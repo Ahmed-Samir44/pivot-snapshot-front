@@ -1,95 +1,89 @@
-// Rows/Columns/Values/Filters as free-text field identifiers (e.g. "[Doctor].[Doctor Name]"),
-// plus Sort and Show Grand Totals controls. No drag-and-drop or member picker yet — those are
-// later Excel-parity work, see DECISIONS.md.
+import { useEffect, useState } from "react";
+import Select from "react-select";
+import { X } from "lucide-react";
+import HierarchicalCubePathSelect from "../forms/HierarchicalCubePathSelect";
+import MultiSelectField from "../forms/MultiSelectField";
+import { getMembers } from "../../services/cubeMetaApi";
+
 const AGGREGATIONS = ["Sum", "Count", "Average", "Min", "Max"];
 const SHOW_VALUES_AS_OPTIONS = [
-  { value: "Normal", label: "عادي" },
-  { value: "PercentOfGrandTotal", label: "% من الإجمالي الكلي" },
+  { value: "Normal", label: "Normal" },
+  { value: "PercentOfGrandTotal", label: "% of Grand Total" },
 ];
 
-function FieldListEditor({ label, placeholder, fields, onChange }) {
-  const updateField = (index, next) => {
-    const copy = [...fields];
-    copy[index] = next;
-    onChange(copy);
-  };
+const nativeSelectClass =
+  "rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent";
 
-  const removeField = (index) => {
-    onChange(fields.filter((_, i) => i !== index));
-  };
-
+function SectionCard({ title, children }) {
   return (
-    <fieldset className="field-editor">
-      <legend>{label}</legend>
-      {fields.map((field, index) => (
-        <div className="field-row" key={index}>
-          <input
-            type="text"
-            value={field}
-            placeholder={placeholder}
-            onChange={(e) => updateField(index, e.target.value)}
-          />
-          <button type="button" onClick={() => removeField(index)} aria-label={`إزالة ${label}`}>
-            ✕
-          </button>
-        </div>
-      ))}
-      <button type="button" onClick={() => onChange([...fields, ""])}>
-        + إضافة {label}
-      </button>
-    </fieldset>
+    <div className="card">
+      <h3 className="mb-4 text-sm font-bold uppercase tracking-wide text-muted">{title}</h3>
+      {children}
+    </div>
   );
 }
 
-// A filter selects specific members of a dimension (comma-separated) — matches Excel's Filters
-// area, or a member-level filter on a field also used as a Row/Column (see MdxPivotQueryBuilder).
-function FilterListEditor({ filters, onChange }) {
-  const updateFilter = (index, patch) => {
-    const copy = [...filters];
-    copy[index] = { ...copy[index], ...patch };
-    onChange(copy);
-  };
+// One filter's member list is only fetched once its field is chosen — the /api/cube/members
+// endpoint is keyed by field, so there's nothing to fetch until then.
+function FilterRow({ filter, dimensionOptions, onChange, onRemove }) {
+  const [memberOptions, setMemberOptions] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
 
-  const removeFilter = (index) => {
-    onChange(filters.filter((_, i) => i !== index));
-  };
+  useEffect(() => {
+    if (!filter.field) {
+      setMemberOptions([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingMembers(true);
+    getMembers(filter.field)
+      .then((members) => {
+        if (!cancelled) setMemberOptions(members);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMembers(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filter.field]);
 
-  const addFilter = () => {
-    onChange([...filters, { field: "", membersText: "" }]);
-  };
+  const selectedField = dimensionOptions.find((opt) => opt.value === filter.field) ?? null;
 
   return (
-    <fieldset className="field-editor">
-      <legend>Filters</legend>
-      {filters.map((filter, index) => (
-        <div className="field-row" key={index}>
-          <input
-            type="text"
-            value={filter.field}
-            placeholder="[Date].[Year]"
-            onChange={(e) => updateFilter(index, { field: e.target.value })}
+    <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+      <div className="mb-3 flex items-start gap-3">
+        <div className="flex-1">
+          <Select
+            className="react-select-container"
+            classNamePrefix="react-select"
+            placeholder="Choose a field to filter…"
+            options={dimensionOptions}
+            value={selectedField}
+            onChange={(opt) => onChange({ field: opt?.value ?? "", includedMembers: [] })}
+            isClearable
+            menuPortalTarget={typeof document !== "undefined" ? document.body : null}
+            menuPosition="fixed"
+            styles={{ menuPortal: (base) => ({ ...base, zIndex: 10000 }) }}
           />
-          <input
-            type="text"
-            value={filter.membersText}
-            placeholder="2025, 2026"
-            onChange={(e) => updateFilter(index, { membersText: e.target.value })}
-          />
-          <button type="button" onClick={() => removeFilter(index)} aria-label="إزالة Filter">
-            ✕
-          </button>
         </div>
-      ))}
-      <button type="button" onClick={addFilter}>
-        + إضافة Filter
-      </button>
-    </fieldset>
+        <button type="button" onClick={onRemove} className="mt-2 text-muted hover:text-ink" aria-label="Remove filter">
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+      {filter.field && (
+        <MultiSelectField
+          options={memberOptions}
+          value={filter.includedMembers}
+          onChange={(includedMembers) => onChange({ ...filter, includedMembers })}
+          placeholder={loadingMembers ? "Loading members…" : "Select member(s) to include…"}
+          isLoading={loadingMembers}
+        />
+      )}
+    </div>
   );
 }
 
-// Sort applies to the ROWS axis only (see MdxPivotQueryBuilder). "By label" is only valid when
-// there's exactly one row field — the backend rejects it otherwise, so the dropdown here doesn't
-// try to pre-validate that; the API's error message explains it if the user hits that case.
 function SortEditor({ sort, values, onChange }) {
   const mode = sort === null ? "none" : sort.byMeasureField ? sort.byMeasureField : "label";
 
@@ -103,33 +97,34 @@ function SortEditor({ sort, values, onChange }) {
   };
 
   return (
-    <fieldset className="field-editor">
-      <legend>Sort</legend>
-      <div className="field-row">
-        <select value={mode} onChange={(e) => handleModeChange(e.target.value)}>
-          <option value="none">بدون ترتيب</option>
-          <option value="label">بالاسم (Row واحد بس)</option>
-          {values.filter((v) => v.field).map((v) => (
-            <option key={v.field} value={v.field}>
-              بقيمة {v.field}
-            </option>
-          ))}
+    <div className="flex flex-wrap items-center gap-3">
+      <select className={nativeSelectClass} value={mode} onChange={(e) => handleModeChange(e.target.value)}>
+        <option value="none">No sorting</option>
+        <option value="label">By label (single Row field only)</option>
+        {values.filter((v) => v.field).map((v) => (
+          <option key={v.field} value={v.field}>
+            By value of {v.field}
+          </option>
+        ))}
+      </select>
+      {sort && (
+        <select
+          className={nativeSelectClass}
+          value={sort.direction}
+          onChange={(e) => onChange({ ...sort, direction: e.target.value })}
+        >
+          <option value="Ascending">Ascending</option>
+          <option value="Descending">Descending</option>
         </select>
-        {sort && (
-          <select
-            value={sort.direction}
-            onChange={(e) => onChange({ ...sort, direction: e.target.value })}
-          >
-            <option value="Ascending">تصاعدي</option>
-            <option value="Descending">تنازلي</option>
-          </select>
-        )}
-      </div>
-    </fieldset>
+      )}
+    </div>
   );
 }
 
-export default function FieldPicker({ value, onChange }) {
+export default function FieldPicker({ value, onChange, dimensions, measures }) {
+  const dimensionOptions = dimensions.map((d) => ({ value: d.field, label: d.displayName }));
+  const measureOptions = measures.map((m) => ({ value: m.field, label: m.displayName }));
+
   const updateValue = (index, patch) => {
     const copy = [...value.values];
     copy[index] = { ...copy[index], ...patch };
@@ -144,31 +139,58 @@ export default function FieldPicker({ value, onChange }) {
     onChange({ ...value, values: [...value.values, { field: "", aggregation: "Sum", showValuesAs: "Normal" }] });
   };
 
+  const updateFilter = (index, patch) => {
+    const copy = [...value.filters];
+    copy[index] = patch;
+    onChange({ ...value, filters: copy });
+  };
+
+  const removeFilter = (index) => {
+    onChange({ ...value, filters: value.filters.filter((_, i) => i !== index) });
+  };
+
+  const addFilter = () => {
+    onChange({ ...value, filters: [...value.filters, { field: "", includedMembers: [] }] });
+  };
+
   return (
-    <div className="field-picker">
-      <FieldListEditor
-        label="Rows"
-        placeholder="[Doctor].[Doctor Name]"
-        fields={value.rows}
-        onChange={(rows) => onChange({ ...value, rows })}
-      />
-      <FieldListEditor
-        label="Columns"
-        placeholder="[Date].[Month]"
-        fields={value.columns}
-        onChange={(columns) => onChange({ ...value, columns })}
-      />
-      <fieldset className="field-editor">
-        <legend>Values</legend>
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <SectionCard title="Rows">
+        <HierarchicalCubePathSelect
+          label="Row fields"
+          options={dimensions.map((d) => d.field)}
+          value={value.rows}
+          onChange={(rows) => onChange({ ...value, rows })}
+        />
+      </SectionCard>
+
+      <SectionCard title="Columns">
+        <HierarchicalCubePathSelect
+          label="Column fields"
+          options={dimensions.map((d) => d.field)}
+          value={value.columns}
+          onChange={(columns) => onChange({ ...value, columns })}
+        />
+      </SectionCard>
+
+      <SectionCard title="Values">
         {value.values.map((v, index) => (
-          <div className="field-row" key={index}>
-            <input
-              type="text"
-              value={v.field}
-              placeholder="VisitCount"
-              onChange={(e) => updateValue(index, { field: e.target.value })}
-            />
+          <div key={index} className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="min-w-[10rem] flex-1">
+              <Select
+                className="react-select-container"
+                classNamePrefix="react-select"
+                placeholder="Choose a measure…"
+                options={measureOptions}
+                value={measureOptions.find((opt) => opt.value === v.field) ?? null}
+                onChange={(opt) => updateValue(index, { field: opt?.value ?? "" })}
+                menuPortalTarget={typeof document !== "undefined" ? document.body : null}
+                menuPosition="fixed"
+                styles={{ menuPortal: (base) => ({ ...base, zIndex: 10000 }) }}
+              />
+            </div>
             <select
+              className={nativeSelectClass}
               value={v.aggregation}
               onChange={(e) => updateValue(index, { aggregation: e.target.value })}
             >
@@ -179,6 +201,7 @@ export default function FieldPicker({ value, onChange }) {
               ))}
             </select>
             <select
+              className={nativeSelectClass}
               value={v.showValuesAs}
               onChange={(e) => updateValue(index, { showValuesAs: e.target.value })}
             >
@@ -188,28 +211,46 @@ export default function FieldPicker({ value, onChange }) {
                 </option>
               ))}
             </select>
-            <button type="button" onClick={() => removeValue(index)} aria-label="إزالة Value">
-              ✕
+            <button type="button" onClick={() => removeValue(index)} className="text-muted hover:text-ink" aria-label="Remove value">
+              <X className="h-5 w-5" />
             </button>
           </div>
         ))}
-        <button type="button" onClick={addValue}>
-          + إضافة Value
+        <button type="button" onClick={addValue} className="btn-secondary mt-1">
+          + Add value
         </button>
-      </fieldset>
-      <FilterListEditor filters={value.filters} onChange={(filters) => onChange({ ...value, filters })} />
-      <SortEditor sort={value.sort} values={value.values} onChange={(sort) => onChange({ ...value, sort })} />
-      <fieldset className="field-editor">
-        <legend>Totals</legend>
-        <label className="field-row">
+      </SectionCard>
+
+      <SectionCard title="Filters">
+        {value.filters.map((filter, index) => (
+          <FilterRow
+            key={index}
+            filter={filter}
+            dimensionOptions={dimensionOptions}
+            onChange={(patch) => updateFilter(index, patch)}
+            onRemove={() => removeFilter(index)}
+          />
+        ))}
+        <button type="button" onClick={addFilter} className="btn-secondary">
+          + Add filter
+        </button>
+      </SectionCard>
+
+      <SectionCard title="Sort">
+        <SortEditor sort={value.sort} values={value.values} onChange={(sort) => onChange({ ...value, sort })} />
+      </SectionCard>
+
+      <SectionCard title="Totals">
+        <label className="flex items-center gap-2 text-sm font-medium text-ink">
           <input
             type="checkbox"
+            className="h-4 w-4 accent-gold"
             checked={value.showGrandTotals}
             onChange={(e) => onChange({ ...value, showGrandTotals: e.target.checked })}
           />
           Show Grand Totals
         </label>
-      </fieldset>
+      </SectionCard>
     </div>
   );
 }

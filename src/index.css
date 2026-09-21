@@ -1,91 +1,33 @@
-:root {
-  --text: #1f1a24;
-  --bg: #ffffff;
-  --border: #d8d5dd;
-  --accent: #6d28d9;
-  --danger: #b3261e;
-  --danger-bg: #fdecea;
-  font: 16px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
-  color-scheme: light dark;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #eceaf0;
-    --bg: #141018;
-    --border: #3a3441;
-    --accent: #b28cff;
-    --danger-bg: #3a1a17;
+/* Component classes ported from the Segmentation project so both tools share one visual
+   language (same glass-panel/button/input/card treatment) instead of diverging designs. */
+@layer base {
+  body {
+    @apply bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 text-ink font-sans antialiased;
   }
 }
 
-* {
-  box-sizing: border-box;
-}
+@layer components {
+  .glass-panel {
+    @apply bg-white/80 backdrop-blur-xl border border-white/50 rounded-2xl shadow-xl;
+  }
 
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-}
+  .btn-primary {
+    @apply bg-gradient-to-r from-gold to-gold-strong text-white font-bold py-2 px-4 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105;
+  }
 
-.pivot-builder {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 24px 16px;
-}
+  .btn-secondary {
+    @apply bg-white/90 text-ink font-semibold py-2 px-4 rounded-xl border border-slate-200 shadow-md hover:shadow-lg transition-all duration-200 hover:scale-105;
+  }
 
-.field-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  margin-bottom: 16px;
-}
+  .input-field {
+    @apply w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/90 focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent transition-all duration-200;
+  }
 
-.field-editor {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  flex: 1 1 220px;
-}
-
-.field-row {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.field-row input,
-.field-row select {
-  flex: 1;
-  padding: 4px 6px;
-}
-
-.pivot-error {
-  color: var(--danger);
-  background: var(--danger-bg);
-  padding: 8px 12px;
-  border-radius: 6px;
-}
-
-.pivot-grid {
-  border-collapse: collapse;
-  margin-top: 16px;
-  width: 100%;
-}
-
-.pivot-grid th,
-.pivot-grid td {
-  border: 1px solid var(--border);
-  padding: 6px 10px;
-  text-align: center;
-}
-
-.pivot-grid th {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-
-.pivot-grid .is-total {
-  font-weight: 700;
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  .card {
+    @apply glass-panel p-6 hover:shadow-2xl transition-all duration-300;
+  }
 }
