@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Search } from "lucide-react";
 
 // Groups consecutive rows sharing the same first-level label into collapsible sections. A group
 // is only collapsible when it ends in a Subtotal row (IsTotal, added by the backend's
@@ -11,7 +11,6 @@ function computeGroups(rowHeaders) {
   let i = 0;
   while (i < rowHeaders.length) {
     if (rowHeaders[i].isTotal) {
-      // The Grand Total row (or a stray total with no preceding group) — not collapsible.
       groups.push({ start: i, end: i + 1, key: null, hasSubtotal: false });
       i += 1;
       continue;
@@ -29,8 +28,25 @@ function computeGroups(rowHeaders) {
   return groups;
 }
 
+// A pill-shaped header badge (dimension/measure name + a decorative caret), echoing the rounded
+// filter-pill style used elsewhere in the product's screens, instead of a traditional shaded
+// spreadsheet header cell.
+function HeaderPill({ children, muted = false }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm ${
+        muted ? "border-transparent bg-transparent text-muted shadow-none" : "border-slate-200 bg-white text-ink"
+      }`}
+    >
+      {children}
+      {!muted && <ChevronDown className="h-3 w-3 text-muted" />}
+    </span>
+  );
+}
+
 export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabels = [] }) {
   const [collapsed, setCollapsed] = useState(() => new Set());
+  const [searchText, setSearchText] = useState("");
 
   const groups = useMemo(() => (result ? computeGroups(result.rowHeaders) : []), [result]);
 
@@ -42,9 +58,6 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
   const rowDepth = rowHeaders[0]?.labels.length ?? 0;
   const columnDepth = columnHeaders[0]?.labels.length ?? 0;
 
-  const totalCellClass = "bg-gold/20 font-bold";
-  const numberColClass = "border border-slate-200 bg-slate-100 px-2 py-2 text-center text-xs text-muted";
-
   const toggleGroup = (key) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -54,23 +67,29 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
     });
   };
 
-  // A detail row is hidden when it belongs to a collapsed group and isn't that group's own
-  // Subtotal row (the Subtotal row always stays visible — it's the collapsed summary).
   const groupForRow = new Map();
   groups.forEach((g) => {
     for (let r = g.start; r < g.end; r++) groupForRow.set(r, g);
   });
 
+  const query = searchText.trim().toLowerCase();
+  const matchesSearch = (row) => !query || row.isTotal || row.labels.some((l) => l.toLowerCase().includes(query));
+
+  const isRowVisible = (row, rowIndex) => {
+    const group = groupForRow.get(rowIndex);
+    const isGroupSubtotalRow = group?.hasSubtotal && rowIndex === group.end - 1;
+    const isCollapsedDetail = group?.hasSubtotal && collapsed.has(group.key) && !isGroupSubtotalRow;
+    return !isCollapsedDetail && matchesSearch(row);
+  };
+
   // Precomputed rather than mutated inline during the render map below, so numbering stays a
-  // pure function of `rowHeaders`/`collapsed` instead of a running counter touched mid-render.
+  // pure function of the current filters/collapse state instead of a running counter touched
+  // mid-render.
   const visibleRowNumbers = new Map();
   {
     let counter = 0;
     rowHeaders.forEach((row, rowIndex) => {
-      const group = groupForRow.get(rowIndex);
-      const isGroupSubtotalRow = group?.hasSubtotal && rowIndex === group.end - 1;
-      const isCollapsedDetail = group?.hasSubtotal && collapsed.has(group.key) && !isGroupSubtotalRow;
-      if (!isCollapsedDetail) {
+      if (isRowVisible(row, rowIndex)) {
         counter += 1;
         visibleRowNumbers.set(rowIndex, counter);
       }
@@ -78,101 +97,102 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
   }
 
   return (
-    <div className="card overflow-x-auto">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          {columnFieldLabels.length > 0 && (
-            <tr>
-              <th colSpan={1 + rowDepth} className="border border-slate-200" />
-              <th
-                colSpan={columnHeaders.length}
-                className="border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-muted"
-              >
-                {columnFieldLabels.join(" › ")}
-              </th>
-            </tr>
-          )}
-          {Array.from({ length: columnDepth }).map((_, level) => (
-            <tr key={level}>
-              {level === 0 && (
-                <>
-                  <th rowSpan={columnDepth} className={numberColClass}>
-                    #
-                  </th>
-                  {/* One header cell per row field (e.g. "Specialty Name", "Doctor Name") instead
-                      of a single blank spanning cell — PivotResult only carries member values, not
-                      the field's own name, so PivotBuilder looks these up via the dimensions list. */}
-                  {Array.from({ length: rowDepth }).map((_, rowLevel) => (
-                    <th
-                      key={rowLevel}
-                      rowSpan={columnDepth}
-                      className="border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-muted"
-                    >
-                      {rowFieldLabels[rowLevel] ?? ""}
-                    </th>
-                  ))}
-                </>
-              )}
-              {columnHeaders.map((col, colIndex) => (
-                <th
-                  key={colIndex}
-                  className={`border border-slate-200 bg-gold/10 px-3 py-2 text-ink ${col.isTotal ? totalCellClass : ""}`}
-                >
-                  {col.labels[level]}
-                </th>
-              ))}
-            </tr>
-          ))}
-        </thead>
-        <tbody>
-          {rowHeaders.map((row, rowIndex) => {
-            const group = groupForRow.get(rowIndex);
-            const isGroupSubtotalRow = group?.hasSubtotal && rowIndex === group.end - 1;
-            const isCollapsedDetail = group?.hasSubtotal && collapsed.has(group.key) && !isGroupSubtotalRow;
-            if (isCollapsedDetail) {
-              return null;
-            }
+    <div className="card overflow-hidden p-0">
+      <div className="border-b border-slate-100 p-4">
+        <div className="relative max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          <input
+            type="text"
+            placeholder="Search rows…"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            className="w-full rounded-full border border-slate-200 bg-white py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
+          />
+        </div>
+      </div>
 
-            return (
-              <tr key={rowIndex}>
-                <td className={numberColClass}>{visibleRowNumbers.get(rowIndex)}</td>
-                {row.labels.map((label, level) => (
-                  <th
-                    key={level}
-                    scope="row"
-                    className={`border border-slate-200 bg-gold/10 px-3 py-2 text-left text-ink ${row.isTotal ? totalCellClass : ""}`}
-                  >
-                    <span className="inline-flex items-center gap-1">
-                      {level === 0 && isGroupSubtotalRow && (
-                        <button
-                          type="button"
-                          onClick={() => toggleGroup(group.key)}
-                          className="text-muted hover:text-ink"
-                          aria-label={collapsed.has(group.key) ? "Expand group" : "Collapse group"}
-                        >
-                          {collapsed.has(group.key) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                        </button>
-                      )}
-                      {label}
-                    </span>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            {columnFieldLabels.length > 0 && (
+              <tr>
+                <th colSpan={1 + rowDepth} />
+                <th colSpan={columnHeaders.length} className="px-2 py-2 text-left">
+                  <HeaderPill muted>{columnFieldLabels.join(" › ")}</HeaderPill>
+                </th>
+              </tr>
+            )}
+            {Array.from({ length: columnDepth }).map((_, level) => (
+              <tr key={level}>
+                {level === 0 && (
+                  <>
+                    <th rowSpan={columnDepth} className="px-2 py-2 text-center text-xs font-medium text-muted">
+                      #
+                    </th>
+                    {Array.from({ length: rowDepth }).map((_, rowLevel) => (
+                      <th key={rowLevel} rowSpan={columnDepth} className="px-2 py-2 text-left">
+                        <HeaderPill muted>{rowFieldLabels[rowLevel] ?? ""}</HeaderPill>
+                      </th>
+                    ))}
+                  </>
+                )}
+                {columnHeaders.map((col, colIndex) => (
+                  <th key={colIndex} className={`px-2 py-2 text-left ${col.isTotal ? "bg-gold/10" : ""}`}>
+                    <HeaderPill>{col.labels[level]}</HeaderPill>
                   </th>
-                ))}
-                {cells[rowIndex].map((cell, colIndex) => (
-                  <td
-                    key={colIndex}
-                    className={`border border-slate-200 px-3 py-2 text-right ${
-                      row.isTotal || columnHeaders[colIndex].isTotal ? totalCellClass : ""
-                    }`}
-                  >
-                    {cell ?? ""}
-                  </td>
                 ))}
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <p className="mt-2 text-xs text-muted">{rowHeaders.length.toLocaleString()} rows</p>
+            ))}
+          </thead>
+          <tbody>
+            {rowHeaders.map((row, rowIndex) => {
+              if (!isRowVisible(row, rowIndex)) {
+                return null;
+              }
+
+              const group = groupForRow.get(rowIndex);
+              const isGroupSubtotalRow = group?.hasSubtotal && rowIndex === group.end - 1;
+              const rowTint = row.isTotal ? "bg-gold/10" : visibleRowNumbers.get(rowIndex) % 2 === 0 ? "bg-slate-50/60" : "";
+
+              return (
+                <tr key={rowIndex} className={`border-b border-slate-100 ${rowTint}`}>
+                  <td className="px-2 py-2.5 text-center text-xs text-muted">{visibleRowNumbers.get(rowIndex)}</td>
+                  {row.labels.map((label, level) => (
+                    <td key={level} className={`px-4 py-2.5 text-left ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}>
+                      <span className="inline-flex items-center gap-1.5">
+                        {level === 0 && isGroupSubtotalRow && (
+                          <button
+                            type="button"
+                            onClick={() => toggleGroup(group.key)}
+                            className="text-muted hover:text-ink"
+                            aria-label={collapsed.has(group.key) ? "Expand group" : "Collapse group"}
+                          >
+                            {collapsed.has(group.key) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                          </button>
+                        )}
+                        {label}
+                      </span>
+                    </td>
+                  ))}
+                  {cells[rowIndex].map((cell, colIndex) => (
+                    <td
+                      key={colIndex}
+                      className={`px-4 py-2.5 text-right tabular-nums ${
+                        row.isTotal || columnHeaders[colIndex].isTotal ? "font-bold text-ink" : "text-slate-700"
+                      }`}
+                    >
+                      {cell ?? ""}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="border-t border-slate-100 px-4 py-3 text-xs text-muted">
+        {[...visibleRowNumbers.values()].length.toLocaleString()} of {rowHeaders.length.toLocaleString()} rows
+      </p>
     </div>
   );
 }
