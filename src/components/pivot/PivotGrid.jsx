@@ -117,7 +117,7 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
             {columnFieldLabels.length > 0 && (
               <tr>
                 <th colSpan={1 + rowDepth} />
-                <th colSpan={columnHeaders.length} className="px-2 py-2 text-left">
+                <th colSpan={columnHeaders.length} className="px-2 py-2 text-center">
                   <HeaderPill muted>{columnFieldLabels.join(" › ")}</HeaderPill>
                 </th>
               </tr>
@@ -130,14 +130,14 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
                       #
                     </th>
                     {Array.from({ length: rowDepth }).map((_, rowLevel) => (
-                      <th key={rowLevel} rowSpan={columnDepth} className="px-2 py-2 text-left">
+                      <th key={rowLevel} rowSpan={columnDepth} className="px-2 py-2 text-center">
                         <HeaderPill muted>{rowFieldLabels[rowLevel] ?? ""}</HeaderPill>
                       </th>
                     ))}
                   </>
                 )}
                 {columnHeaders.map((col, colIndex) => (
-                  <th key={colIndex} className={`px-2 py-2 text-left ${col.isTotal ? "bg-gold/10" : ""}`}>
+                  <th key={colIndex} className={`px-2 py-2 text-center ${col.isTotal ? "bg-gold/10" : ""}`}>
                     <HeaderPill>{col.labels[level]}</HeaderPill>
                   </th>
                 ))}
@@ -158,8 +158,8 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
                 <tr key={rowIndex} className={`border-b border-slate-100 ${rowTint}`}>
                   <td className="px-2 py-2.5 text-center text-xs text-muted">{visibleRowNumbers.get(rowIndex)}</td>
                   {row.labels.map((label, level) => (
-                    <td key={level} className={`px-4 py-2.5 text-left ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}>
-                      <span className="inline-flex items-center gap-1.5">
+                    <td key={level} className={`px-4 py-2.5 text-center ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}>
+                      <span className="inline-flex items-center justify-center gap-1.5">
                         {level === 0 && isGroupSubtotalRow && (
                           <button
                             type="button"
@@ -177,7 +177,7 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
                   {cells[rowIndex].map((cell, colIndex) => (
                     <td
                       key={colIndex}
-                      className={`px-4 py-2.5 text-right tabular-nums ${
+                      className={`px-4 py-2.5 text-center tabular-nums ${
                         row.isTotal || columnHeaders[colIndex].isTotal ? "font-bold text-ink" : "text-slate-700"
                       }`}
                     >
