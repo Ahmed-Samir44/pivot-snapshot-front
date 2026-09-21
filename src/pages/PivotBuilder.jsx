@@ -20,6 +20,14 @@ const EMPTY_REQUEST = {
   showSubtotals: false,
 };
 
+// PivotResult only carries member VALUES (e.g. "Cardiology"), not the field's own name — this
+// looks each row/column field id up in the dimensions list to get something readable ("Specialty
+// Name") for the grid's header row, instead of leaving it blank.
+function fieldLabels(fieldIds, dimensions) {
+  if (!fieldIds) return [];
+  return fieldIds.map((id) => dimensions.find((d) => d.field === id)?.displayName ?? id);
+}
+
 export default function PivotBuilder() {
   const [request, setRequest] = useState(EMPTY_REQUEST);
   const [lastQuery, setLastQuery] = useState(null); // the exact cleaned request that produced `result`
@@ -111,7 +119,11 @@ export default function PivotBuilder() {
       {error && <p className="mt-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-red-800">{error}</p>}
 
       <div className="mt-6">
-        <PivotGrid result={result} />
+        <PivotGrid
+          result={result}
+          rowFieldLabels={fieldLabels(lastQuery?.rows, dimensions)}
+          columnFieldLabels={fieldLabels(lastQuery?.columns, dimensions)}
+        />
       </div>
 
       {result && (

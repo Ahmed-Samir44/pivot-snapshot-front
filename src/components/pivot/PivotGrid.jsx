@@ -29,7 +29,7 @@ function computeGroups(rowHeaders) {
   return groups;
 }
 
-export default function PivotGrid({ result }) {
+export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabels = [] }) {
   const [collapsed, setCollapsed] = useState(() => new Set());
 
   const groups = useMemo(() => (result ? computeGroups(result.rowHeaders) : []), [result]);
@@ -81,6 +81,17 @@ export default function PivotGrid({ result }) {
     <div className="card overflow-x-auto">
       <table className="w-full border-collapse text-sm">
         <thead>
+          {columnFieldLabels.length > 0 && (
+            <tr>
+              <th colSpan={1 + rowDepth} className="border border-slate-200" />
+              <th
+                colSpan={columnHeaders.length}
+                className="border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-muted"
+              >
+                {columnFieldLabels.join(" › ")}
+              </th>
+            </tr>
+          )}
           {Array.from({ length: columnDepth }).map((_, level) => (
             <tr key={level}>
               {level === 0 && (
@@ -88,7 +99,18 @@ export default function PivotGrid({ result }) {
                   <th rowSpan={columnDepth} className={numberColClass}>
                     #
                   </th>
-                  <th colSpan={rowDepth} rowSpan={columnDepth} className="border border-slate-200" />
+                  {/* One header cell per row field (e.g. "Specialty Name", "Doctor Name") instead
+                      of a single blank spanning cell — PivotResult only carries member values, not
+                      the field's own name, so PivotBuilder looks these up via the dimensions list. */}
+                  {Array.from({ length: rowDepth }).map((_, rowLevel) => (
+                    <th
+                      key={rowLevel}
+                      rowSpan={columnDepth}
+                      className="border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-muted"
+                    >
+                      {rowFieldLabels[rowLevel] ?? ""}
+                    </th>
+                  ))}
                 </>
               )}
               {columnHeaders.map((col, colIndex) => (
