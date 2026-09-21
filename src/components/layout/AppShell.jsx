@@ -1,16 +1,17 @@
 // Adapted from the Segmentation project's DashboardLayout — same sidebar shell and gold/ink
-// branding, but without react-router-dom: this app has a single page for now. Nav items below
-// are placeholders for Phase C (Save Snapshot / History / Compare will become real routes once
-// they exist — see DECISIONS.md) rather than working links.
+// branding, now with real routes (Pivot Builder / Snapshot History / Compare Snapshots).
+import { Link, useLocation } from "react-router-dom";
 import { Activity, LayoutDashboard, History, GitCompare } from "lucide-react";
 
 const NAV_ITEMS = [
-  { label: "Pivot Builder", icon: LayoutDashboard, active: true },
-  { label: "Snapshot History", icon: History, active: false },
-  { label: "Compare Snapshots", icon: GitCompare, active: false },
+  { path: "/", label: "Pivot Builder", icon: LayoutDashboard },
+  { path: "/history", label: "Snapshot History", icon: History },
+  { path: "/compare", label: "Compare Snapshots", icon: GitCompare },
 ];
 
 export default function AppShell({ children }) {
+  const location = useLocation();
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100">
       <aside className="fixed left-0 top-0 z-50 h-full w-64 glass-panel border-r border-white/50">
@@ -27,19 +28,21 @@ export default function AppShell({ children }) {
         </div>
 
         <nav className="space-y-2 p-4">
-          {NAV_ITEMS.map(({ label, icon: Icon, active }) => (
-            <div
-              key={label}
-              aria-disabled={!active}
-              title={active ? undefined : "Coming in a later phase"}
-              className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200 ${
-                active ? "bg-gradient-to-r from-gold to-gold-strong text-white shadow-lg" : "text-muted opacity-60"
-              }`}
-            >
-              <Icon className="h-5 w-5" />
-              <span className="font-semibold">{label}</span>
-            </div>
-          ))}
+          {NAV_ITEMS.map(({ path, label, icon: Icon }) => {
+            const active = location.pathname === path;
+            return (
+              <Link
+                key={path}
+                to={path}
+                className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200 ${
+                  active ? "bg-gradient-to-r from-gold to-gold-strong text-white shadow-lg" : "text-ink hover:bg-white/50"
+                }`}
+              >
+                <Icon className="h-5 w-5" />
+                <span className="font-semibold">{label}</span>
+              </Link>
+            );
+          })}
         </nav>
 
         <div className="absolute bottom-0 left-0 right-0 border-t border-slate-200 p-4">
