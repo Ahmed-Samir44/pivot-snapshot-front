@@ -232,7 +232,7 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
       </SectionCard>
 
       <SectionCard title="Totals">
-        <label className="flex items-center gap-2 text-sm font-medium text-ink">
+        <label className="mb-2 flex items-center gap-2 text-sm font-medium text-ink">
           <input
             type="checkbox"
             className="h-4 w-4 accent-gold"
@@ -240,6 +240,16 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
             onChange={(e) => onChange({ ...value, showGrandTotals: e.target.checked })}
           />
           Show Grand Totals
+        </label>
+        <label className="flex items-center gap-2 text-sm font-medium text-ink">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-gold"
+            checked={value.showSubtotals}
+            disabled={value.rows.length < 2}
+            onChange={(e) => onChange({ ...value, showSubtotals: e.target.checked })}
+          />
+          Show Subtotals (needs 2+ Row fields)
         </label>
       </SectionCard>
     </div>

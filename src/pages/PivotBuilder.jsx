@@ -17,6 +17,7 @@ const EMPTY_REQUEST = {
   filters: [],
   sort: null,
   showGrandTotals: false,
+  showSubtotals: false,
 };
 
 export default function PivotBuilder() {
@@ -55,6 +56,7 @@ export default function PivotBuilder() {
         filters: request.filters.filter((f) => f.field && f.includedMembers.length > 0),
         sort: request.sort,
         showGrandTotals: request.showGrandTotals,
+        showSubtotals: request.showSubtotals,
       };
       const data = await queryPivot(cleaned);
       setResult(data);
