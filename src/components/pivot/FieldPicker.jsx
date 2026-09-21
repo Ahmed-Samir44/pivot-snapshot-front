@@ -85,6 +85,7 @@ function FilterRow({ filter, dimensionOptions, onChange, onRemove }) {
 
 function SortEditor({ sort, values, onChange }) {
   const mode = sort === null ? "none" : sort.byMeasureField ? sort.byMeasureField : "label";
+  const axis = sort?.axis ?? "Rows";
 
   const handleModeChange = (nextMode) => {
     if (nextMode === "none") {
@@ -92,14 +93,18 @@ function SortEditor({ sort, values, onChange }) {
       return;
     }
     const direction = sort?.direction ?? "Ascending";
-    onChange(nextMode === "label" ? { direction, byMeasureField: null } : { direction, byMeasureField: nextMode });
+    onChange(
+      nextMode === "label"
+        ? { direction, byMeasureField: null, axis }
+        : { direction, byMeasureField: nextMode, axis },
+    );
   };
 
   return (
     <div className="flex flex-wrap items-center gap-3">
       <select className={nativeSelectClass} value={mode} onChange={(e) => handleModeChange(e.target.value)}>
         <option value="none">No sorting</option>
-        <option value="label">By label (single Row field only)</option>
+        <option value="label">By label (single field only)</option>
         {values.filter((v) => v.field).map((v) => (
           <option key={v.field} value={v.field}>
             By value of {v.field}
@@ -107,22 +112,99 @@ function SortEditor({ sort, values, onChange }) {
         ))}
       </select>
       {sort && (
-        <select
-          className={nativeSelectClass}
-          value={sort.direction}
-          onChange={(e) => onChange({ ...sort, direction: e.target.value })}
-        >
-          <option value="Ascending">Ascending</option>
-          <option value="Descending">Descending</option>
-        </select>
+        <>
+          <select
+            className={nativeSelectClass}
+            value={axis}
+            onChange={(e) => onChange({ ...sort, axis: e.target.value })}
+          >
+            <option value="Rows">Sort Rows</option>
+            <option value="Columns">Sort Columns</option>
+          </select>
+          <select
+            className={nativeSelectClass}
+            value={sort.direction}
+            onChange={(e) => onChange({ ...sort, direction: e.target.value })}
+          >
+            <option value="Ascending">Ascending</option>
+            <option value="Descending">Descending</option>
+          </select>
+        </>
       )}
     </div>
+  );
+}
+
+// A calculated field is a NEW measure derived from two EXISTING measures with a fixed operator —
+// not a free-text formula. See the backend's CalculatedField for why (avoids accepting arbitrary
+// MDX from the client). Once added, its name becomes selectable in the Values picker below.
+function CalculatedFieldsEditor({ calculatedFields, measureOptions, onChange }) {
+  const update = (index, patch) => {
+    const copy = [...calculatedFields];
+    copy[index] = { ...copy[index], ...patch };
+    onChange(copy);
+  };
+
+  const remove = (index) => onChange(calculatedFields.filter((_, i) => i !== index));
+
+  const add = () =>
+    onChange([...calculatedFields, { name: "", leftField: "", operator: "Divide", rightField: "" }]);
+
+  return (
+    <>
+      {calculatedFields.map((field, index) => (
+        <div key={index} className="mb-3 flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            placeholder="New field name…"
+            value={field.name}
+            onChange={(e) => update(index, { name: e.target.value })}
+            className="input-field min-w-[10rem] flex-1 py-2"
+          />
+          <select className={nativeSelectClass} value={field.leftField} onChange={(e) => update(index, { leftField: e.target.value })}>
+            <option value="">Choose measure…</option>
+            {measureOptions.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <select className={nativeSelectClass} value={field.operator} onChange={(e) => update(index, { operator: e.target.value })}>
+            <option value="Add">+</option>
+            <option value="Subtract">−</option>
+            <option value="Multiply">×</option>
+            <option value="Divide">÷</option>
+          </select>
+          <select className={nativeSelectClass} value={field.rightField} onChange={(e) => update(index, { rightField: e.target.value })}>
+            <option value="">Choose measure…</option>
+            {measureOptions.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <button type="button" onClick={() => remove(index)} className="text-muted hover:text-ink" aria-label="Remove calculated field">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={add} className="btn-secondary">
+        + Add calculated field
+      </button>
+    </>
   );
 }
 
 export default function FieldPicker({ value, onChange, dimensions, measures }) {
   const dimensionOptions = dimensions.map((d) => ({ value: d.field, label: d.displayName }));
   const measureOptions = measures.map((m) => ({ value: m.field, label: m.displayName }));
+  // A calculated field's own LeftField/RightField must reference a real cube measure only (no
+  // chaining calculated-on-calculated — see the backend's CalculatedField), but once declared its
+  // name becomes usable anywhere a regular measure is, including as a Value.
+  const calculatedFieldOptions = value.calculatedFields
+    .filter((f) => f.name)
+    .map((f) => ({ value: f.name, label: `${f.name} (calculated)` }));
+  const valueFieldOptions = [...measureOptions, ...calculatedFieldOptions];
 
   const updateValue = (index, patch) => {
     const copy = [...value.values];
@@ -183,8 +265,8 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
                 className="react-select-container"
                 classNamePrefix="react-select"
                 placeholder="Choose a measure…"
-                options={measureOptions}
-                value={measureOptions.find((opt) => opt.value === v.field) ?? null}
+                options={valueFieldOptions}
+                value={valueFieldOptions.find((opt) => opt.value === v.field) ?? null}
                 onChange={(opt) => updateValue(index, { field: opt?.value ?? "" })}
                 menuPortalTarget={typeof document !== "undefined" ? document.body : null}
                 menuPosition="fixed"
@@ -210,6 +292,14 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
         <button type="button" onClick={addValue} className="btn-secondary mt-1">
           + Add value
         </button>
+      </SectionCard>
+
+      <SectionCard title="Calculated Fields">
+        <CalculatedFieldsEditor
+          calculatedFields={value.calculatedFields}
+          measureOptions={measureOptions}
+          onChange={(calculatedFields) => onChange({ ...value, calculatedFields })}
+        />
       </SectionCard>
 
       <SectionCard title="Filters">

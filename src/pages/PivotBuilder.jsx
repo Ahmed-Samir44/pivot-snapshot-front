@@ -18,6 +18,7 @@ const EMPTY_REQUEST = {
   sort: null,
   showGrandTotals: false,
   showSubtotals: false,
+  calculatedFields: [],
 };
 
 // PivotResult only carries member VALUES (e.g. "Cardiology"), not the field's own name — this
@@ -65,6 +66,7 @@ export default function PivotBuilder() {
         sort: request.sort,
         showGrandTotals: request.showGrandTotals,
         showSubtotals: request.showSubtotals,
+        calculatedFields: request.calculatedFields.filter((f) => f.name && f.leftField && f.rightField),
       };
       const data = await queryPivot(cleaned);
       setResult(data);
