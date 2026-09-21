@@ -84,3 +84,8 @@ body {
 .pivot-grid th {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
+
+.pivot-grid .is-total {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}

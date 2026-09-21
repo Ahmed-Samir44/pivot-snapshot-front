@@ -6,7 +6,23 @@ import { queryPivot } from "../services/pivotApi";
 // This screen renders a live, interactive pivot (React state + re-fetch on every change).
 // It is NOT the saved snapshot: "Save Snapshot" (not built yet — see DECISIONS.md Phase C) will
 // freeze the current result into static HTML/CSS for Power Apps, which cannot run JavaScript.
-const EMPTY_REQUEST = { rows: [], columns: [], values: [] };
+const EMPTY_REQUEST = {
+  rows: [],
+  columns: [],
+  values: [],
+  filters: [],
+  sort: null,
+  showGrandTotals: false,
+};
+
+// Filter members are edited as one comma-separated text field in the UI (simplest input for an
+// MVP member picker) but the API wants an array — this is the only place that split happens.
+function parseMembers(membersText) {
+  return membersText
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+}
 
 export default function PivotBuilder() {
   const [request, setRequest] = useState(EMPTY_REQUEST);
@@ -22,6 +38,12 @@ export default function PivotBuilder() {
         rows: request.rows.filter(Boolean),
         columns: request.columns.filter(Boolean),
         values: request.values.filter((v) => v.field),
+        filters: request.filters
+          .filter((f) => f.field)
+          .map((f) => ({ field: f.field, includedMembers: parseMembers(f.membersText) }))
+          .filter((f) => f.includedMembers.length > 0),
+        sort: request.sort,
+        showGrandTotals: request.showGrandTotals,
       };
       const data = await queryPivot(cleaned);
       setResult(data);
