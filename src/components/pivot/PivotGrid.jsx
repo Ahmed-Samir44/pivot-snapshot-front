@@ -97,7 +97,11 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
   }
 
   return (
-    <div className="card overflow-hidden p-0">
+    // w-fit: the white card now hugs the table's actual (content-sized) width instead of
+    // stretching to the full page — dropping the table's own w-full (previous fix) stopped
+    // individual columns from being stretched, but left the surrounding card still full-width
+    // with a large empty gap on the right, which is what "not sized right" meant here.
+    <div className="card w-fit max-w-full overflow-hidden p-0">
       <div className="border-b border-slate-100 p-4">
         <div className="relative max-w-sm">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
