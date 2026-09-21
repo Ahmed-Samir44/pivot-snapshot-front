@@ -5,7 +5,6 @@ import HierarchicalCubePathSelect from "../forms/HierarchicalCubePathSelect";
 import MultiSelectField from "../forms/MultiSelectField";
 import { getMembers } from "../../services/cubeMetaApi";
 
-const AGGREGATIONS = ["Sum", "Count", "Average", "Min", "Max"];
 const SHOW_VALUES_AS_OPTIONS = [
   { value: "Normal", label: "Normal" },
   { value: "PercentOfGrandTotal", label: "% of Grand Total" },
@@ -136,7 +135,7 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
   };
 
   const addValue = () => {
-    onChange({ ...value, values: [...value.values, { field: "", aggregation: "Sum", showValuesAs: "Normal" }] });
+    onChange({ ...value, values: [...value.values, { field: "", showValuesAs: "Normal" }] });
   };
 
   const updateFilter = (index, patch) => {
@@ -173,6 +172,9 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
         />
       </SectionCard>
 
+      {/* Only a measure picker, no separate aggregation dropdown: confirmed against the real
+          cube (2026-09-21) that measures are pre-built with their aggregation baked in — see
+          PivotValueField in the backend for the full story. */}
       <SectionCard title="Values">
         {value.values.map((v, index) => (
           <div key={index} className="mb-3 flex flex-wrap items-center gap-2">
@@ -189,17 +191,6 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
                 styles={{ menuPortal: (base) => ({ ...base, zIndex: 10000 }) }}
               />
             </div>
-            <select
-              className={nativeSelectClass}
-              value={v.aggregation}
-              onChange={(e) => updateValue(index, { aggregation: e.target.value })}
-            >
-              {AGGREGATIONS.map((agg) => (
-                <option key={agg} value={agg}>
-                  {agg}
-                </option>
-              ))}
-            </select>
             <select
               className={nativeSelectClass}
               value={v.showValuesAs}
