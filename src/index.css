@@ -1,0 +1,86 @@
+:root {
+  --text: #1f1a24;
+  --bg: #ffffff;
+  --border: #d8d5dd;
+  --accent: #6d28d9;
+  --danger: #b3261e;
+  --danger-bg: #fdecea;
+  font: 16px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #eceaf0;
+    --bg: #141018;
+    --border: #3a3441;
+    --accent: #b28cff;
+    --danger-bg: #3a1a17;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.pivot-builder {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.field-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.field-editor {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  flex: 1 1 220px;
+}
+
+.field-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.field-row input,
+.field-row select {
+  flex: 1;
+  padding: 4px 6px;
+}
+
+.pivot-error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.pivot-grid {
+  border-collapse: collapse;
+  margin-top: 16px;
+  width: 100%;
+}
+
+.pivot-grid th,
+.pivot-grid td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: center;
+}
+
+.pivot-grid th {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
