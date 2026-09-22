@@ -10,6 +10,8 @@ const SHOW_VALUES_AS_OPTIONS = [
   { value: "PercentOfGrandTotal", label: "% of Grand Total" },
 ];
 
+const DEFAULT_FORMAT = { type: "General", decimalPlaces: 2, currencySymbol: "EGP" };
+
 const nativeSelectClass =
   "rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent";
 
@@ -212,6 +214,11 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
     onChange({ ...value, values: copy });
   };
 
+  const updateValueFormat = (index, patch) => {
+    const current = value.values[index].format ?? DEFAULT_FORMAT;
+    updateValue(index, { format: { ...current, ...patch } });
+  };
+
   const removeValue = (index) => {
     onChange({ ...value, values: value.values.filter((_, i) => i !== index) });
   };
@@ -258,37 +265,75 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
           cube (2026-09-21) that measures are pre-built with their aggregation baked in — see
           PivotValueField in the backend for the full story. */}
       <SectionCard title="Values">
-        {value.values.map((v, index) => (
-          <div key={index} className="mb-3 flex flex-wrap items-center gap-2">
-            <div className="min-w-[10rem] flex-1">
-              <Select
-                className="react-select-container"
-                classNamePrefix="react-select"
-                placeholder="Choose a measure…"
-                options={valueFieldOptions}
-                value={valueFieldOptions.find((opt) => opt.value === v.field) ?? null}
-                onChange={(opt) => updateValue(index, { field: opt?.value ?? "" })}
-                menuPortalTarget={typeof document !== "undefined" ? document.body : null}
-                menuPosition="fixed"
-                styles={{ menuPortal: (base) => ({ ...base, zIndex: 10000 }) }}
-              />
+        {value.values.map((v, index) => {
+          const format = v.format ?? DEFAULT_FORMAT;
+          return (
+            <div key={index} className="mb-3 rounded-xl border border-slate-100 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="min-w-[10rem] flex-1">
+                  <Select
+                    className="react-select-container"
+                    classNamePrefix="react-select"
+                    placeholder="Choose a measure…"
+                    options={valueFieldOptions}
+                    value={valueFieldOptions.find((opt) => opt.value === v.field) ?? null}
+                    onChange={(opt) => updateValue(index, { field: opt?.value ?? "" })}
+                    menuPortalTarget={typeof document !== "undefined" ? document.body : null}
+                    menuPosition="fixed"
+                    styles={{ menuPortal: (base) => ({ ...base, zIndex: 10000 }) }}
+                  />
+                </div>
+                <select
+                  className={nativeSelectClass}
+                  value={v.showValuesAs}
+                  onChange={(e) => updateValue(index, { showValuesAs: e.target.value })}
+                >
+                  {SHOW_VALUES_AS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" onClick={() => removeValue(index)} className="text-muted hover:text-ink" aria-label="Remove value">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium text-muted">Format:</span>
+                <select
+                  className={nativeSelectClass}
+                  value={format.type}
+                  onChange={(e) => updateValueFormat(index, { type: e.target.value })}
+                >
+                  <option value="General">General</option>
+                  <option value="Number">Number</option>
+                  <option value="Currency">Currency</option>
+                </select>
+                {format.type !== "General" && (
+                  <input
+                    type="number"
+                    min={0}
+                    max={10}
+                    value={format.decimalPlaces}
+                    onChange={(e) => updateValueFormat(index, { decimalPlaces: Number(e.target.value) })}
+                    className="input-field w-20 py-2"
+                    title="Decimal places"
+                  />
+                )}
+                {format.type === "Currency" && (
+                  <input
+                    type="text"
+                    value={format.currencySymbol}
+                    onChange={(e) => updateValueFormat(index, { currencySymbol: e.target.value })}
+                    placeholder="EGP"
+                    className="input-field w-24 py-2"
+                    title="Currency symbol"
+                  />
+                )}
+              </div>
             </div>
-            <select
-              className={nativeSelectClass}
-              value={v.showValuesAs}
-              onChange={(e) => updateValue(index, { showValuesAs: e.target.value })}
-            >
-              {SHOW_VALUES_AS_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-            <button type="button" onClick={() => removeValue(index)} className="text-muted hover:text-ink" aria-label="Remove value">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        ))}
+          );
+        })}
         <button type="button" onClick={addValue} className="btn-secondary mt-1">
           + Add value
         </button>

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { formatNumber, formatForColumn } from "../../utils/numberFormat";
 
 // Groups consecutive rows sharing the same first-level label into collapsible sections. A group
 // is only collapsible when it ends in a Subtotal row (IsTotal, added by the backend's
@@ -44,7 +45,7 @@ function HeaderPill({ children, muted = false }) {
   );
 }
 
-export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabels = [] }) {
+export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabels = [], valueFields = [] }) {
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [searchText, setSearchText] = useState("");
 
@@ -188,7 +189,7 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
                         row.isTotal || columnHeaders[colIndex].isTotal ? "font-bold text-ink" : "text-slate-700"
                       }`}
                     >
-                      {cell ?? ""}
+                      {formatNumber(cell, formatForColumn(colIndex, valueFields))}
                     </td>
                   ))}
                 </tr>

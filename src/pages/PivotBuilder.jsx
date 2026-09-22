@@ -125,6 +125,7 @@ export default function PivotBuilder() {
           result={result}
           rowFieldLabels={fieldLabels(lastQuery?.rows, dimensions)}
           columnFieldLabels={fieldLabels(lastQuery?.columns, dimensions)}
+          valueFields={lastQuery?.values}
         />
       </div>
 
