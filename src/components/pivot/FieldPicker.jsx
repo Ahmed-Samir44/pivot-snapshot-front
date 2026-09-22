@@ -16,6 +16,8 @@ const SHOW_VALUES_AS_OPTIONS = [
   { value: "DifferenceFrom", label: "Difference From (previous)" },
   { value: "PercentOfRowTotal", label: "% of Row Total" },
   { value: "PercentOfColumnTotal", label: "% of Column Total" },
+  { value: "PercentOfParentColumn", label: "% of Parent Column" },
+  { value: "Index", label: "Index" },
 ];
 
 const DEFAULT_FORMAT = { type: "General", decimalPlaces: 2, currencySymbol: "EGP" };
