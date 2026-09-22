@@ -57,6 +57,7 @@ export default function PivotBuilder() {
   const [metaError, setMetaError] = useState(null);
 
   const [snapshotName, setSnapshotName] = useState("");
+  const [tableStyle, setTableStyle] = useState("Default");
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
   const [saveError, setSaveError] = useState(null);
@@ -105,7 +106,7 @@ export default function PivotBuilder() {
     setSaveError(null);
     setSaveMessage(null);
     try {
-      const saved = await saveSnapshot(snapshotName.trim(), lastQuery, result);
+      const saved = await saveSnapshot(snapshotName.trim(), lastQuery, result, tableStyle);
       setSaveMessage(`Saved as version ${saved.versionNumber}.`);
     } catch (err) {
       setSaveError(err.message);
@@ -155,6 +156,17 @@ export default function PivotBuilder() {
             value={snapshotName}
             onChange={(e) => setSnapshotName(e.target.value)}
           />
+          <select
+            className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
+            value={tableStyle}
+            onChange={(e) => setTableStyle(e.target.value)}
+            title="Table style for the saved snapshot"
+          >
+            <option value="Default">Style: Default</option>
+            <option value="Banded">Style: Banded rows</option>
+            <option value="Dark">Style: Dark</option>
+            <option value="Minimal">Style: Minimal</option>
+          </select>
           <button
             type="button"
             onClick={handleSave}
