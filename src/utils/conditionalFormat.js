@@ -67,3 +67,16 @@ export function detailRangeForColumn(result, columnIndex) {
   }
   return { min: Math.min(...values), max: Math.max(...values) };
 }
+
+// Mirror of detailRangeForColumn, across the OTHER axis — used when valuesPlacement is "Rows"
+// (see PivotGrid.jsx), where a single ROW (not column) holds one measure's whole detail range.
+export function detailRangeForRow(result, rowIndex) {
+  const values = result.columnHeaders
+    .map((col, c) => (col.isTotal ? null : result.cells[rowIndex][c]))
+    .filter((v) => v !== null && v !== undefined);
+
+  if (values.length === 0) {
+    return { min: 0, max: 0 };
+  }
+  return { min: Math.min(...values), max: Math.max(...values) };
+}

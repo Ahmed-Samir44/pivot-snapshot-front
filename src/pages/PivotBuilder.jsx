@@ -15,6 +15,7 @@ const EMPTY_REQUEST = {
   rows: [],
   columns: [],
   values: [],
+  valuesPlacement: "Columns",
   filters: [],
   sort: null,
   showGrandTotals: false,
@@ -96,6 +97,7 @@ export default function PivotBuilder() {
         rows: request.rows.filter(Boolean),
         columns: request.columns.filter(Boolean),
         values: request.values.filter((v) => v.field),
+        valuesPlacement: request.valuesPlacement,
         filters: request.filters.filter((f) => f.field && isFilterComplete(f)),
         sort: request.sort,
         showGrandTotals: request.showGrandTotals,
@@ -200,10 +202,18 @@ export default function PivotBuilder() {
           columnFieldLabels={fieldLabels(lastQuery?.columns, dimensions)}
           valueFields={lastQuery?.values}
           layout={reportLayout}
+          valuesPlacement={lastQuery?.valuesPlacement}
         />
       </div>
 
-      {includeChart && <PivotChart result={result} valueFields={lastQuery?.values} chartType={chartType} />}
+      {includeChart && lastQuery?.valuesPlacement === "Rows" && (
+        <p className="mt-4 text-sm text-muted">
+          No chart is drawn while values are on Rows — see the "Show values on" setting above.
+        </p>
+      )}
+      {includeChart && (
+        <PivotChart result={result} valueFields={lastQuery?.values} chartType={chartType} valuesPlacement={lastQuery?.valuesPlacement} />
+      )}
 
       {result && (
         <div className="card mt-6 flex flex-wrap items-center gap-3">

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { formatNumber, formatForColumn } from "../../utils/numberFormat";
-import { conditionalStyleFor, detailRangeForColumn, iconColorFor } from "../../utils/conditionalFormat";
+import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
 
 // The backend's SubtotalsProcessor now inserts subtotals at EVERY row level except the innermost
 // (e.g. Rows = [Specialty, Doctor, Month] gets both a per-Doctor and a nested per-Specialty
@@ -85,15 +85,28 @@ function HeaderPill({ children, muted = false }) {
   );
 }
 
-export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabels = [], valueFields = [], layout = "Tabular" }) {
+export default function PivotGrid({
+  result,
+  rowFieldLabels = [],
+  columnFieldLabels = [],
+  valueFields = [],
+  layout = "Tabular",
+  valuesPlacement = "Columns",
+}) {
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [searchText, setSearchText] = useState("");
 
   const groups = useMemo(() => (result ? computeGroups(result.rowHeaders) : []), [result]);
-  const conditionalRanges = useMemo(
-    () => (result ? result.columnHeaders.map((_, c) => detailRangeForColumn(result, c)) : []),
-    [result],
-  );
+  // Excel's own literal label for the pseudo-field, appended as one more row-header level when
+  // measures are crossjoined into Rows instead of Columns — mirrors HtmlSnapshotRenderer exactly
+  // (row.labels themselves already carry the measure name automatically, no change needed there).
+  const rowFieldLabelsWithMeasure = valuesPlacement === "Rows" ? [...rowFieldLabels, "Σ Values"] : rowFieldLabels;
+  const conditionalRanges = useMemo(() => {
+    if (!result) return [];
+    return valuesPlacement === "Rows"
+      ? result.rowHeaders.map((_, r) => detailRangeForRow(result, r))
+      : result.columnHeaders.map((_, c) => detailRangeForColumn(result, c));
+  }, [result, valuesPlacement]);
   const compactVisibility = useMemo(
     () => (result && layout === "Compact" ? computeCompactVisibility(result.rowHeaders) : null),
     [result, layout],
@@ -185,12 +198,12 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
                     </th>
                     {layout === "Compact" ? (
                       <th rowSpan={columnDepth} className="px-2 py-2 text-center">
-                        <HeaderPill muted>{rowFieldLabels.join(" › ")}</HeaderPill>
+                        <HeaderPill muted>{rowFieldLabelsWithMeasure.join(" › ")}</HeaderPill>
                       </th>
                     ) : (
                       Array.from({ length: rowDepth }).map((_, rowLevel) => (
                         <th key={rowLevel} rowSpan={columnDepth} className="px-2 py-2 text-center">
-                          <HeaderPill muted>{rowFieldLabels[rowLevel] ?? ""}</HeaderPill>
+                          <HeaderPill muted>{rowFieldLabelsWithMeasure[rowLevel] ?? ""}</HeaderPill>
                         </th>
                       ))
                     )}
@@ -260,15 +273,19 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
                   )}
                   {cells[rowIndex].map((cell, colIndex) => {
                     const isTotalCell = row.isTotal || columnHeaders[colIndex].isTotal;
-                    const valueField = valueFields?.length ? valueFields[colIndex % valueFields.length] : null;
+                    // Which PivotValueField a cell belongs to is read from whichever axis actually
+                    // carries the measure crossjoin — mirrors HtmlSnapshotRenderer.cs exactly.
+                    const measureIndex = valuesPlacement === "Rows" ? rowIndex : colIndex;
+                    const rangeIndex = valuesPlacement === "Rows" ? rowIndex : colIndex;
+                    const valueField = valueFields?.length ? valueFields[measureIndex % valueFields.length] : null;
                     // Same rule as the saved HTML snapshot: Total/Subtotal cells never get a
                     // conditional-format background, since they're not "a value in the range" —
                     // they're the sum of it (see ConditionalFormatting.cs for the full reasoning).
                     const conditionalStyle = !isTotalCell && valueField
-                      ? conditionalStyleFor(cell, valueField.conditionalFormat, conditionalRanges[colIndex]?.min, conditionalRanges[colIndex]?.max)
+                      ? conditionalStyleFor(cell, valueField.conditionalFormat, conditionalRanges[rangeIndex]?.min, conditionalRanges[rangeIndex]?.max)
                       : null;
                     const iconColor = !isTotalCell && valueField
-                      ? iconColorFor(cell, valueField.conditionalFormat, conditionalRanges[colIndex]?.min, conditionalRanges[colIndex]?.max)
+                      ? iconColorFor(cell, valueField.conditionalFormat, conditionalRanges[rangeIndex]?.min, conditionalRanges[rangeIndex]?.max)
                       : null;
 
                     return (
@@ -279,7 +296,7 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
                         }`}
                         style={conditionalStyle ?? undefined}
                       >
-                        {iconColor && <span style={{ color: iconColor }}>●</span>} {formatNumber(cell, formatForColumn(colIndex, valueFields))}
+                        {iconColor && <span style={{ color: iconColor }}>●</span>} {formatNumber(cell, formatForColumn(measureIndex, valueFields))}
                       </td>
                     );
                   })}

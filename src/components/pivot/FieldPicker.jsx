@@ -828,6 +828,18 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
           cube (2026-09-21) that measures are pre-built with their aggregation baked in — see
           PivotValueField in the backend for the full story. */}
       <SectionCard title="Values" badge={value.values.length}>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted">Show values on:</span>
+          <select
+            className={nativeSelectClass}
+            value={value.valuesPlacement ?? "Columns"}
+            onChange={(e) => onChange({ ...value, valuesPlacement: e.target.value })}
+            title="Excel's own 'drag Σ Values between Columns and Rows' — see DECISIONS.md for this phase's scope cuts (needs a Column field, Normal-only Show Values As, no chart)"
+          >
+            <option value="Columns">Columns (default)</option>
+            <option value="Rows">Rows</option>
+          </select>
+        </div>
         <ZoneDropArea zoneKey="values" onFieldDropped={moveField} isEmpty={value.values.length === 0}>
         {value.values.map((v, index) => {
           const format = v.format ?? DEFAULT_FORMAT;

@@ -149,8 +149,12 @@ function PieChart({ bars }) {
   );
 }
 
-export default function PivotChart({ result, valueFields, chartType = "Bar" }) {
-  if (!result || !valueFields?.length || result.columnHeaders.length === 0) {
+export default function PivotChart({ result, valueFields, chartType = "Bar", valuesPlacement = "Columns" }) {
+  // v1 scope cut, mirrors the backend's PivotChartRenderer.Render exactly: extractBars assumes
+  // one bar per ROW reading a single fixed column — correct only when measures are on Columns.
+  // With measures on Rows, consecutive rows ARE the different measures for the same dim-combo, so
+  // no chart is drawn rather than a meaningless mixed one.
+  if (!result || !valueFields?.length || result.columnHeaders.length === 0 || valuesPlacement === "Rows") {
     return null;
   }
 
