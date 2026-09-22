@@ -12,7 +12,12 @@ export async function queryPivot(request) {
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(data.error || "حدث خطأ غير متوقع");
+    const error = new Error(data.error || "حدث خطأ غير متوقع");
+    // Structured fields (type/field/memberCount/canOverride) from CardinalityGuard's
+    // HighCardinalityFieldException — carried on the Error object (not just its message) so the
+    // caller can offer a specific "run anyway" retry instead of only showing text.
+    error.details = data;
+    throw error;
   }
 
   return data;

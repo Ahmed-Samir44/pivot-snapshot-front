@@ -62,6 +62,11 @@ export default function PivotBuilder() {
   const [saveMessage, setSaveMessage] = useState(null);
   const [saveError, setSaveError] = useState(null);
 
+  // Set only for CardinalityGuard's HighCardinalityFieldException (see pivotApi.js's
+  // error.details) — a distinct state from `error` because this one gets its own warning UI with
+  // an explicit "run anyway" retry, not just an error message.
+  const [cardinalityWarning, setCardinalityWarning] = useState(null);
+
   useEffect(() => {
     Promise.all([getDimensions(), getMeasures()])
       .then(([dims, meas]) => {
@@ -71,9 +76,13 @@ export default function PivotBuilder() {
       .catch((err) => setMetaError(err.message));
   }, []);
 
-  const runQuery = async () => {
+  // maxMembersOverride is only ever set by the user explicitly confirming the cardinality
+  // warning below (runQueryWithOverride) — never sent by default, so a normal "Run query" click
+  // always goes through CardinalityGuard's ordinary safe limit.
+  const runQuery = async (maxMembersOverride) => {
     setLoading(true);
     setError(null);
+    setCardinalityWarning(null);
     setSaveMessage(null);
     try {
       const cleaned = {
@@ -85,16 +94,27 @@ export default function PivotBuilder() {
         showGrandTotals: request.showGrandTotals,
         showSubtotals: request.showSubtotals,
         calculatedFields: request.calculatedFields.filter((f) => f.name && f.leftField && f.rightField),
+        ...(maxMembersOverride ? { maxMembersOverride } : {}),
       };
       const data = await queryPivot(cleaned);
       setResult(data);
       setLastQuery(cleaned);
     } catch (err) {
-      setError(err.message);
+      if (err.details?.type === "HighCardinalityField") {
+        setCardinalityWarning(err.details);
+      } else {
+        setError(err.message);
+      }
       setResult(null);
       setLastQuery(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runQueryWithOverride = () => {
+    if (cardinalityWarning) {
+      runQuery(cardinalityWarning.absoluteMaxMembersPerField);
     }
   };
 
@@ -132,11 +152,31 @@ export default function PivotBuilder() {
         <FieldPicker value={request} onChange={setRequest} dimensions={dimensions} measures={measures} />
       </div>
 
-      <button type="button" onClick={runQuery} disabled={loading} className="btn-primary disabled:cursor-not-allowed disabled:opacity-50">
+      <button type="button" onClick={() => runQuery()} disabled={loading} className="btn-primary disabled:cursor-not-allowed disabled:opacity-50">
         {loading ? "Loading…" : "Run query"}
       </button>
 
       {error && <p className="mt-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-red-800">{error}</p>}
+
+      {cardinalityWarning && (
+        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">
+          <p>{cardinalityWarning.error}</p>
+          {cardinalityWarning.canOverride ? (
+            <>
+              <p className="mt-1 text-sm">
+                السيرفر ده مشترك مع مشاريع تانية وسبق وحصله انهيار بسبب استعلام مشابه — تشغيل الاستعلام ده من غير فلتر ممكن يبطّئ أو يعطّل السيرفر للمستخدمين التانيين. اضغط بس لو متأكد.
+              </p>
+              <button type="button" onClick={runQueryWithOverride} disabled={loading} className="btn-secondary mt-2 disabled:cursor-not-allowed disabled:opacity-50">
+                فهمت المخاطرة، شغّل على أي حال (لحد {cardinalityWarning.absoluteMaxMembersPerField.toLocaleString()} عضو)
+              </button>
+            </>
+          ) : (
+            <p className="mt-1 text-sm">
+              عدد الأعضاء ({cardinalityWarning.memberCount.toLocaleString()}) أكبر من الحد الأقصى المطلق المسموح به على السيرفر ({cardinalityWarning.absoluteMaxMembersPerField.toLocaleString()}) — لازم تضيف فلتر على الحقل ده، مفيش تجاوز ممكن هنا.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="mt-6">
         <PivotGrid
