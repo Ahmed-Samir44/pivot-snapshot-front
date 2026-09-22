@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { formatNumber, formatForColumn } from "../../utils/numberFormat";
-import { conditionalStyleFor, detailRangeForColumn } from "../../utils/conditionalFormat";
+import { conditionalStyleFor, detailRangeForColumn, iconColorFor } from "../../utils/conditionalFormat";
 
 // Groups consecutive rows sharing the same first-level label into collapsible sections. A group
 // is only collapsible when it ends in a Subtotal row (IsTotal, added by the backend's
@@ -196,6 +196,9 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
                     const conditionalStyle = !isTotalCell && valueField
                       ? conditionalStyleFor(cell, valueField.conditionalFormat, conditionalRanges[colIndex]?.min, conditionalRanges[colIndex]?.max)
                       : null;
+                    const iconColor = !isTotalCell && valueField
+                      ? iconColorFor(cell, valueField.conditionalFormat, conditionalRanges[colIndex]?.min, conditionalRanges[colIndex]?.max)
+                      : null;
 
                     return (
                       <td
@@ -205,7 +208,7 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
                         }`}
                         style={conditionalStyle ?? undefined}
                       >
-                        {formatNumber(cell, formatForColumn(colIndex, valueFields))}
+                        {iconColor && <span style={{ color: iconColor }}>●</span>} {formatNumber(cell, formatForColumn(colIndex, valueFields))}
                       </td>
                     );
                   })}

@@ -40,6 +40,20 @@ export function conditionalStyleFor(value, format, min, max) {
   return null;
 }
 
+// Excel's default "3 Traffic Lights" tertile split — same colors as the color scale, mirrors the
+// backend's ConditionalFormatting.IconColorFor exactly. Returns just the hex color; the caller
+// renders the actual dot (see PivotGrid.jsx).
+export function iconColorFor(value, format, min, max) {
+  if (!format || format.type !== "IconSet" || value === null || value === undefined || max <= min) {
+    return null;
+  }
+
+  const t = clamp01((value - min) / (max - min));
+  if (t < 1 / 3) return colorScaleHex(0);
+  if (t < 2 / 3) return colorScaleHex(0.5);
+  return colorScaleHex(1);
+}
+
 // Same "detail rows only" exclusion as the backend's DetailRangeFor — a Grand Total is always the
 // largest number in its column, so including it would stretch every real value toward the "low"
 // end of the scale.

@@ -487,6 +487,7 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
                   <option value="None">None</option>
                   <option value="ColorScale">Color scale</option>
                   <option value="DataBar">Data bar</option>
+                  <option value="IconSet">Icon set (traffic lights)</option>
                 </select>
               </div>
             </div>
