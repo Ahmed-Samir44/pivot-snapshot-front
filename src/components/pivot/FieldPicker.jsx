@@ -87,9 +87,52 @@ function FilterRow({ filter, dimensionOptions, onChange, onRemove }) {
   );
 }
 
-function SortEditor({ sort, values, onChange }) {
-  const mode = sort === null ? "none" : sort.byMeasureField ? sort.byMeasureField : "label";
+// Custom order is Excel's manual drag-to-reorder — an explicit list of members in the exact
+// display order, rather than an automatic rule. react-select's multi-value order already follows
+// click order (and reordering is just remove-then-reclick), so reusing it here for BUILDING the
+// list doubles as the reordering UI without a separate drag-and-drop implementation.
+function CustomOrderEditor({ field, customOrder, onChange }) {
+  const [memberOptions, setMemberOptions] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+
+  useEffect(() => {
+    if (!field) {
+      setMemberOptions([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingMembers(true);
+    getMembers(field)
+      .then((members) => {
+        if (!cancelled) setMemberOptions(members);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMembers(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [field]);
+
+  if (!field) {
+    return <p className="text-sm text-muted">Add exactly one field to the target axis first to set a custom order.</p>;
+  }
+
+  return (
+    <MultiSelectField
+      options={memberOptions}
+      value={customOrder ?? []}
+      onChange={onChange}
+      placeholder={loadingMembers ? "Loading members…" : "Click members in the order you want them displayed…"}
+      isLoading={loadingMembers}
+    />
+  );
+}
+
+function SortEditor({ sort, values, rows, columns, onChange }) {
+  const mode = sort === null ? "none" : sort.customOrder ? "custom" : sort.byMeasureField ? sort.byMeasureField : "label";
   const axis = sort?.axis ?? "Rows";
+  const targetField = (axis === "Columns" ? columns : rows)[0] ?? null;
 
   const handleModeChange = (nextMode) => {
     if (nextMode === "none") {
@@ -97,43 +140,59 @@ function SortEditor({ sort, values, onChange }) {
       return;
     }
     const direction = sort?.direction ?? "Ascending";
+    if (nextMode === "custom") {
+      onChange({ direction, byMeasureField: null, axis, customOrder: [] });
+      return;
+    }
     onChange(
       nextMode === "label"
-        ? { direction, byMeasureField: null, axis }
-        : { direction, byMeasureField: nextMode, axis },
+        ? { direction, byMeasureField: null, axis, customOrder: null }
+        : { direction, byMeasureField: nextMode, axis, customOrder: null },
     );
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <select className={nativeSelectClass} value={mode} onChange={(e) => handleModeChange(e.target.value)}>
-        <option value="none">No sorting</option>
-        <option value="label">By label (single field only)</option>
-        {values.filter((v) => v.field).map((v) => (
-          <option key={v.field} value={v.field}>
-            By value of {v.field}
-          </option>
-        ))}
-      </select>
-      {sort && (
-        <>
-          <select
-            className={nativeSelectClass}
-            value={axis}
-            onChange={(e) => onChange({ ...sort, axis: e.target.value })}
-          >
-            <option value="Rows">Sort Rows</option>
-            <option value="Columns">Sort Columns</option>
-          </select>
-          <select
-            className={nativeSelectClass}
-            value={sort.direction}
-            onChange={(e) => onChange({ ...sort, direction: e.target.value })}
-          >
-            <option value="Ascending">Ascending</option>
-            <option value="Descending">Descending</option>
-          </select>
-        </>
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <select className={nativeSelectClass} value={mode} onChange={(e) => handleModeChange(e.target.value)}>
+          <option value="none">No sorting</option>
+          <option value="label">By label (single field only)</option>
+          <option value="custom">Custom order (single field only)</option>
+          {values.filter((v) => v.field).map((v) => (
+            <option key={v.field} value={v.field}>
+              By value of {v.field}
+            </option>
+          ))}
+        </select>
+        {sort && (
+          <>
+            <select
+              className={nativeSelectClass}
+              value={axis}
+              onChange={(e) => onChange({ ...sort, axis: e.target.value })}
+            >
+              <option value="Rows">Sort Rows</option>
+              <option value="Columns">Sort Columns</option>
+            </select>
+            {mode !== "custom" && (
+              <select
+                className={nativeSelectClass}
+                value={sort.direction}
+                onChange={(e) => onChange({ ...sort, direction: e.target.value })}
+              >
+                <option value="Ascending">Ascending</option>
+                <option value="Descending">Descending</option>
+              </select>
+            )}
+          </>
+        )}
+      </div>
+      {sort && mode === "custom" && (
+        <CustomOrderEditor
+          field={targetField}
+          customOrder={sort.customOrder}
+          onChange={(customOrder) => onChange({ ...sort, customOrder })}
+        />
       )}
     </div>
   );
@@ -365,7 +424,13 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
       </SectionCard>
 
       <SectionCard title="Sort">
-        <SortEditor sort={value.sort} values={value.values} onChange={(sort) => onChange({ ...value, sort })} />
+        <SortEditor
+          sort={value.sort}
+          values={value.values}
+          rows={value.rows}
+          columns={value.columns}
+          onChange={(sort) => onChange({ ...value, sort })}
+        />
       </SectionCard>
 
       <SectionCard title="Totals">
