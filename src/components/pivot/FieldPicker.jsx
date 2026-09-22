@@ -363,6 +363,24 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
     onChange({ ...value, filters: [...value.filters, { field: "", includedMembers: [] }] });
   };
 
+  // Excel's classic "drag a field from Rows to Columns" — see HierarchicalCubePathSelect for the
+  // native-HTML5-DnD half of this; this is the other half, since only FieldPicker holds both
+  // arrays at once. fromKey/toKey are always "rows"/"columns" (the only two dragSourceKeys used
+  // below), so a straight swap between the two arrays is all this needs to handle.
+  const moveFieldBetweenAxes = (field, fromKey, toKey) => {
+    const fromArr = fromKey === "rows" ? value.rows : value.columns;
+    const toArr = toKey === "rows" ? value.rows : value.columns;
+    if (!fromArr.includes(field) || toArr.includes(field)) return;
+
+    const nextFrom = fromArr.filter((f) => f !== field);
+    const nextTo = [...toArr, field];
+    onChange({
+      ...value,
+      rows: fromKey === "rows" ? nextFrom : nextTo,
+      columns: fromKey === "columns" ? nextFrom : nextTo,
+    });
+  };
+
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <SectionCard title="Rows">
@@ -371,6 +389,8 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
           options={dimensions.map((d) => d.field)}
           value={value.rows}
           onChange={(rows) => onChange({ ...value, rows })}
+          dragSourceKey="rows"
+          onFieldDropped={moveFieldBetweenAxes}
         />
       </SectionCard>
 
@@ -380,6 +400,8 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
           options={dimensions.map((d) => d.field)}
           value={value.columns}
           onChange={(columns) => onChange({ ...value, columns })}
+          dragSourceKey="columns"
+          onFieldDropped={moveFieldBetweenAxes}
         />
       </SectionCard>
 

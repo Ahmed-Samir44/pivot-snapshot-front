@@ -41,6 +41,13 @@ const singleSelectProps = {
   isClearable: true,
 };
 
+// Native HTML5 drag-and-drop (not a library) — dataTransfer carries a plain string across the
+// browser's DOM event system, which works between two SEPARATE instances of this component
+// (Rows and Columns each render their own) without any shared React state between them. The
+// actual cross-list move (remove from one array, add to the other) still has to happen one level
+// up, in FieldPicker, since only it holds both arrays — see onFieldDropped.
+const DRAG_MIME_TYPE = "application/x-pivot-field";
+
 export default function HierarchicalCubePathSelect({
   options,
   value = [],
@@ -49,6 +56,8 @@ export default function HierarchicalCubePathSelect({
   placeholderAdd = "Choose dimension and field(s), then add — all matching paths are added at once.",
   selectedHeading = "Selected fields",
   addButtonLabel = "Add",
+  dragSourceKey = null,
+  onFieldDropped = null,
 }) {
   const [step1, setStep1] = useState(null);
   const [step2Multi, setStep2Multi] = useState([]);
@@ -109,6 +118,31 @@ export default function HierarchicalCubePathSelect({
     onChange(value.filter((v) => v !== fullPath));
   };
 
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleDragStart = (e, fullPath) => {
+    if (!dragSourceKey) return;
+    e.dataTransfer.setData(DRAG_MIME_TYPE, JSON.stringify({ field: fullPath, source: dragSourceKey }));
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDrop = (e) => {
+    if (!dragSourceKey || !onFieldDropped) return;
+    e.preventDefault();
+    setDragOver(false);
+    const raw = e.dataTransfer.getData(DRAG_MIME_TYPE);
+    if (!raw) return;
+    const { field, source } = JSON.parse(raw);
+    if (source !== dragSourceKey) {
+      onFieldDropped(field, source, dragSourceKey);
+    }
+  };
+
   return (
     <div className="mb-6">
       <label className="mb-2 block text-sm font-semibold text-ink">{label}</label>
@@ -160,16 +194,28 @@ export default function HierarchicalCubePathSelect({
         </div>
       </div>
 
-      {value.length > 0 && (
+      {(value.length > 0 || (dragSourceKey && onFieldDropped)) && (
         <div className="mt-4">
           <p className="mb-2 text-xs font-medium text-muted">
             {selectedHeading} ({value.length})
+            {dragSourceKey && onFieldDropped && " — drag a field here to move it from the other axis"}
           </p>
-          <ul className="flex flex-wrap gap-2">
+          <ul
+            className={`flex flex-wrap gap-2 rounded-lg ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
+              value.length === 0 ? "min-h-[2.5rem] border-2 border-dashed border-slate-200 p-2" : ""
+            }`}
+            onDragOver={dragSourceKey && onFieldDropped ? handleDragOver : undefined}
+            onDragLeave={dragSourceKey && onFieldDropped ? () => setDragOver(false) : undefined}
+            onDrop={dragSourceKey && onFieldDropped ? handleDrop : undefined}
+          >
             {value.map((fullPath) => (
               <li
                 key={fullPath}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-3 py-1.5 text-sm font-medium text-white"
+                draggable={Boolean(dragSourceKey)}
+                onDragStart={(e) => handleDragStart(e, fullPath)}
+                className={`inline-flex items-center gap-1.5 rounded-lg bg-gold px-3 py-1.5 text-sm font-medium text-white ${
+                  dragSourceKey ? "cursor-grab active:cursor-grabbing" : ""
+                }`}
               >
                 <span>{formatDimensionName(fullPath)}</span>
                 <button
