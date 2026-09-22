@@ -8,6 +8,8 @@ import { getMembers } from "../../services/cubeMetaApi";
 const SHOW_VALUES_AS_OPTIONS = [
   { value: "Normal", label: "Normal" },
   { value: "PercentOfGrandTotal", label: "% of Grand Total" },
+  { value: "RunningTotal", label: "Running Total" },
+  { value: "Rank", label: "Rank" },
 ];
 
 const DEFAULT_FORMAT = { type: "General", decimalPlaces: 2, currencySymbol: "EGP" };
