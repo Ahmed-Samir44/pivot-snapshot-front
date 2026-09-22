@@ -20,6 +20,7 @@ const EMPTY_REQUEST = {
   showGrandTotals: false,
   showSubtotals: false,
   calculatedFields: [],
+  calculatedItems: [],
   dateGroupings: [],
   numericGroupings: [],
 };
@@ -100,6 +101,12 @@ export default function PivotBuilder() {
         showGrandTotals: request.showGrandTotals,
         showSubtotals: request.showSubtotals,
         calculatedFields: request.calculatedFields.filter((f) => f.name && f.leftField && f.rightField),
+        // A CalculatedItem needs a field, a name, and at least one member on either side (see
+        // MdxPivotQueryBuilder.ValidateCalculatedItems) — mirrors the calculatedFields cleaning
+        // above.
+        calculatedItems: request.calculatedItems.filter(
+          (i) => i.field && i.name && (i.positiveMembers.length > 0 || i.negativeMembers.length > 0),
+        ),
         dateGroupings: request.dateGroupings.filter((g) => request.rows.includes(g.field)),
         numericGroupings: request.numericGroupings.filter((g) => request.rows.includes(g.field) && g.binSize > 0),
         ...(maxMembersOverride ? { maxMembersOverride } : {}),

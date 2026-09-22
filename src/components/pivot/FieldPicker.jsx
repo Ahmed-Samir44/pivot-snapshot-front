@@ -511,6 +511,132 @@ function CalculatedFieldsEditor({ calculatedFields, measureOptions, onChange }) 
   );
 }
 
+// Excel's "Calculated Item" — a NEW MEMBER within an EXISTING Rows/Columns field's hierarchy
+// (e.g. "East + West" as a new Region member), distinct from CalculatedFieldsEditor above (which
+// creates a new MEASURE instead). Same "reject a free-text formula" philosophy as calculated
+// fields: a signed sum of the field's own EXISTING members, picked from a member list rather than
+// typed — see the backend's CalculatedItem for the full WHY and its v1 scope cuts (can't combine
+// with a Filter or grouping on the same field, or with any ShowValuesAs besides Normal).
+function CalculatedItemRow({ item, axisFieldOptions, onChange, onRemove }) {
+  const [memberOptions, setMemberOptions] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+
+  useEffect(() => {
+    if (!item.field) {
+      setMemberOptions([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingMembers(true);
+    getMembers(item.field)
+      .then((members) => {
+        if (!cancelled) setMemberOptions(members);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMembers(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.field]);
+
+  return (
+    <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <select
+          className={nativeSelectClass}
+          value={item.field}
+          onChange={(e) => onChange({ field: e.target.value, positiveMembers: [], negativeMembers: [] })}
+        >
+          <option value="">Choose a Rows/Columns field…</option>
+          {axisFieldOptions.map((f) => (
+            <option key={f} value={f}>
+              {formatDimensionName(f)}
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          placeholder="New item name (e.g. East + West)…"
+          value={item.name}
+          onChange={(e) => onChange({ name: e.target.value })}
+          className="input-field min-w-[10rem] flex-1 py-2"
+        />
+        <button type="button" onClick={onRemove} className="text-muted hover:text-ink" aria-label="Remove calculated item">
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+      {item.field && (
+        <div className="flex flex-col gap-2">
+          <div>
+            <span className="mb-1 block text-xs font-medium text-muted">Add (+):</span>
+            <MultiSelectField
+              options={memberOptions}
+              value={item.positiveMembers}
+              onChange={(positiveMembers) => onChange({ positiveMembers })}
+              placeholder={loadingMembers ? "Loading members…" : "Select member(s) to add…"}
+              isLoading={loadingMembers}
+            />
+          </div>
+          <div>
+            <span className="mb-1 block text-xs font-medium text-muted">Subtract (−):</span>
+            <MultiSelectField
+              options={memberOptions}
+              value={item.negativeMembers}
+              onChange={(negativeMembers) => onChange({ negativeMembers })}
+              placeholder={loadingMembers ? "Loading members…" : "Select member(s) to subtract…"}
+              isLoading={loadingMembers}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalculatedItemsEditor({ calculatedItems, rows, columns, onChange }) {
+  const axisFieldOptions = [...rows, ...columns];
+
+  const update = (index, patch) => {
+    const copy = [...calculatedItems];
+    copy[index] = { ...copy[index], ...patch };
+    onChange(copy);
+  };
+
+  const remove = (index) => onChange(calculatedItems.filter((_, i) => i !== index));
+
+  const add = () =>
+    onChange([...calculatedItems, { field: axisFieldOptions[0] ?? "", name: "", positiveMembers: [], negativeMembers: [] }]);
+
+  if (axisFieldOptions.length === 0) {
+    return <p className="text-sm text-muted">Add at least one Row or Column field first.</p>;
+  }
+
+  return (
+    <>
+      {calculatedItems.map((item, index) => (
+        <CalculatedItemRow
+          key={index}
+          item={item}
+          axisFieldOptions={axisFieldOptions}
+          onChange={(patch) => update(index, patch)}
+          onRemove={() => remove(index)}
+        />
+      ))}
+      <button type="button" onClick={add} className="btn-secondary">
+        + Add calculated item
+      </button>
+    </>
+  );
+}
+
+// A CalculatedItem's Field must still be a Rows or Columns field — the backend rejects one that
+// isn't (see MdxPivotQueryBuilder.ValidateCalculatedItems) — so it needs to be dropped the moment
+// its field leaves both axes, same idea as dateGroupings/numericGroupings being dropped when their
+// field leaves Rows.
+const clearOrphanedCalculatedItems = (calculatedItems, rows, columns) =>
+  calculatedItems.filter((item) => rows.includes(item.field) || columns.includes(item.field));
+
 export default function FieldPicker({ value, onChange, dimensions, measures }) {
   const dimensionOptions = dimensions.map((d) => ({ value: d.field, label: d.displayName }));
   const measureOptions = measures.map((m) => ({ value: m.field, label: m.displayName }));
@@ -594,6 +720,8 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
       next.filters = [...next.filters, { field, mode: "Members", includedMembers: [] }];
     }
 
+    next.calculatedItems = clearOrphanedCalculatedItems(value.calculatedItems, next.rows, next.columns);
+
     onChange(next);
   };
 
@@ -663,7 +791,9 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
           label="Column fields"
           options={dimensions.map((d) => d.field)}
           value={value.columns}
-          onChange={(columns) => onChange({ ...value, columns })}
+          onChange={(columns) =>
+            onChange({ ...value, columns, calculatedItems: clearOrphanedCalculatedItems(value.calculatedItems, value.rows, columns) })
+          }
           dragSourceKey="columns"
           onFieldDropped={moveField}
         />
@@ -675,11 +805,13 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
           options={dimensions.map((d) => d.field)}
           value={value.rows}
           onChange={(rows) => {
-            // Dropping a row field also drops any grouping that referenced it — the backend
-            // rejects a grouping on a field that's no longer in Rows (ValidateGroupings).
+            // Dropping a row field also drops any grouping/calculated item that referenced it —
+            // the backend rejects both on a field that's no longer in Rows/Columns
+            // (ValidateGroupings, ValidateCalculatedItems).
             const dateGroupings = value.dateGroupings.filter((g) => rows.includes(g.field));
             const numericGroupings = value.numericGroupings.filter((g) => rows.includes(g.field));
-            onChange({ ...value, rows, dateGroupings, numericGroupings });
+            const calculatedItems = clearOrphanedCalculatedItems(value.calculatedItems, rows, value.columns);
+            onChange({ ...value, rows, dateGroupings, numericGroupings, calculatedItems });
           }}
           dragSourceKey="rows"
           onFieldDropped={moveField}
@@ -806,6 +938,15 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
           calculatedFields={value.calculatedFields}
           measureOptions={measureOptions}
           onChange={(calculatedFields) => onChange({ ...value, calculatedFields })}
+        />
+      </SectionCard>
+
+      <SectionCard title="Calculated Items">
+        <CalculatedItemsEditor
+          calculatedItems={value.calculatedItems}
+          rows={value.rows}
+          columns={value.columns}
+          onChange={(calculatedItems) => onChange({ ...value, calculatedItems })}
         />
       </SectionCard>
 
