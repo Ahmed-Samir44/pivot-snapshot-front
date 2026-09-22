@@ -27,6 +27,11 @@ export function formatNumber(value, format) {
   if (type === "Currency") {
     return `${format?.currencySymbol ?? "EGP"} ${withThousands(value, decimals)}`;
   }
+  if (type === "Percentage") {
+    // No *100 here — mirrors the backend's NumberFormatter exactly: ShowValuesAs percent variants
+    // already produce percentage-scale numbers (38.43, not 0.3843).
+    return `${withThousands(value, decimals)}%`;
+  }
 
   // General: trims trailing zeros (up to 2 decimals) instead of always showing a fixed count.
   return value.toLocaleString("en-US", { maximumFractionDigits: 2 });

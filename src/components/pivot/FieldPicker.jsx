@@ -108,6 +108,9 @@ const FILTER_MODE_OPTIONS = [
   { value: "LabelEndsWith", label: "Label ends with…" },
   { value: "TopN", label: "Top N by value" },
   { value: "BottomN", label: "Bottom N by value" },
+  { value: "GreaterThan", label: "Value greater than…" },
+  { value: "LessThan", label: "Value less than…" },
+  { value: "Between", label: "Value between…" },
 ];
 
 // One filter's member list is only fetched once its field is chosen (and only needed for
@@ -140,7 +143,7 @@ function FilterRow({ filter, dimensionOptions, selectedValueOptions, onChange, o
   const selectedField = dimensionOptions.find((opt) => opt.value === filter.field) ?? null;
 
   const handleModeChange = (nextMode) => {
-    onChange({ field: filter.field, mode: nextMode, includedMembers: [], labelText: "", n: 10, byMeasureField: null });
+    onChange({ field: filter.field, mode: nextMode, includedMembers: [], labelText: "", n: 10, byMeasureField: null, value: null, valueTo: null });
   };
 
   return (
@@ -213,6 +216,39 @@ function FilterRow({ filter, dimensionOptions, selectedValueOptions, onChange, o
                 value={filter.n ?? 10}
                 onChange={(e) => onChange({ ...filter, n: Number(e.target.value) })}
               />
+              <select
+                className={nativeSelectClass}
+                value={filter.byMeasureField ?? ""}
+                onChange={(e) => onChange({ ...filter, byMeasureField: e.target.value || null })}
+              >
+                <option value="">Choose a measure…</option>
+                {selectedValueOptions.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {(mode === "GreaterThan" || mode === "LessThan" || mode === "Between") && (
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                type="number"
+                className="input-field w-28"
+                placeholder={mode === "Between" ? "From…" : "Value…"}
+                value={filter.value ?? ""}
+                onChange={(e) => onChange({ ...filter, value: e.target.value === "" ? null : Number(e.target.value) })}
+              />
+              {mode === "Between" && (
+                <input
+                  type="number"
+                  className="input-field w-28"
+                  placeholder="To…"
+                  value={filter.valueTo ?? ""}
+                  onChange={(e) => onChange({ ...filter, valueTo: e.target.value === "" ? null : Number(e.target.value) })}
+                />
+              )}
               <select
                 className={nativeSelectClass}
                 value={filter.byMeasureField ?? ""}
@@ -688,6 +724,7 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
                   <option value="General">General</option>
                   <option value="Number">Number</option>
                   <option value="Currency">Currency</option>
+                  <option value="Percentage">Percentage</option>
                 </select>
                 {format.type !== "General" && (
                   <input
