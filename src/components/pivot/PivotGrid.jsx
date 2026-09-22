@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { formatNumber, formatForColumn } from "../../utils/numberFormat";
+import { conditionalStyleFor, detailRangeForColumn } from "../../utils/conditionalFormat";
 
 // Groups consecutive rows sharing the same first-level label into collapsible sections. A group
 // is only collapsible when it ends in a Subtotal row (IsTotal, added by the backend's
@@ -50,6 +51,10 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
   const [searchText, setSearchText] = useState("");
 
   const groups = useMemo(() => (result ? computeGroups(result.rowHeaders) : []), [result]);
+  const conditionalRanges = useMemo(
+    () => (result ? result.columnHeaders.map((_, c) => detailRangeForColumn(result, c)) : []),
+    [result],
+  );
 
   if (!result) {
     return null;
@@ -182,16 +187,28 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
                       </span>
                     </td>
                   ))}
-                  {cells[rowIndex].map((cell, colIndex) => (
-                    <td
-                      key={colIndex}
-                      className={`whitespace-nowrap px-6 py-2.5 text-center tabular-nums ${
-                        row.isTotal || columnHeaders[colIndex].isTotal ? "font-bold text-ink" : "text-slate-700"
-                      }`}
-                    >
-                      {formatNumber(cell, formatForColumn(colIndex, valueFields))}
-                    </td>
-                  ))}
+                  {cells[rowIndex].map((cell, colIndex) => {
+                    const isTotalCell = row.isTotal || columnHeaders[colIndex].isTotal;
+                    const valueField = valueFields?.length ? valueFields[colIndex % valueFields.length] : null;
+                    // Same rule as the saved HTML snapshot: Total/Subtotal cells never get a
+                    // conditional-format background, since they're not "a value in the range" —
+                    // they're the sum of it (see ConditionalFormatting.cs for the full reasoning).
+                    const conditionalStyle = !isTotalCell && valueField
+                      ? conditionalStyleFor(cell, valueField.conditionalFormat, conditionalRanges[colIndex]?.min, conditionalRanges[colIndex]?.max)
+                      : null;
+
+                    return (
+                      <td
+                        key={colIndex}
+                        className={`whitespace-nowrap px-6 py-2.5 text-center tabular-nums ${
+                          isTotalCell ? "font-bold text-ink" : "text-slate-700"
+                        }`}
+                        style={conditionalStyle ?? undefined}
+                      >
+                        {formatNumber(cell, formatForColumn(colIndex, valueFields))}
+                      </td>
+                    );
+                  })}
                 </tr>
               );
             })}

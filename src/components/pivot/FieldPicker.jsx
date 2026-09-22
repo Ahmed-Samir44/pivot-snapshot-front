@@ -453,6 +453,18 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
                   />
                 )}
               </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium text-muted">Conditional format:</span>
+                <select
+                  className={nativeSelectClass}
+                  value={v.conditionalFormat?.type ?? "None"}
+                  onChange={(e) => updateValue(index, { conditionalFormat: { type: e.target.value } })}
+                >
+                  <option value="None">None</option>
+                  <option value="ColorScale">Color scale</option>
+                  <option value="DataBar">Data bar</option>
+                </select>
+              </div>
             </div>
           );
         })}
