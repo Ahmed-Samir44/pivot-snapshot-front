@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import AppShell from "../components/layout/AppShell";
 import FieldPicker from "../components/pivot/FieldPicker";
 import PivotGrid from "../components/pivot/PivotGrid";
+import PivotChart from "../components/pivot/PivotChart";
 import { queryPivot } from "../services/pivotApi";
 import { getDimensions, getMeasures } from "../services/cubeMetaApi";
 import { saveSnapshot } from "../services/snapshotApi";
@@ -58,6 +59,7 @@ export default function PivotBuilder() {
 
   const [snapshotName, setSnapshotName] = useState("");
   const [tableStyle, setTableStyle] = useState("Default");
+  const [includeChart, setIncludeChart] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
   const [saveError, setSaveError] = useState(null);
@@ -126,7 +128,7 @@ export default function PivotBuilder() {
     setSaveError(null);
     setSaveMessage(null);
     try {
-      const saved = await saveSnapshot(snapshotName.trim(), lastQuery, result, tableStyle);
+      const saved = await saveSnapshot(snapshotName.trim(), lastQuery, result, tableStyle, includeChart);
       setSaveMessage(`Saved as version ${saved.versionNumber}.`);
     } catch (err) {
       setSaveError(err.message);
@@ -187,6 +189,8 @@ export default function PivotBuilder() {
         />
       </div>
 
+      {includeChart && <PivotChart result={result} valueFields={lastQuery?.values} />}
+
       {result && (
         <div className="card mt-6 flex flex-wrap items-center gap-3">
           <input
@@ -207,6 +211,10 @@ export default function PivotBuilder() {
             <option value="Dark">Style: Dark</option>
             <option value="Minimal">Style: Minimal</option>
           </select>
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <input type="checkbox" checked={includeChart} onChange={(e) => setIncludeChart(e.target.checked)} />
+            Include chart
+          </label>
           <button
             type="button"
             onClick={handleSave}
