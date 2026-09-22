@@ -60,6 +60,7 @@ export default function PivotBuilder() {
   const [snapshotName, setSnapshotName] = useState("");
   const [tableStyle, setTableStyle] = useState("Default");
   const [includeChart, setIncludeChart] = useState(false);
+  const [chartType, setChartType] = useState("Bar");
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
   const [saveError, setSaveError] = useState(null);
@@ -128,7 +129,7 @@ export default function PivotBuilder() {
     setSaveError(null);
     setSaveMessage(null);
     try {
-      const saved = await saveSnapshot(snapshotName.trim(), lastQuery, result, tableStyle, includeChart);
+      const saved = await saveSnapshot(snapshotName.trim(), lastQuery, result, tableStyle, includeChart, chartType);
       setSaveMessage(`Saved as version ${saved.versionNumber}.`);
     } catch (err) {
       setSaveError(err.message);
@@ -189,7 +190,7 @@ export default function PivotBuilder() {
         />
       </div>
 
-      {includeChart && <PivotChart result={result} valueFields={lastQuery?.values} />}
+      {includeChart && <PivotChart result={result} valueFields={lastQuery?.values} chartType={chartType} />}
 
       {result && (
         <div className="card mt-6 flex flex-wrap items-center gap-3">
@@ -215,6 +216,18 @@ export default function PivotBuilder() {
             <input type="checkbox" checked={includeChart} onChange={(e) => setIncludeChart(e.target.checked)} />
             Include chart
           </label>
+          {includeChart && (
+            <select
+              className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
+              value={chartType}
+              onChange={(e) => setChartType(e.target.value)}
+              title="Chart type"
+            >
+              <option value="Bar">Chart: Bar</option>
+              <option value="Line">Chart: Line</option>
+              <option value="Pie">Chart: Pie</option>
+            </select>
+          )}
           <button
             type="button"
             onClick={handleSave}

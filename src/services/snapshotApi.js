@@ -9,11 +9,11 @@ async function request(path, options) {
   return data;
 }
 
-export function saveSnapshot(name, pivotRequest, pivotResult, tableStyle = "Default", includeChart = false) {
+export function saveSnapshot(name, pivotRequest, pivotResult, tableStyle = "Default", includeChart = false, chartType = "Bar") {
   return request("/api/snapshots", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, request: pivotRequest, result: pivotResult, tableStyle, includeChart }),
+    body: JSON.stringify({ name, request: pivotRequest, result: pivotResult, tableStyle, includeChart, chartType }),
   });
 }
 
