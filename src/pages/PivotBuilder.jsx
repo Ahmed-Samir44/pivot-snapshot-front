@@ -20,6 +20,8 @@ const EMPTY_REQUEST = {
   showGrandTotals: false,
   showSubtotals: false,
   calculatedFields: [],
+  dateGroupings: [],
+  numericGroupings: [],
 };
 
 // PivotResult only carries member VALUES (e.g. "Cardiology"), not the field's own name — this
@@ -97,6 +99,8 @@ export default function PivotBuilder() {
         showGrandTotals: request.showGrandTotals,
         showSubtotals: request.showSubtotals,
         calculatedFields: request.calculatedFields.filter((f) => f.name && f.leftField && f.rightField),
+        dateGroupings: request.dateGroupings.filter((g) => request.rows.includes(g.field)),
+        numericGroupings: request.numericGroupings.filter((g) => request.rows.includes(g.field) && g.binSize > 0),
         ...(maxMembersOverride ? { maxMembersOverride } : {}),
       };
       const data = await queryPivot(cleaned);

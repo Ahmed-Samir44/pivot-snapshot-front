@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import HierarchicalCubePathSelect from "../forms/HierarchicalCubePathSelect";
 import MultiSelectField from "../forms/MultiSelectField";
 import { getMembers } from "../../services/cubeMetaApi";
+import { formatDimensionName } from "../../utils/cubeMeta";
 
 const SHOW_VALUES_AS_OPTIONS = [
   { value: "Normal", label: "Normal" },
@@ -146,6 +147,75 @@ function FilterRow({ filter, dimensionOptions, selectedValueOptions, onChange, o
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Excel's "Group Field" (date) and "Group Selection" (numeric bins), one control per Row field —
+// backend enforces Rows-only and one grouping per field (see MdxPivotQueryBuilder.ValidateGroupings).
+// Mode is derived from whichever of dateGroupings/numericGroupings currently mentions the field,
+// rather than stored as its own separate piece of state, so the two arrays stay the single source
+// of truth the backend actually reads.
+function RowGroupingEditor({ rows, dateGroupings, numericGroupings, onChange }) {
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const modeFor = (field) => {
+    const dateGrouping = dateGroupings.find((g) => g.field === field);
+    if (dateGrouping) return dateGrouping.unit;
+    const numericGrouping = numericGroupings.find((g) => g.field === field);
+    if (numericGrouping) return "Numeric";
+    return "None";
+  };
+
+  const setMode = (field, mode) => {
+    const nextDate = dateGroupings.filter((g) => g.field !== field);
+    const nextNumeric = numericGroupings.filter((g) => g.field !== field);
+    if (mode === "Month" || mode === "Quarter" || mode === "Year") {
+      nextDate.push({ field, unit: mode });
+    } else if (mode === "Numeric") {
+      nextNumeric.push({ field, binSize: 10 });
+    }
+    onChange(nextDate, nextNumeric);
+  };
+
+  const setBinSize = (field, binSize) => {
+    onChange(
+      dateGroupings,
+      numericGroupings.map((g) => (g.field === field ? { ...g, binSize } : g)),
+    );
+  };
+
+  return (
+    <div className="mt-4 space-y-2">
+      <p className="text-xs font-medium text-muted">Group by (date/numeric fields only):</p>
+      {rows.map((field) => {
+        const mode = modeFor(field);
+        return (
+          <div key={field} className="flex flex-wrap items-center gap-2">
+            <span className="min-w-[10rem] text-sm text-ink">{formatDimensionName(field)}</span>
+            <select className={nativeSelectClass} value={mode} onChange={(e) => setMode(field, e.target.value)}>
+              <option value="None">No grouping</option>
+              <option value="Month">Group by Month</option>
+              <option value="Quarter">Group by Quarter</option>
+              <option value="Year">Group by Year</option>
+              <option value="Numeric">Numeric bins</option>
+            </select>
+            {mode === "Numeric" && (
+              <input
+                type="number"
+                min={0.01}
+                step="any"
+                className="input-field w-24 py-2"
+                value={numericGroupings.find((g) => g.field === field)?.binSize ?? 10}
+                onChange={(e) => setBinSize(field, Number(e.target.value))}
+                title="Bin size"
+              />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -380,6 +450,10 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
       ...value,
       rows: fromKey === "rows" ? nextFrom : nextTo,
       columns: fromKey === "columns" ? nextFrom : nextTo,
+      // A field leaving Rows (dragged to Columns) takes its grouping with it — the backend
+      // rejects a grouping on a field no longer in Rows.
+      dateGroupings: fromKey === "rows" ? value.dateGroupings.filter((g) => g.field !== field) : value.dateGroupings,
+      numericGroupings: fromKey === "rows" ? value.numericGroupings.filter((g) => g.field !== field) : value.numericGroupings,
     });
   };
 
@@ -390,9 +464,21 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
           label="Row fields"
           options={dimensions.map((d) => d.field)}
           value={value.rows}
-          onChange={(rows) => onChange({ ...value, rows })}
+          onChange={(rows) => {
+            // Dropping a row field also drops any grouping that referenced it — the backend
+            // rejects a grouping on a field that's no longer in Rows (ValidateGroupings).
+            const dateGroupings = value.dateGroupings.filter((g) => rows.includes(g.field));
+            const numericGroupings = value.numericGroupings.filter((g) => rows.includes(g.field));
+            onChange({ ...value, rows, dateGroupings, numericGroupings });
+          }}
           dragSourceKey="rows"
           onFieldDropped={moveFieldBetweenAxes}
+        />
+        <RowGroupingEditor
+          rows={value.rows}
+          dateGroupings={value.dateGroupings}
+          numericGroupings={value.numericGroupings}
+          onChange={(dateGroupings, numericGroupings) => onChange({ ...value, dateGroupings, numericGroupings })}
         />
       </SectionCard>
 
