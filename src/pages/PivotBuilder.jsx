@@ -63,6 +63,7 @@ export default function PivotBuilder() {
   const [tableStyle, setTableStyle] = useState("Default");
   const [includeChart, setIncludeChart] = useState(false);
   const [chartType, setChartType] = useState("Bar");
+  const [reportLayout, setReportLayout] = useState("Tabular");
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
   const [saveError, setSaveError] = useState(null);
@@ -133,7 +134,7 @@ export default function PivotBuilder() {
     setSaveError(null);
     setSaveMessage(null);
     try {
-      const saved = await saveSnapshot(snapshotName.trim(), lastQuery, result, tableStyle, includeChart, chartType);
+      const saved = await saveSnapshot(snapshotName.trim(), lastQuery, result, tableStyle, includeChart, chartType, reportLayout);
       setSaveMessage(`Saved as version ${saved.versionNumber}.`);
     } catch (err) {
       setSaveError(err.message);
@@ -191,6 +192,7 @@ export default function PivotBuilder() {
           rowFieldLabels={fieldLabels(lastQuery?.rows, dimensions)}
           columnFieldLabels={fieldLabels(lastQuery?.columns, dimensions)}
           valueFields={lastQuery?.values}
+          layout={reportLayout}
         />
       </div>
 
@@ -215,6 +217,15 @@ export default function PivotBuilder() {
             <option value="Banded">Style: Banded rows</option>
             <option value="Dark">Style: Dark</option>
             <option value="Minimal">Style: Minimal</option>
+          </select>
+          <select
+            className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
+            value={reportLayout}
+            onChange={(e) => setReportLayout(e.target.value)}
+            title="Report layout for the Rows area"
+          >
+            <option value="Tabular">Layout: Tabular</option>
+            <option value="Compact">Layout: Compact</option>
           </select>
           <label className="flex items-center gap-2 text-sm text-ink">
             <input type="checkbox" checked={includeChart} onChange={(e) => setIncludeChart(e.target.checked)} />

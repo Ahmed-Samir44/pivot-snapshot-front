@@ -41,6 +41,34 @@ function computeGroups(rowHeaders) {
   return groups;
 }
 
+// Mirrors the backend's HtmlSnapshotRenderer.ComputeVisibleLevels exactly, computed once over the
+// FULL (unfiltered) row list so the live grid's suppression pattern matches what the saved
+// snapshot will show — the live search box can still hide rows, but doesn't change which levels
+// were "already shown by a previous row" in the underlying data.
+function computeVisibleLevels(labels, previousLabels) {
+  const visible = new Array(labels.length).fill(false);
+  let changed = previousLabels === null;
+  for (let level = 0; level < labels.length; level++) {
+    if (!changed && level < previousLabels.length && labels[level] === previousLabels[level]) {
+      visible[level] = false;
+    } else {
+      changed = true;
+      visible[level] = true;
+    }
+  }
+  return visible;
+}
+
+function computeCompactVisibility(rowHeaders) {
+  const result = [];
+  let previousLabels = null;
+  rowHeaders.forEach((row) => {
+    result.push(computeVisibleLevels(row.labels, row.isTotal ? null : previousLabels));
+    previousLabels = row.isTotal ? null : row.labels;
+  });
+  return result;
+}
+
 // A pill-shaped header badge (dimension/measure name + a decorative caret), echoing the rounded
 // filter-pill style used elsewhere in the product's screens, instead of a traditional shaded
 // spreadsheet header cell.
@@ -57,7 +85,7 @@ function HeaderPill({ children, muted = false }) {
   );
 }
 
-export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabels = [], valueFields = [] }) {
+export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabels = [], valueFields = [], layout = "Tabular" }) {
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [searchText, setSearchText] = useState("");
 
@@ -66,6 +94,10 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
     () => (result ? result.columnHeaders.map((_, c) => detailRangeForColumn(result, c)) : []),
     [result],
   );
+  const compactVisibility = useMemo(
+    () => (result && layout === "Compact" ? computeCompactVisibility(result.rowHeaders) : null),
+    [result, layout],
+  );
 
   if (!result) {
     return null;
@@ -73,6 +105,7 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
 
   const { rowHeaders, columnHeaders, cells } = result;
   const rowDepth = rowHeaders[0]?.labels.length ?? 0;
+  const rowHeaderColumnCount = layout === "Compact" ? 1 : rowDepth;
   const columnDepth = columnHeaders[0]?.labels.length ?? 0;
 
   const toggleGroup = (key) => {
@@ -137,7 +170,7 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
           <thead>
             {columnFieldLabels.length > 0 && (
               <tr>
-                <th colSpan={1 + rowDepth} />
+                <th colSpan={1 + rowHeaderColumnCount} />
                 <th colSpan={columnHeaders.length} className="px-2 py-2 text-center">
                   <HeaderPill muted>{columnFieldLabels.join(" › ")}</HeaderPill>
                 </th>
@@ -150,11 +183,17 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
                     <th rowSpan={columnDepth} className="px-2 py-2 text-center text-xs font-medium text-muted">
                       #
                     </th>
-                    {Array.from({ length: rowDepth }).map((_, rowLevel) => (
-                      <th key={rowLevel} rowSpan={columnDepth} className="px-2 py-2 text-center">
-                        <HeaderPill muted>{rowFieldLabels[rowLevel] ?? ""}</HeaderPill>
+                    {layout === "Compact" ? (
+                      <th rowSpan={columnDepth} className="px-2 py-2 text-center">
+                        <HeaderPill muted>{rowFieldLabels.join(" › ")}</HeaderPill>
                       </th>
-                    ))}
+                    ) : (
+                      Array.from({ length: rowDepth }).map((_, rowLevel) => (
+                        <th key={rowLevel} rowSpan={columnDepth} className="px-2 py-2 text-center">
+                          <HeaderPill muted>{rowFieldLabels[rowLevel] ?? ""}</HeaderPill>
+                        </th>
+                      ))
+                    )}
                   </>
                 )}
                 {columnHeaders.map((col, colIndex) => (
@@ -175,29 +214,50 @@ export default function PivotGrid({ result, rowFieldLabels = [], columnFieldLabe
               const isGroupSubtotalRow = group?.hasSubtotal && rowIndex === group.end - 1;
               const rowTint = row.isTotal ? "bg-gold/10" : visibleRowNumbers.get(rowIndex) % 2 === 0 ? "bg-slate-50/60" : "";
 
+              const collapseToggle = isGroupSubtotalRow && (
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.key)}
+                  className="text-muted hover:text-ink"
+                  aria-label={collapsed.has(group.key) ? "Expand group" : "Collapse group"}
+                >
+                  {collapsed.has(group.key) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                </button>
+              );
+
               return (
                 <tr key={rowIndex} className={`border-b border-slate-100 ${rowTint}`}>
                   <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs text-muted">{visibleRowNumbers.get(rowIndex)}</td>
-                  {row.labels.map((label, level) => (
+                  {layout === "Compact" ? (
                     <td
-                      key={level}
-                      className={`whitespace-nowrap px-6 py-2.5 text-center ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}
+                      className={`whitespace-nowrap px-6 py-2.5 text-left ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}
                     >
-                      <span className="inline-flex items-center justify-center gap-1.5">
-                        {level === 0 && isGroupSubtotalRow && (
-                          <button
-                            type="button"
-                            onClick={() => toggleGroup(group.key)}
-                            className="text-muted hover:text-ink"
-                            aria-label={collapsed.has(group.key) ? "Expand group" : "Collapse group"}
-                          >
-                            {collapsed.has(group.key) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                          </button>
-                        )}
-                        {label}
+                      <span className="inline-flex items-center gap-1.5">
+                        {collapseToggle}
+                        <span>
+                          {row.labels.map((label, level) =>
+                            compactVisibility[rowIndex][level] ? (
+                              <div key={level} style={{ paddingLeft: level * 16 }}>
+                                {label}
+                              </div>
+                            ) : null,
+                          )}
+                        </span>
                       </span>
                     </td>
-                  ))}
+                  ) : (
+                    row.labels.map((label, level) => (
+                      <td
+                        key={level}
+                        className={`whitespace-nowrap px-6 py-2.5 text-center ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}
+                      >
+                        <span className="inline-flex items-center justify-center gap-1.5">
+                          {level === 0 && collapseToggle}
+                          {label}
+                        </span>
+                      </td>
+                    ))
+                  )}
                   {cells[rowIndex].map((cell, colIndex) => {
                     const isTotalCell = row.isTotal || columnHeaders[colIndex].isTotal;
                     const valueField = valueFields?.length ? valueFields[colIndex % valueFields.length] : null;
