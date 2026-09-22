@@ -29,6 +29,23 @@ function fieldLabels(fieldIds, dimensions) {
   return fieldIds.map((id) => dimensions.find((d) => d.field === id)?.displayName ?? id);
 }
 
+// A filter is only ready to send once whichever fields ITS mode actually needs are filled in —
+// each mode uses a different subset of PivotFilter's optional fields (see the backend's
+// MdxPivotQueryBuilder.ValidateFilters for the authoritative per-mode rules this mirrors).
+function isFilterComplete(filter) {
+  switch (filter.mode ?? "Members") {
+    case "LabelContains":
+    case "LabelBeginsWith":
+    case "LabelEndsWith":
+      return Boolean(filter.labelText);
+    case "TopN":
+    case "BottomN":
+      return Boolean(filter.n > 0 && filter.byMeasureField);
+    default:
+      return filter.includedMembers.length > 0;
+  }
+}
+
 export default function PivotBuilder() {
   const [request, setRequest] = useState(EMPTY_REQUEST);
   const [lastQuery, setLastQuery] = useState(null); // the exact cleaned request that produced `result`
@@ -62,7 +79,7 @@ export default function PivotBuilder() {
         rows: request.rows.filter(Boolean),
         columns: request.columns.filter(Boolean),
         values: request.values.filter((v) => v.field),
-        filters: request.filters.filter((f) => f.field && f.includedMembers.length > 0),
+        filters: request.filters.filter((f) => f.field && isFilterComplete(f)),
         sort: request.sort,
         showGrandTotals: request.showGrandTotals,
         showSubtotals: request.showSubtotals,

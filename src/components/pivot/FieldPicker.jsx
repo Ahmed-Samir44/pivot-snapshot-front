@@ -26,14 +26,25 @@ function SectionCard({ title, children }) {
   );
 }
 
-// One filter's member list is only fetched once its field is chosen — the /api/cube/members
-// endpoint is keyed by field, so there's nothing to fetch until then.
-function FilterRow({ filter, dimensionOptions, onChange, onRemove }) {
+const FILTER_MODE_OPTIONS = [
+  { value: "Members", label: "Members (pick exact values)" },
+  { value: "LabelContains", label: "Label contains…" },
+  { value: "LabelBeginsWith", label: "Label begins with…" },
+  { value: "LabelEndsWith", label: "Label ends with…" },
+  { value: "TopN", label: "Top N by value" },
+  { value: "BottomN", label: "Bottom N by value" },
+];
+
+// One filter's member list is only fetched once its field is chosen (and only needed for
+// Mode "Members" — the rule-based modes below never show a member list, they describe a
+// condition the real cube evaluates itself).
+function FilterRow({ filter, dimensionOptions, selectedValueOptions, onChange, onRemove }) {
   const [memberOptions, setMemberOptions] = useState([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
+  const mode = filter.mode ?? "Members";
 
   useEffect(() => {
-    if (!filter.field) {
+    if (!filter.field || mode !== "Members") {
       setMemberOptions([]);
       return;
     }
@@ -49,9 +60,13 @@ function FilterRow({ filter, dimensionOptions, onChange, onRemove }) {
     return () => {
       cancelled = true;
     };
-  }, [filter.field]);
+  }, [filter.field, mode]);
 
   const selectedField = dimensionOptions.find((opt) => opt.value === filter.field) ?? null;
+
+  const handleModeChange = (nextMode) => {
+    onChange({ field: filter.field, mode: nextMode, includedMembers: [], labelText: "", n: 10, byMeasureField: null });
+  };
 
   return (
     <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
@@ -63,7 +78,7 @@ function FilterRow({ filter, dimensionOptions, onChange, onRemove }) {
             placeholder="Choose a field to filter…"
             options={dimensionOptions}
             value={selectedField}
-            onChange={(opt) => onChange({ field: opt?.value ?? "", includedMembers: [] })}
+            onChange={(opt) => onChange({ field: opt?.value ?? "", mode: "Members", includedMembers: [] })}
             isClearable
             menuPortalTarget={typeof document !== "undefined" ? document.body : null}
             menuPosition="fixed"
@@ -75,13 +90,59 @@ function FilterRow({ filter, dimensionOptions, onChange, onRemove }) {
         </button>
       </div>
       {filter.field && (
-        <MultiSelectField
-          options={memberOptions}
-          value={filter.includedMembers}
-          onChange={(includedMembers) => onChange({ ...filter, includedMembers })}
-          placeholder={loadingMembers ? "Loading members…" : "Select member(s) to include…"}
-          isLoading={loadingMembers}
-        />
+        <div className="flex flex-col gap-3">
+          <select className={nativeSelectClass} value={mode} onChange={(e) => handleModeChange(e.target.value)}>
+            {FILTER_MODE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+
+          {mode === "Members" && (
+            <MultiSelectField
+              options={memberOptions}
+              value={filter.includedMembers}
+              onChange={(includedMembers) => onChange({ ...filter, includedMembers })}
+              placeholder={loadingMembers ? "Loading members…" : "Select member(s) to include…"}
+              isLoading={loadingMembers}
+            />
+          )}
+
+          {(mode === "LabelContains" || mode === "LabelBeginsWith" || mode === "LabelEndsWith") && (
+            <input
+              type="text"
+              className="input-field"
+              placeholder="Text to match…"
+              value={filter.labelText ?? ""}
+              onChange={(e) => onChange({ ...filter, labelText: e.target.value })}
+            />
+          )}
+
+          {(mode === "TopN" || mode === "BottomN") && (
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                type="number"
+                min={1}
+                className="input-field w-24"
+                value={filter.n ?? 10}
+                onChange={(e) => onChange({ ...filter, n: Number(e.target.value) })}
+              />
+              <select
+                className={nativeSelectClass}
+                value={filter.byMeasureField ?? ""}
+                onChange={(e) => onChange({ ...filter, byMeasureField: e.target.value || null })}
+              >
+                <option value="">Choose a measure…</option>
+                {selectedValueOptions.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -414,6 +475,10 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
             key={index}
             filter={filter}
             dimensionOptions={dimensionOptions}
+            // TopN/BottomN's ByMeasureField must match a field already in Values (see
+            // MdxPivotQueryBuilder.ValidateFilters) — not just any cube measure, so this is
+            // value.values, not the full measureOptions list used elsewhere in this component.
+            selectedValueOptions={value.values.filter((v) => v.field).map((v) => ({ value: v.field, label: v.field }))}
             onChange={(patch) => updateFilter(index, patch)}
             onRemove={() => removeFilter(index)}
           />
