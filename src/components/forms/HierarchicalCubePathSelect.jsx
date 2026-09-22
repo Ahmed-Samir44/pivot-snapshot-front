@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import Select from "react-select";
 import { Plus, X } from "lucide-react";
 import { parseCubeBracketSegments, formatCubeBracketLabel, formatDimensionName } from "../../utils/cubeMeta";
+import { setFieldDragPayload, readFieldDragPayload } from "../../utils/dragDrop";
 
 const selectStyles = {
   menuPortal: (base) => ({ ...base, zIndex: 10000 }),
@@ -41,13 +42,12 @@ const singleSelectProps = {
   isClearable: true,
 };
 
-// Native HTML5 drag-and-drop (not a library) — dataTransfer carries a plain string across the
-// browser's DOM event system, which works between two SEPARATE instances of this component
-// (Rows and Columns each render their own) without any shared React state between them. The
-// actual cross-list move (remove from one array, add to the other) still has to happen one level
-// up, in FieldPicker, since only it holds both arrays — see onFieldDropped.
-const DRAG_MIME_TYPE = "application/x-pivot-field";
-
+// Native HTML5 drag-and-drop (not a library, see utils/dragDrop.js) — works between this
+// component's own two instances (Rows and Columns) AND the Values/Filters zones and the
+// Available Fields panel elsewhere in FieldPicker, none of which share React state with this
+// component. The actual move (remove from one zone's array, add to another's, converting shape
+// where needed) happens one level up in FieldPicker, since only it holds every zone — see
+// onFieldDropped.
 export default function HierarchicalCubePathSelect({
   options,
   value = [],
@@ -122,8 +122,7 @@ export default function HierarchicalCubePathSelect({
 
   const handleDragStart = (e, fullPath) => {
     if (!dragSourceKey) return;
-    e.dataTransfer.setData(DRAG_MIME_TYPE, JSON.stringify({ field: fullPath, source: dragSourceKey }));
-    e.dataTransfer.effectAllowed = "move";
+    setFieldDragPayload(e, fullPath, dragSourceKey);
   };
 
   const handleDragOver = (e) => {
@@ -135,11 +134,9 @@ export default function HierarchicalCubePathSelect({
     if (!dragSourceKey || !onFieldDropped) return;
     e.preventDefault();
     setDragOver(false);
-    const raw = e.dataTransfer.getData(DRAG_MIME_TYPE);
-    if (!raw) return;
-    const { field, source } = JSON.parse(raw);
-    if (source !== dragSourceKey) {
-      onFieldDropped(field, source, dragSourceKey);
+    const payload = readFieldDragPayload(e);
+    if (payload && payload.source !== dragSourceKey) {
+      onFieldDropped(payload.field, payload.source, dragSourceKey);
     }
   };
 
@@ -198,7 +195,7 @@ export default function HierarchicalCubePathSelect({
         <div className="mt-4">
           <p className="mb-2 text-xs font-medium text-muted">
             {selectedHeading} ({value.length})
-            {dragSourceKey && onFieldDropped && " — drag a field here to move it from the other axis"}
+            {dragSourceKey && onFieldDropped && " — drag a field here from another zone"}
           </p>
           <ul
             className={`flex flex-wrap gap-2 rounded-lg ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${

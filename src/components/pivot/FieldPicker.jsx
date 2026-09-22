@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import Select from "react-select";
-import { X } from "lucide-react";
+import { X, GripVertical } from "lucide-react";
 import HierarchicalCubePathSelect from "../forms/HierarchicalCubePathSelect";
 import MultiSelectField from "../forms/MultiSelectField";
 import { getMembers } from "../../services/cubeMetaApi";
 import { formatDimensionName } from "../../utils/cubeMeta";
+import { setFieldDragPayload, readFieldDragPayload } from "../../utils/dragDrop";
 
 const SHOW_VALUES_AS_OPTIONS = [
   { value: "Normal", label: "Normal" },
@@ -20,11 +21,80 @@ const DEFAULT_FORMAT = { type: "General", decimalPlaces: 2, currencySymbol: "EGP
 const nativeSelectClass =
   "rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent";
 
-function SectionCard({ title, children }) {
+function SectionCard({ title, badge, children }) {
   return (
     <div className="card">
-      <h3 className="mb-4 text-sm font-bold uppercase tracking-wide text-muted">{title}</h3>
+      <h3 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-muted">
+        {title}
+        {badge > 0 && <span className="rounded-full bg-gold/20 px-2 py-0.5 text-xs font-bold text-gold">{badge}</span>}
+      </h3>
       {children}
+    </div>
+  );
+}
+
+// Excel's Field List: every cube field in one place, dragged from here into whichever of the four
+// zones below it belongs in. Unlike the zones, a field never "leaves" this list when placed
+// somewhere — Excel's own field list keeps every field checkbox visible too — it just gets a
+// small dot marking it as already used somewhere, since (unlike Excel) this tool allows the same
+// field to sit in Filters AND Rows/Columns/Values at once (a Row/Column field can independently
+// carry its own member filter — see moveField's WHY comment in FieldPicker).
+function AvailableFieldsPanel({ dimensions, measures, calculatedFieldNames, isPlaced }) {
+  const allFields = [
+    ...dimensions.map((d) => ({ field: d.field, label: d.displayName })),
+    ...measures.map((m) => ({ field: m.field, label: m.displayName })),
+    ...calculatedFieldNames.map((name) => ({ field: name, label: `${name} (calculated)` })),
+  ];
+
+  return (
+    <SectionCard title="Available fields">
+      <p className="mb-3 text-xs text-muted">Drag a field into Filters, Rows, Columns, or Values below.</p>
+      <ul className="flex max-h-64 flex-wrap gap-2 overflow-y-auto">
+        {allFields.map(({ field, label }) => (
+          <li
+            key={field}
+            draggable
+            onDragStart={(e) => setFieldDragPayload(e, field, "available")}
+            className="inline-flex cursor-grab items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-ink shadow-sm active:cursor-grabbing"
+          >
+            {isPlaced(field) && <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-hidden="true" />}
+            {label}
+          </li>
+        ))}
+      </ul>
+    </SectionCard>
+  );
+}
+
+// A generic drop target for the Values and Filters zones (Rows/Columns use
+// HierarchicalCubePathSelect's own built-in drop handling instead — see that component). Visually
+// matches the dashed-border "drop here" affordance in HierarchicalCubePathSelect for consistency
+// across all four zones.
+function ZoneDropArea({ zoneKey, onFieldDropped, isEmpty, children }) {
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const payload = readFieldDragPayload(e);
+    if (payload && payload.source !== zoneKey) {
+      onFieldDropped(payload.field, payload.source, zoneKey);
+    }
+  };
+
+  return (
+    <div
+      className={`rounded-lg ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
+        isEmpty ? "min-h-[3rem] border-2 border-dashed border-slate-200 p-3" : ""
+      }`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}
+    >
+      {isEmpty ? <p className="text-xs text-muted">Drag a field here</p> : children}
     </div>
   );
 }
@@ -74,6 +144,16 @@ function FilterRow({ filter, dimensionOptions, selectedValueOptions, onChange, o
   return (
     <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
       <div className="mb-3 flex items-start gap-3">
+        {filter.field && (
+          <span
+            draggable
+            onDragStart={(e) => setFieldDragPayload(e, filter.field, "filters")}
+            className="mt-2 cursor-grab text-muted hover:text-ink active:cursor-grabbing"
+            title="Drag to move this field to another zone"
+          >
+            <GripVertical className="h-5 w-5" />
+          </span>
+        )}
         <div className="flex-1">
           <Select
             className="react-select-container"
@@ -435,31 +515,97 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
     onChange({ ...value, filters: [...value.filters, { field: "", includedMembers: [] }] });
   };
 
-  // Excel's classic "drag a field from Rows to Columns" — see HierarchicalCubePathSelect for the
-  // native-HTML5-DnD half of this; this is the other half, since only FieldPicker holds both
-  // arrays at once. fromKey/toKey are always "rows"/"columns" (the only two dragSourceKeys used
-  // below), so a straight swap between the two arrays is all this needs to handle.
-  const moveFieldBetweenAxes = (field, fromKey, toKey) => {
-    const fromArr = fromKey === "rows" ? value.rows : value.columns;
-    const toArr = toKey === "rows" ? value.rows : value.columns;
-    if (!fromArr.includes(field) || toArr.includes(field)) return;
+  // Excel's classic "drag a field between zones" — see HierarchicalCubePathSelect/ZoneDropArea
+  // for the native-HTML5-DnD half of this; this is the other half, since only FieldPicker holds
+  // every zone's array at once.
+  //
+  // Rows/Columns/Values are MUTUALLY EXCLUSIVE (a field moving into one leaves the other two,
+  // same as Excel — a field can't be a row, a column, and a value all at once). Filters is
+  // ADDITIVE instead: dropping a field onto Filters adds a member-filter for it WITHOUT removing
+  // it from wherever else it already is, and dragging a Filters pill onto Rows/Columns/Values
+  // just adds it there too, leaving the filter in place — this mirrors a real feature this tool
+  // already had before drag-and-drop existed (a Row/Column field carrying its own member filter,
+  // same as Excel's per-column filter icon, distinct from the classic Report Filter area), so
+  // drag-and-drop had to preserve it rather than force strict one-zone-only placement.
+  const moveField = (field, fromZone, toZone) => {
+    if (fromZone === toZone) {
+      return;
+    }
 
-    const nextFrom = fromArr.filter((f) => f !== field);
-    const nextTo = [...toArr, field];
-    onChange({
-      ...value,
-      rows: fromKey === "rows" ? nextFrom : nextTo,
-      columns: fromKey === "columns" ? nextFrom : nextTo,
-      // A field leaving Rows (dragged to Columns) takes its grouping with it — the backend
-      // rejects a grouping on a field no longer in Rows.
-      dateGroupings: fromKey === "rows" ? value.dateGroupings.filter((g) => g.field !== field) : value.dateGroupings,
-      numericGroupings: fromKey === "rows" ? value.numericGroupings.filter((g) => g.field !== field) : value.numericGroupings,
-    });
+    const next = { ...value };
+
+    if (toZone === "rows" || toZone === "columns" || toZone === "values") {
+      next.rows = value.rows.filter((f) => f !== field);
+      next.columns = value.columns.filter((f) => f !== field);
+      next.values = value.values.filter((v) => v.field !== field);
+      // A field leaving Rows takes its grouping with it — the backend rejects a grouping on a
+      // field that's no longer in Rows (ValidateGroupings).
+      next.dateGroupings = value.dateGroupings.filter((g) => g.field !== field);
+      next.numericGroupings = value.numericGroupings.filter((g) => g.field !== field);
+    }
+
+    if (toZone === "rows" && !next.rows.includes(field)) {
+      next.rows = [...next.rows, field];
+    } else if (toZone === "columns" && !next.columns.includes(field)) {
+      next.columns = [...next.columns, field];
+    } else if (toZone === "values" && !next.values.some((v) => v.field === field)) {
+      next.values = [...next.values, { field, showValuesAs: "Normal" }];
+    } else if (toZone === "filters" && !next.filters.some((f) => f.field === field)) {
+      next.filters = [...next.filters, { field, mode: "Members", includedMembers: [] }];
+    }
+
+    onChange(next);
   };
+
+  const isFieldPlaced = (field) =>
+    value.rows.includes(field) || value.columns.includes(field) || value.values.some((v) => v.field === field) || value.filters.some((f) => f.field === field);
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <SectionCard title="Rows">
+      <div className="lg:col-span-2">
+        <AvailableFieldsPanel
+          dimensions={dimensions}
+          measures={measures}
+          calculatedFieldNames={value.calculatedFields.filter((f) => f.name).map((f) => f.name)}
+          isPlaced={isFieldPlaced}
+        />
+      </div>
+
+      {/* Layout order matches Excel's own Field List pane: Filters + Columns on top,
+          Rows + Values below. */}
+      <SectionCard title="Filters" badge={value.filters.length}>
+        <ZoneDropArea zoneKey="filters" onFieldDropped={moveField} isEmpty={value.filters.length === 0}>
+          {value.filters.map((filter, index) => (
+            <FilterRow
+              key={index}
+              filter={filter}
+              dimensionOptions={dimensionOptions}
+              // TopN/BottomN's ByMeasureField must match a field already in Values (see
+              // MdxPivotQueryBuilder.ValidateFilters) — not just any cube measure, so this is
+              // value.values, not the full measureOptions list used elsewhere in this component.
+              selectedValueOptions={value.values.filter((v) => v.field).map((v) => ({ value: v.field, label: v.field }))}
+              onChange={(patch) => updateFilter(index, patch)}
+              onRemove={() => removeFilter(index)}
+            />
+          ))}
+        </ZoneDropArea>
+        <button type="button" onClick={addFilter} className="btn-secondary">
+          + Add filter
+        </button>
+      </SectionCard>
+
+      <SectionCard title="Columns" badge={value.columns.length}>
+        <HierarchicalCubePathSelect
+          label="Column fields"
+          options={dimensions.map((d) => d.field)}
+          value={value.columns}
+          onChange={(columns) => onChange({ ...value, columns })}
+          dragSourceKey="columns"
+          onFieldDropped={moveField}
+        />
+      </SectionCard>
+
+      <SectionCard title="Rows" badge={value.rows.length}>
         <HierarchicalCubePathSelect
           label="Row fields"
           options={dimensions.map((d) => d.field)}
@@ -472,7 +618,7 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
             onChange({ ...value, rows, dateGroupings, numericGroupings });
           }}
           dragSourceKey="rows"
-          onFieldDropped={moveFieldBetweenAxes}
+          onFieldDropped={moveField}
         />
         <RowGroupingEditor
           rows={value.rows}
@@ -482,26 +628,26 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
         />
       </SectionCard>
 
-      <SectionCard title="Columns">
-        <HierarchicalCubePathSelect
-          label="Column fields"
-          options={dimensions.map((d) => d.field)}
-          value={value.columns}
-          onChange={(columns) => onChange({ ...value, columns })}
-          dragSourceKey="columns"
-          onFieldDropped={moveFieldBetweenAxes}
-        />
-      </SectionCard>
-
       {/* Only a measure picker, no separate aggregation dropdown: confirmed against the real
           cube (2026-09-21) that measures are pre-built with their aggregation baked in — see
           PivotValueField in the backend for the full story. */}
-      <SectionCard title="Values">
+      <SectionCard title="Values" badge={value.values.length}>
+        <ZoneDropArea zoneKey="values" onFieldDropped={moveField} isEmpty={value.values.length === 0}>
         {value.values.map((v, index) => {
           const format = v.format ?? DEFAULT_FORMAT;
           return (
             <div key={index} className="mb-3 rounded-xl border border-slate-100 p-3">
               <div className="flex flex-wrap items-center gap-2">
+                {v.field && (
+                  <span
+                    draggable
+                    onDragStart={(e) => setFieldDragPayload(e, v.field, "values")}
+                    className="cursor-grab text-muted hover:text-ink active:cursor-grabbing"
+                    title="Drag to move this field to another zone"
+                  >
+                    <GripVertical className="h-5 w-5" />
+                  </span>
+                )}
                 <div className="min-w-[10rem] flex-1">
                   <Select
                     className="react-select-container"
@@ -579,6 +725,7 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
             </div>
           );
         })}
+        </ZoneDropArea>
         <button type="button" onClick={addValue} className="btn-secondary mt-1">
           + Add value
         </button>
@@ -590,25 +737,6 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
           measureOptions={measureOptions}
           onChange={(calculatedFields) => onChange({ ...value, calculatedFields })}
         />
-      </SectionCard>
-
-      <SectionCard title="Filters">
-        {value.filters.map((filter, index) => (
-          <FilterRow
-            key={index}
-            filter={filter}
-            dimensionOptions={dimensionOptions}
-            // TopN/BottomN's ByMeasureField must match a field already in Values (see
-            // MdxPivotQueryBuilder.ValidateFilters) — not just any cube measure, so this is
-            // value.values, not the full measureOptions list used elsewhere in this component.
-            selectedValueOptions={value.values.filter((v) => v.field).map((v) => ({ value: v.field, label: v.field }))}
-            onChange={(patch) => updateFilter(index, patch)}
-            onRemove={() => removeFilter(index)}
-          />
-        ))}
-        <button type="button" onClick={addFilter} className="btn-secondary">
-          + Add filter
-        </button>
       </SectionCard>
 
       <SectionCard title="Sort">
