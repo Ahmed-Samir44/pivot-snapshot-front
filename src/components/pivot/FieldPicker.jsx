@@ -597,6 +597,30 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
     onChange(next);
   };
 
+  // Values order matters (it decides column grouping order, same as Rows/Columns — see the
+  // "measures are the fastest-varying factor" invariant in MdxPivotQueryBuilder), so — unlike
+  // Filters, which is an unordered set of conditions — a Values pill needs the same
+  // drag-to-reorder-within-the-zone support HierarchicalCubePathSelect already gives Rows/Columns.
+  // stopPropagation keeps ZoneDropArea's own onDrop (cross-zone move, appended at the end) from
+  // also firing for the same event.
+  const handleValueRowDrop = (e, targetIndex) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const payload = readFieldDragPayload(e);
+    if (!payload) return;
+    if (payload.source !== "values") {
+      moveField(payload.field, payload.source, "values");
+      return;
+    }
+    const draggedIndex = value.values.findIndex((v) => v.field === payload.field);
+    if (draggedIndex === -1 || draggedIndex === targetIndex) return;
+    const next = [...value.values];
+    const [item] = next.splice(draggedIndex, 1);
+    const insertAt = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
+    next.splice(insertAt, 0, item);
+    onChange({ ...value, values: next });
+  };
+
   const isFieldPlaced = (field) =>
     value.rows.includes(field) || value.columns.includes(field) || value.values.some((v) => v.field === field) || value.filters.some((f) => f.field === field);
 
@@ -676,14 +700,19 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
         {value.values.map((v, index) => {
           const format = v.format ?? DEFAULT_FORMAT;
           return (
-            <div key={index} className="mb-3 rounded-xl border border-slate-100 p-3">
+            <div
+              key={index}
+              className="mb-3 rounded-xl border border-slate-100 p-3"
+              onDragOver={v.field ? (e) => e.preventDefault() : undefined}
+              onDrop={v.field ? (e) => handleValueRowDrop(e, index) : undefined}
+            >
               <div className="flex flex-wrap items-center gap-2">
                 {v.field && (
                   <span
                     draggable
                     onDragStart={(e) => setFieldDragPayload(e, v.field, "values")}
                     className="cursor-grab text-muted hover:text-ink active:cursor-grabbing"
-                    title="Drag to move this field to another zone"
+                    title="Drag to move this field to another zone, or drop onto another value row to reorder"
                   >
                     <GripVertical className="h-5 w-5" />
                   </span>

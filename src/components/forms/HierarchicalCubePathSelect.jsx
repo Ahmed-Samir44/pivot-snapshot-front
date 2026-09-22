@@ -140,6 +140,29 @@ export default function HierarchicalCubePathSelect({
     }
   };
 
+  // Dropping directly ON a pill (rather than empty space in the list) reorders WITHIN this same
+  // zone when the dragged field came from here too — stopPropagation keeps the container's own
+  // onDrop (cross-zone move) from also firing for the same event. A drop from another zone landing
+  // on a pill still falls through to the ordinary cross-zone move (appended at the end), same as
+  // dropping on empty space; only same-zone drags get positional reordering here.
+  const handlePillDrop = (e, targetFullPath) => {
+    if (!dragSourceKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    const payload = readFieldDragPayload(e);
+    if (!payload) return;
+    if (payload.source === dragSourceKey) {
+      if (payload.field === targetFullPath) return;
+      const withoutDragged = value.filter((v) => v !== payload.field);
+      const targetIndex = withoutDragged.indexOf(targetFullPath);
+      if (targetIndex === -1) return;
+      onChange([...withoutDragged.slice(0, targetIndex), payload.field, ...withoutDragged.slice(targetIndex)]);
+    } else if (onFieldDropped) {
+      onFieldDropped(payload.field, payload.source, dragSourceKey);
+    }
+  };
+
   return (
     <div className="mb-6">
       <label className="mb-2 block text-sm font-semibold text-ink">{label}</label>
@@ -210,6 +233,8 @@ export default function HierarchicalCubePathSelect({
                 key={fullPath}
                 draggable={Boolean(dragSourceKey)}
                 onDragStart={(e) => handleDragStart(e, fullPath)}
+                onDragOver={dragSourceKey ? (e) => e.preventDefault() : undefined}
+                onDrop={dragSourceKey ? (e) => handlePillDrop(e, fullPath) : undefined}
                 className={`inline-flex items-center gap-1.5 rounded-lg bg-gold px-3 py-1.5 text-sm font-medium text-white ${
                   dragSourceKey ? "cursor-grab active:cursor-grabbing" : ""
                 }`}
