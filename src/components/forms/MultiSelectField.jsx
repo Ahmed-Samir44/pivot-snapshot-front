@@ -2,7 +2,7 @@
 // gold/ink design system. Used here for picking a Filter's included members.
 import Select from "react-select";
 
-export default function MultiSelectField({ options, value, onChange, label, placeholder = "Select options...", isLoading = false }) {
+export default function MultiSelectField({ options, value, onChange, label, placeholder = "Select options...", isLoading = false, onInputChange }) {
   const formattedOptions = options.map((opt) => ({ value: opt, label: opt }));
   const selectedValues = Array.isArray(value)
     ? value.map((v) => formattedOptions.find((opt) => opt.value === v) || { value: v, label: v })
@@ -20,6 +20,13 @@ export default function MultiSelectField({ options, value, onChange, label, plac
         placeholder={placeholder}
         isClearable
         isSearchable
+        // onInputChange is only passed when the caller re-fetches `options` itself as the user
+        // types (server-side search) — filterOption disables react-select's OWN client-side
+        // filtering in that case, since `options` already IS the filtered result and re-filtering
+        // it against whatever's currently typed (a keystroke ahead of the next fetch landing)
+        // would flash "no options" for text the server hasn't been asked about yet.
+        onInputChange={onInputChange}
+        filterOption={onInputChange ? () => true : undefined}
         menuPortalTarget={typeof document !== "undefined" ? document.body : null}
         menuPosition="fixed"
         className="react-select-container"

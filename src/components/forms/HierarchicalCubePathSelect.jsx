@@ -4,6 +4,7 @@
 import { useMemo, useState } from "react";
 import Select from "react-select";
 import { Plus, X } from "lucide-react";
+import Popover from "./Popover";
 import { parseCubeBracketSegments, formatCubeBracketLabel, formatDimensionName } from "../../utils/cubeMeta";
 import { setFieldDragPayload, readFieldDragPayload } from "../../utils/dragDrop";
 
@@ -11,8 +12,7 @@ const selectStyles = {
   menuPortal: (base) => ({ ...base, zIndex: 10000 }),
   control: (base) => ({
     ...base,
-    minHeight: "48px",
-    borderRadius: "12px",
+    borderRadius: "10px",
     borderColor: "#e2e8f0",
     "&:hover": { borderColor: "#AE8C67" },
   }),
@@ -48,13 +48,18 @@ const singleSelectProps = {
 // component. The actual move (remove from one zone's array, add to another's, converting shape
 // where needed) happens one level up in FieldPicker, since only it holds every zone — see
 // onFieldDropped.
+//
+// Compact drop-zone box: the pill list (and its drag/drop target) is always visible, but the
+// two-step Dimension→Field(s) picker only exists inside a Popover behind the "+" button — moved
+// there so the zone reads as a small box (matching the rest of FieldPicker's compact "Drop
+// Zones" strip) instead of an always-expanded form taking the same space whether or not the user
+// is actively adding a field right now.
 export default function HierarchicalCubePathSelect({
   options,
   value = [],
   onChange,
   label,
   placeholderAdd = "Choose dimension and field(s), then add — all matching paths are added at once.",
-  selectedHeading = "Selected fields",
   addButtonLabel = "Add",
   dragSourceKey = null,
   onFieldDropped = null,
@@ -107,11 +112,12 @@ export default function HierarchicalCubePathSelect({
 
   const canAdd = newPathsToAdd.length > 0;
 
-  const handleAdd = () => {
+  const handleAdd = (closePopover) => {
     if (!canAdd) return;
     onChange([...value, ...newPathsToAdd]);
     setStep1(null);
     setStep2Multi([]);
+    closePopover();
   };
 
   const remove = (fullPath) => {
@@ -164,95 +170,112 @@ export default function HierarchicalCubePathSelect({
   };
 
   return (
-    <div className="mb-6">
-      <label className="mb-2 block text-sm font-semibold text-ink">{label}</label>
-
-      <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-        <p className="text-sm text-muted">{placeholderAdd}</p>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[min(100%,12rem)] flex-1 basis-[10rem]">
-            <span className="mb-1 block text-xs font-medium text-muted">1 · Dimension</span>
-            <Select
-              {...singleSelectProps}
-              placeholder="Select dimension…"
-              options={opt1}
-              value={step1}
-              onChange={(v) => {
-                setStep1(v);
-                setStep2Multi([]);
-              }}
-            />
-          </div>
-          <div className="min-w-[min(100%,12rem)] flex-1 basis-[10rem]">
-            <span className="mb-1 block text-xs font-medium text-muted">2 · Field(s)</span>
-            <Select
-              isMulti
-              className="react-select-container"
-              classNamePrefix="react-select"
-              menuPortalTarget={typeof document !== "undefined" ? document.body : null}
-              menuPosition="fixed"
-              styles={selectStyles}
-              isClearable
-              closeMenuOnSelect={false}
-              hideSelectedOptions={false}
-              placeholder={step1 ? "Select field(s)…" : "Choose dimension first"}
-              options={opt2}
-              value={step2Multi}
-              isDisabled={!step1}
-              onChange={(v) => setStep2Multi(v || [])}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={handleAdd}
-            disabled={!canAdd}
-            className="btn-primary inline-flex h-12 shrink-0 items-center justify-center gap-2 whitespace-nowrap px-4 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Plus className="h-5 w-5 shrink-0" />
-            {addButtonLabel}
-          </button>
-        </div>
+    // flex h-full flex-col: this box sits in a CSS grid row (FieldPicker's "Drop zones" strip)
+    // that stretches every card to match the tallest sibling — without this, the <ul> drop target
+    // below stayed sized to its own pill content, leaving genuine leftover white space inside a
+    // stretched card that LOOKED droppable but wasn't (caught live, 2026-09-23). flex-1 on the
+    // <ul> below is what actually claims that leftover space.
+    <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-bold uppercase tracking-wide text-muted">
+          {label} {value.length > 0 && <span className="text-gold">({value.length})</span>}
+        </span>
+        <Popover
+          trigger={(toggle) => (
+            <button
+              type="button"
+              onClick={toggle}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold hover:bg-gold/25"
+              aria-label={`Add a field to ${label}`}
+              title={`Add a field to ${label}`}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          )}
+        >
+          {(close) => (
+            <div className="space-y-3">
+              <p className="text-xs text-muted">{placeholderAdd}</p>
+              <div>
+                <span className="mb-1 block text-xs font-medium text-muted">1 · Dimension</span>
+                <Select
+                  {...singleSelectProps}
+                  placeholder="Select dimension…"
+                  options={opt1}
+                  value={step1}
+                  onChange={(v) => {
+                    setStep1(v);
+                    setStep2Multi([]);
+                  }}
+                />
+              </div>
+              <div>
+                <span className="mb-1 block text-xs font-medium text-muted">2 · Field(s)</span>
+                <Select
+                  isMulti
+                  className="react-select-container"
+                  classNamePrefix="react-select"
+                  menuPortalTarget={typeof document !== "undefined" ? document.body : null}
+                  menuPosition="fixed"
+                  styles={selectStyles}
+                  isClearable
+                  closeMenuOnSelect={false}
+                  hideSelectedOptions={false}
+                  placeholder={step1 ? "Select field(s)…" : "Choose dimension first"}
+                  options={opt2}
+                  value={step2Multi}
+                  isDisabled={!step1}
+                  onChange={(v) => setStep2Multi(v || [])}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => handleAdd(close)}
+                disabled={!canAdd}
+                className="btn-primary inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4 shrink-0" />
+                {addButtonLabel}
+              </button>
+            </div>
+          )}
+        </Popover>
       </div>
 
-      {(value.length > 0 || (dragSourceKey && onFieldDropped)) && (
-        <div className="mt-4">
-          <p className="mb-2 text-xs font-medium text-muted">
-            {selectedHeading} ({value.length})
-            {dragSourceKey && onFieldDropped && " — drag a field here from another zone"}
-          </p>
-          <ul
-            className={`flex flex-wrap gap-2 rounded-lg ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
-              value.length === 0 ? "min-h-[2.5rem] border-2 border-dashed border-slate-200 p-2" : ""
+      {/* items-start + content-start: the <ul> itself is the flex-1 element being stretched to
+          fill the card's leftover height (see the WHY comment above), but it's ALSO a flex
+          container for its own pill <li>s — flex's default align-items/align-content is
+          "stretch", which was blowing each pill up to fill that whole leftover height instead of
+          leaving it empty below a normal-sized pill (caught live, 2026-09-23). Pinning both to
+          "start" keeps the pills their natural size while the extra height still counts as part
+          of the droppable area (the <ul> itself still gets the drop handlers). */}
+      <ul
+        className={`flex min-h-[2.25rem] flex-1 flex-wrap content-start gap-1.5 rounded-lg ${value.length === 0 ? "items-center" : "items-start"} ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
+          value.length === 0 ? "border-2 border-dashed border-slate-200 px-2" : ""
+        }`}
+        onDragOver={dragSourceKey && onFieldDropped ? handleDragOver : undefined}
+        onDragLeave={dragSourceKey && onFieldDropped ? () => setDragOver(false) : undefined}
+        onDrop={dragSourceKey && onFieldDropped ? handleDrop : undefined}
+      >
+        {value.length === 0 && <span className="text-xs text-muted">Drop a field here</span>}
+        {value.map((fullPath) => (
+          <li
+            key={fullPath}
+            draggable={Boolean(dragSourceKey)}
+            onDragStart={(e) => handleDragStart(e, fullPath)}
+            onDragOver={dragSourceKey ? (e) => e.preventDefault() : undefined}
+            onDrop={dragSourceKey ? (e) => handlePillDrop(e, fullPath) : undefined}
+            className={`inline-flex items-center gap-1 rounded-md bg-gold px-2 py-1 text-xs font-medium text-white ${
+              dragSourceKey ? "cursor-grab active:cursor-grabbing" : ""
             }`}
-            onDragOver={dragSourceKey && onFieldDropped ? handleDragOver : undefined}
-            onDragLeave={dragSourceKey && onFieldDropped ? () => setDragOver(false) : undefined}
-            onDrop={dragSourceKey && onFieldDropped ? handleDrop : undefined}
           >
-            {value.map((fullPath) => (
-              <li
-                key={fullPath}
-                draggable={Boolean(dragSourceKey)}
-                onDragStart={(e) => handleDragStart(e, fullPath)}
-                onDragOver={dragSourceKey ? (e) => e.preventDefault() : undefined}
-                onDrop={dragSourceKey ? (e) => handlePillDrop(e, fullPath) : undefined}
-                className={`inline-flex items-center gap-1.5 rounded-lg bg-gold px-3 py-1.5 text-sm font-medium text-white ${
-                  dragSourceKey ? "cursor-grab active:cursor-grabbing" : ""
-                }`}
-              >
-                <span>{formatDimensionName(fullPath)}</span>
-                <button
-                  type="button"
-                  onClick={() => remove(fullPath)}
-                  className="rounded p-0.5 hover:bg-white/20"
-                  aria-label="Remove"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+            <span>{formatDimensionName(fullPath)}</span>
+            <button type="button" onClick={() => remove(fullPath)} className="rounded p-0.5 hover:bg-white/20" aria-label="Remove">
+              <X className="h-3 w-3" />
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
