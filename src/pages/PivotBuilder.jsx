@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FileSpreadsheet } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import FieldPicker from "../components/pivot/FieldPicker";
 import PivotGrid from "../components/pivot/PivotGrid";
@@ -69,6 +70,8 @@ export default function PivotBuilder() {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
   const [saveError, setSaveError] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(null);
 
   // Set only for CardinalityGuard's HighCardinalityFieldException (see pivotApi.js's
   // error.details) — a distinct state from `error` because this one gets its own warning UI with
@@ -152,6 +155,30 @@ export default function PivotBuilder() {
     }
   };
 
+  const handleExport = async () => {
+    if (!result || !lastQuery) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      // Dynamic import: ExcelJS is a genuinely large library (bundle jumped from ~420KB to
+      // ~1.35MB when statically imported, 2026-09-23) — loading it only when someone actually
+      // clicks Export keeps it out of everyone else's initial page load.
+      const { exportPivotToExcel } = await import("../utils/exportExcel");
+      await exportPivotToExcel({
+        result,
+        rowFieldLabels: fieldLabels(lastQuery.rows, dimensions),
+        columnFieldLabels: fieldLabels(lastQuery.columns, dimensions),
+        valueFields: lastQuery.values,
+        valuesPlacement: lastQuery.valuesPlacement,
+        filename: snapshotName.trim() || "Pivot",
+      });
+    } catch (err) {
+      setExportError(err.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <AppShell>
       <header className="mb-8">
@@ -181,15 +208,17 @@ export default function PivotBuilder() {
           {cardinalityWarning.canOverride ? (
             <>
               <p className="mt-1 text-sm">
-                السيرفر ده مشترك مع مشاريع تانية وسبق وحصله انهيار بسبب استعلام مشابه — تشغيل الاستعلام ده من غير فلتر ممكن يبطّئ أو يعطّل السيرفر للمستخدمين التانيين. اضغط بس لو متأكد.
+                This server is shared with other projects and has crashed before from a similar query — running this without a filter could slow down or take
+                down the server for other users. Only proceed if you&apos;re sure.
               </p>
               <button type="button" onClick={runQueryWithOverride} disabled={loading} className="btn-secondary mt-2 disabled:cursor-not-allowed disabled:opacity-50">
-                فهمت المخاطرة، شغّل على أي حال (لحد {cardinalityWarning.absoluteMaxMembersPerField.toLocaleString()} عضو)
+                I understand the risk, run anyway (up to {cardinalityWarning.absoluteMaxMembersPerField.toLocaleString()} members)
               </button>
             </>
           ) : (
             <p className="mt-1 text-sm">
-              عدد الأعضاء ({cardinalityWarning.memberCount.toLocaleString()}) أكبر من الحد الأقصى المطلق المسموح به على السيرفر ({cardinalityWarning.absoluteMaxMembersPerField.toLocaleString()}) — لازم تضيف فلتر على الحقل ده، مفيش تجاوز ممكن هنا.
+              The member count ({cardinalityWarning.memberCount.toLocaleString()}) exceeds the server&apos;s absolute limit (
+              {cardinalityWarning.absoluteMaxMembersPerField.toLocaleString()}) — you must add a filter on this field; there is no override available here.
             </p>
           )}
         </div>
@@ -268,8 +297,18 @@ export default function PivotBuilder() {
           >
             {saving ? "Saving…" : "Save Snapshot"}
           </button>
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={exporting}
+            className="btn-secondary inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" style={{ color: "#217346" }} />
+            {exporting ? "Exporting…" : "Export to Excel"}
+          </button>
           {saveMessage && <span className="text-sm font-medium text-green-700">{saveMessage}</span>}
           {saveError && <span className="text-sm font-medium text-red-700">{saveError}</span>}
+          {exportError && <span className="text-sm font-medium text-red-700">{exportError}</span>}
         </div>
       )}
     </AppShell>

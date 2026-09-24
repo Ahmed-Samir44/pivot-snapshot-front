@@ -2,72 +2,7 @@ import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { formatNumber, formatForColumn } from "../../utils/numberFormat";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
-
-// The backend's SubtotalsProcessor now inserts subtotals at EVERY row level except the innermost
-// (e.g. Rows = [Specialty, Doctor, Month] gets both a per-Doctor and a nested per-Specialty
-// subtotal), not just the outermost. An OUTER-level subtotal row is identifiable by every label
-// after index 0 being the literal "Subtotal" placeholder (e.g. ["Cardiology", "Subtotal",
-// "Subtotal"]); an INNER-level one (e.g. ["Cardiology", "Amin", "Subtotal"]) still starts with
-// the same key but is NOT the terminator for the outer group — it's ordinary content inside it.
-function isOuterSubtotalFor(row, key) {
-  return row.isTotal && row.labels[0] === key && row.labels.slice(1).every((l) => l === "Subtotal");
-}
-
-// Groups consecutive rows sharing the same first-level label into collapsible sections. A group
-// is only collapsible when it ends in an OUTER-level Subtotal row — collapsing without one to
-// fall back to would just hide data with nothing left summarizing it, so no toggle is shown in
-// that case (matches how Excel only offers +/- once subtotals exist). Inner-level subtotal rows
-// (Doctor, in the example above) still render as ordinary rows within the group — independent
-// per-level collapse is a further refinement not implemented yet, see DECISIONS.md.
-function computeGroups(rowHeaders) {
-  const groups = [];
-  let i = 0;
-  while (i < rowHeaders.length) {
-    if (rowHeaders[i].isTotal) {
-      groups.push({ start: i, end: i + 1, key: null, hasSubtotal: false });
-      i += 1;
-      continue;
-    }
-    const start = i;
-    const key = rowHeaders[i].labels[0];
-    while (i < rowHeaders.length && rowHeaders[i].labels[0] === key && !isOuterSubtotalFor(rowHeaders[i], key)) {
-      i += 1;
-    }
-    const hasSubtotal = i < rowHeaders.length && isOuterSubtotalFor(rowHeaders[i], key);
-    const end = hasSubtotal ? i + 1 : i;
-    if (hasSubtotal) i += 1;
-    groups.push({ start, end, key, hasSubtotal });
-  }
-  return groups;
-}
-
-// Mirrors the backend's HtmlSnapshotRenderer.ComputeVisibleLevels exactly, computed once over the
-// FULL (unfiltered) row list so the live grid's suppression pattern matches what the saved
-// snapshot will show — the live search box can still hide rows, but doesn't change which levels
-// were "already shown by a previous row" in the underlying data.
-function computeVisibleLevels(labels, previousLabels) {
-  const visible = new Array(labels.length).fill(false);
-  let changed = previousLabels === null;
-  for (let level = 0; level < labels.length; level++) {
-    if (!changed && level < previousLabels.length && labels[level] === previousLabels[level]) {
-      visible[level] = false;
-    } else {
-      changed = true;
-      visible[level] = true;
-    }
-  }
-  return visible;
-}
-
-function computeCompactVisibility(rowHeaders) {
-  const result = [];
-  let previousLabels = null;
-  rowHeaders.forEach((row) => {
-    result.push(computeVisibleLevels(row.labels, row.isTotal ? null : previousLabels));
-    previousLabels = row.isTotal ? null : row.labels;
-  });
-  return result;
-}
+import { computeGroups, computeCompactVisibility } from "../../utils/pivotGridLayout";
 
 // A pill-shaped header badge (dimension/measure name + a decorative caret), echoing the rounded
 // filter-pill style used elsewhere in the product's screens, instead of a traditional shaded
