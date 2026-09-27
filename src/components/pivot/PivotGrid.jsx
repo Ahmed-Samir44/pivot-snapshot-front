@@ -42,8 +42,11 @@ export default function PivotGrid({
       ? result.rowHeaders.map((_, r) => detailRangeForRow(result, r))
       : result.columnHeaders.map((_, c) => detailRangeForColumn(result, c));
   }, [result, valuesPlacement]);
-  const compactVisibility = useMemo(
-    () => (result && layout === "Compact" ? computeCompactVisibility(result.rowHeaders) : null),
+  // Outline reuses the exact same visibility computation as Compact (see
+  // computeCompactVisibility's own comment) — it just renders the result into separate <td> cells
+  // per level instead of one merged, indented cell.
+  const suppressedLevelVisibility = useMemo(
+    () => (result && (layout === "Compact" || layout === "Outline") ? computeCompactVisibility(result.rowHeaders) : null),
     [result, layout],
   );
 
@@ -184,7 +187,7 @@ export default function PivotGrid({
                         {collapseToggle}
                         <span>
                           {row.labels.map((label, level) =>
-                            compactVisibility[rowIndex][level] ? (
+                            suppressedLevelVisibility[rowIndex][level] ? (
                               <div key={level} style={{ paddingLeft: level * 16 }}>
                                 {label}
                               </div>
@@ -193,6 +196,18 @@ export default function PivotGrid({
                         </span>
                       </span>
                     </td>
+                  ) : layout === "Outline" ? (
+                    row.labels.map((label, level) => (
+                      <td
+                        key={level}
+                        className={`whitespace-nowrap px-6 py-2.5 text-center ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}
+                      >
+                        <span className="inline-flex items-center justify-center gap-1.5">
+                          {level === 0 && collapseToggle}
+                          {suppressedLevelVisibility[rowIndex][level] ? label : ""}
+                        </span>
+                      </td>
+                    ))
                   ) : (
                     row.labels.map((label, level) => (
                       <td

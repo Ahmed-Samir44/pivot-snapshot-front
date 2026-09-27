@@ -12,13 +12,17 @@ const SHOW_VALUES_AS_OPTIONS = [
   { value: "Normal", label: "Normal" },
   { value: "PercentOfGrandTotal", label: "% of Grand Total" },
   { value: "RunningTotal", label: "Running Total" },
-  { value: "Rank", label: "Rank" },
+  { value: "Rank", label: "Rank Largest to Smallest" },
   { value: "PercentOfParentRow", label: "% of Parent Row" },
   { value: "DifferenceFrom", label: "Difference From (previous)" },
   { value: "PercentOfRowTotal", label: "% of Row Total" },
   { value: "PercentOfColumnTotal", label: "% of Column Total" },
   { value: "PercentOfParentColumn", label: "% of Parent Column" },
   { value: "Index", label: "Index" },
+  { value: "PercentDifferenceFrom", label: "% Difference From (previous)" },
+  { value: "PercentRunningTotal", label: "% Running Total In" },
+  { value: "RankAscending", label: "Rank Smallest to Largest" },
+  { value: "PercentOf", label: "% Of…" },
 ];
 
 const DEFAULT_FORMAT = { type: "General", decimalPlaces: 2, currencySymbol: "EGP" };
@@ -222,7 +226,13 @@ function AvailableFieldsPanel({ dimensions, isPlaced }) {
 // that leftover space visually part of the card but not draggable-onto — caught live, 2026-09-23.
 // Needs its parent card to be a flex column (see FieldPicker's Filters/Values boxes) to have any
 // effect; harmless no-op otherwise.
-function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, emptyText = "Drag a field here", children }) {
+// emptyIsDropTarget: false for the Values zone (its only caller with this prop set) — Values
+// never accepts a NEW field by dropping into its empty state (measures are added via the
+// multi-select above, see AvailableFieldsPanel's WHY comment), so the dashed "you can drop here"
+// box was misleading there — flagged live as confusing ("zero functional value") since it visually
+// promised drag-and-drop that doesn't apply to an empty Values zone. Filters/Rows/Columns keep the
+// real drop-target styling (dragging IS how you add a field there).
+function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, emptyText = "Drag a field here", emptyIsDropTarget = true, children }) {
   const [dragOver, setDragOver] = useState(false);
 
   const handleDrop = (e) => {
@@ -237,7 +247,7 @@ function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, empty
   return (
     <div
       className={`flex-1 rounded-lg ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
-        isEmpty ? "min-h-[3rem] border-2 border-dashed border-slate-200 p-3" : ""
+        isEmpty && emptyIsDropTarget ? "min-h-[3rem] border-2 border-dashed border-slate-200 p-3" : isEmpty ? "min-h-[3rem] p-3" : ""
       }`}
       onDragOver={(e) => {
         e.preventDefault();
@@ -253,6 +263,7 @@ function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, empty
 
 const FILTER_MODE_OPTIONS = [
   { value: "Members", label: "Members (pick exact values)" },
+  { value: "Exclude", label: "Exclude (hide picked values)" },
   { value: "LabelContains", label: "Label contains…" },
   { value: "LabelBeginsWith", label: "Label begins with…" },
   { value: "LabelEndsWith", label: "Label ends with…" },
@@ -264,7 +275,7 @@ const FILTER_MODE_OPTIONS = [
 ];
 
 // One filter's member list is only fetched once its field is chosen (and only needed for
-// Mode "Members" — the rule-based modes below never show a member list, they describe a
+// Mode "Members"/"Exclude" — the rule-based modes below never show a member list, they describe a
 // condition the real cube evaluates itself).
 //
 // Re-fetches on every search keystroke (debounced) rather than fetching once and filtering
@@ -286,7 +297,7 @@ function FilterRow({ filter, dimensionOptions, selectedValueOptions, onChange, o
   }, [filter.field]);
 
   useEffect(() => {
-    if (!filter.field || mode !== "Members") {
+    if (!filter.field || (mode !== "Members" && mode !== "Exclude")) {
       setMemberOptions([]);
       return;
     }
@@ -357,12 +368,14 @@ function FilterRow({ filter, dimensionOptions, selectedValueOptions, onChange, o
             ))}
           </select>
 
-          {mode === "Members" && (
+          {(mode === "Members" || mode === "Exclude") && (
             <MultiSelectField
               options={memberOptions}
               value={filter.includedMembers}
               onChange={(includedMembers) => onChange({ ...filter, includedMembers })}
-              placeholder={loadingMembers ? "Loading members…" : "Type to search members…"}
+              placeholder={
+                loadingMembers ? "Loading members…" : mode === "Exclude" ? "Type to search values to exclude…" : "Type to search members…"
+              }
               isLoading={loadingMembers}
               onInputChange={(text, actionMeta) => {
                 // Only a real keystroke should update the search term — react-select also fires
@@ -486,13 +499,15 @@ function FilterPill({ filter, dimensionOptions, selectedValueOptions, onChange, 
   );
 }
 
-// Excel's "Group Field" (date) and "Group Selection" (numeric bins), one control per Row field —
-// backend enforces Rows-only and one grouping per field (see MdxPivotQueryBuilder.ValidateGroupings).
-// Mode is derived from whichever of dateGroupings/numericGroupings currently mentions the field,
-// rather than stored as its own separate piece of state, so the two arrays stay the single source
-// of truth the backend actually reads.
-function RowGroupingEditor({ rows, dateGroupings, numericGroupings, onChange }) {
-  if (rows.length === 0) {
+// Excel's "Group Field" (date) and "Group Selection" (numeric bins), one control per Rows OR
+// Columns field (2026-09-24: extended from Rows-only) — backend enforces one grouping per field
+// (see MdxPivotQueryBuilder.ValidateGroupings). Mode is derived from whichever of
+// dateGroupings/numericGroupings currently mentions the field, rather than stored as its own
+// separate piece of state, so the two arrays stay the single source of truth the backend actually
+// reads. Rendered once per axis (see the two call sites below) — dateGroupings/numericGroupings
+// are shared arrays across both, since a grouping object only names its field, not an axis.
+function AxisGroupingEditor({ label, fields, dateGroupings, numericGroupings, onChange }) {
+  if (fields.length === 0) {
     return null;
   }
 
@@ -524,8 +539,8 @@ function RowGroupingEditor({ rows, dateGroupings, numericGroupings, onChange }) 
 
   return (
     <div className="mt-4 space-y-2">
-      <p className="text-xs font-medium text-muted">Group by (date/numeric fields only):</p>
-      {rows.map((field) => {
+      <p className="text-xs font-medium text-muted">{label} (date/numeric fields only):</p>
+      {fields.map((field) => {
         const mode = modeFor(field);
         return (
           <div key={field} className="flex flex-wrap items-center gap-2">
@@ -597,26 +612,88 @@ function CustomOrderEditor({ field, customOrder, onChange }) {
   );
 }
 
-function SortEditor({ sort, values, rows, columns, onChange }) {
+// One Rows/Columns FIELD's own independent sort rule (Excel's real per-field "Sort A to
+// Z"/"Sort Largest to Smallest") — mutually exclusive with the single axis-wide Sort above (see
+// LevelSort's own WHY comment on the backend model for why this is what finally makes
+// measure-sort compatible with Subtotals). Only shown once an axis has 2+ fields — with exactly
+// one field, the single Sort dropdown above already covers both label and by-value sorting.
+function LevelSortEditor({ label, fields, levelSorts, values, onChange }) {
+  if (fields.length < 2) {
+    return null;
+  }
+
+  const modeFor = (level) => {
+    const rule = levelSorts.find((s) => s.level === level);
+    return rule ? (rule.byMeasureField ?? "label") : "none";
+  };
+  const directionFor = (level) => levelSorts.find((s) => s.level === level)?.direction ?? "Ascending";
+
+  const setRule = (level, mode, direction) => {
+    const withoutLevel = levelSorts.filter((s) => s.level !== level);
+    if (mode === "none") {
+      onChange(withoutLevel);
+      return;
+    }
+    onChange([...withoutLevel, { level, direction, byMeasureField: mode === "label" ? null : mode }]);
+  };
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
+      <p className="text-xs font-medium text-muted">{label}:</p>
+      {fields.map((field, level) => {
+        const mode = modeFor(level);
+        const direction = directionFor(level);
+        return (
+          <div key={level} className="flex flex-wrap items-center gap-2">
+            <span className="min-w-[9rem] text-sm text-ink">{formatDimensionName(field)}</span>
+            <select className={nativeSelectClass} value={mode} onChange={(e) => setRule(level, e.target.value, direction)}>
+              <option value="none">No sorting</option>
+              <option value="label">By label</option>
+              {values.filter((v) => v.field).map((v) => (
+                <option key={v.field} value={v.field}>
+                  By value of {v.field}
+                </option>
+              ))}
+            </select>
+            {mode !== "none" && (
+              <select className={nativeSelectClass} value={direction} onChange={(e) => setRule(level, mode, e.target.value)}>
+                <option value="Ascending">Ascending</option>
+                <option value="Descending">Descending</option>
+              </select>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// onChange here takes the BUNDLED { sort, rowLevelSorts, columnLevelSorts } — all three interact
+// (Sort and *LevelSorts are mutually exclusive, enforced by clearing one when the other is set)
+// so they're easiest to manage together rather than as separate onChange callbacks.
+function SortEditor({ sort, rowLevelSorts, columnLevelSorts, values, rows, columns, onChange }) {
   const mode = sort === null ? "none" : sort.customOrder ? "custom" : sort.byMeasureField ? sort.byMeasureField : "label";
   const axis = sort?.axis ?? "Rows";
   const targetField = (axis === "Columns" ? columns : rows)[0] ?? null;
 
   const handleModeChange = (nextMode) => {
+    // Setting the single axis-wide sort clears any level-by-level rules on the SAME axis — the
+    // backend rejects having both at once (ValidateLevelSorts). The other axis's level sorts are
+    // untouched (they're independent of this axis's own Sort field).
+    const clearLevelSorts = axis === "Columns" ? { columnLevelSorts: [] } : { rowLevelSorts: [] };
     if (nextMode === "none") {
-      onChange(null);
+      onChange({ sort: null });
       return;
     }
     const direction = sort?.direction ?? "Ascending";
     if (nextMode === "custom") {
-      onChange({ direction, byMeasureField: null, axis, customOrder: [] });
+      onChange({ sort: { direction, byMeasureField: null, axis, customOrder: [] }, ...clearLevelSorts });
       return;
     }
-    onChange(
-      nextMode === "label"
-        ? { direction, byMeasureField: null, axis, customOrder: null }
-        : { direction, byMeasureField: nextMode, axis, customOrder: null },
-    );
+    onChange({
+      sort: nextMode === "label" ? { direction, byMeasureField: null, axis, customOrder: null } : { direction, byMeasureField: nextMode, axis, customOrder: null },
+      ...clearLevelSorts,
+    });
   };
 
   return (
@@ -637,7 +714,7 @@ function SortEditor({ sort, values, rows, columns, onChange }) {
             <select
               className={nativeSelectClass}
               value={axis}
-              onChange={(e) => onChange({ ...sort, axis: e.target.value })}
+              onChange={(e) => onChange({ sort: { ...sort, axis: e.target.value } })}
             >
               <option value="Rows">Sort Rows</option>
               <option value="Columns">Sort Columns</option>
@@ -646,7 +723,7 @@ function SortEditor({ sort, values, rows, columns, onChange }) {
               <select
                 className={nativeSelectClass}
                 value={sort.direction}
-                onChange={(e) => onChange({ ...sort, direction: e.target.value })}
+                onChange={(e) => onChange({ sort: { ...sort, direction: e.target.value } })}
               >
                 <option value="Ascending">Ascending</option>
                 <option value="Descending">Descending</option>
@@ -659,8 +736,26 @@ function SortEditor({ sort, values, rows, columns, onChange }) {
         <CustomOrderEditor
           field={targetField}
           customOrder={sort.customOrder}
-          onChange={(customOrder) => onChange({ ...sort, customOrder })}
+          onChange={(customOrder) => onChange({ sort: { ...sort, customOrder } })}
         />
+      )}
+      {!sort && (
+        <>
+          <LevelSortEditor
+            label="Or sort each Row level independently"
+            fields={rows}
+            levelSorts={rowLevelSorts}
+            values={values}
+            onChange={(next) => onChange({ rowLevelSorts: next })}
+          />
+          <LevelSortEditor
+            label="Or sort each Column level independently"
+            fields={columns}
+            levelSorts={columnLevelSorts}
+            values={values}
+            onChange={(next) => onChange({ columnLevelSorts: next })}
+          />
+        </>
       )}
     </div>
   );
@@ -857,8 +952,32 @@ const clearOrphanedCalculatedItems = (calculatedItems, rows, columns) =>
 // pill itself only carries per-measure CONFIG (Show Values As, Format, Conditional format) behind
 // a Popover, plus drag-to-reorder within the Values zone (onDropReorder), same pattern as
 // FilterPill.
-function ValuePill({ v, onUpdate, onUpdateFormat, onRemove, onDropReorder }) {
+function ValuePill({ v, onUpdate, onUpdateFormat, onRemove, onDropReorder, rows }) {
   const format = v.format ?? DEFAULT_FORMAT;
+  const isPercentOf = v.showValuesAs === "PercentOf";
+  const [baseItemOptions, setBaseItemOptions] = useState([]);
+  const [loadingBaseItems, setLoadingBaseItems] = useState(false);
+
+  // Base item options come from the SAME member-search endpoint FilterRow uses — only fetched once
+  // a Base field is actually chosen, and re-fetched whenever it changes.
+  useEffect(() => {
+    if (!isPercentOf || !v.baseField) {
+      setBaseItemOptions([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingBaseItems(true);
+    getMembers(v.baseField)
+      .then((members) => {
+        if (!cancelled) setBaseItemOptions(members);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingBaseItems(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPercentOf, v.baseField]);
 
   return (
     <div onDragOver={(e) => e.preventDefault()} onDrop={onDropReorder}>
@@ -890,6 +1009,43 @@ function ValuePill({ v, onUpdate, onUpdateFormat, onRemove, onDropReorder }) {
                 ))}
               </select>
             </div>
+            {isPercentOf && (
+              <div className="space-y-2 rounded-md bg-slate-50 p-2">
+                <div>
+                  <span className="mb-1 block text-xs font-medium text-muted">Base field (Rows)</span>
+                  <select
+                    className={nativeSelectClass}
+                    value={v.baseField ?? ""}
+                    onChange={(e) => onUpdate({ baseField: e.target.value, baseItem: "" })}
+                  >
+                    <option value="">Choose a row field…</option>
+                    {rows.map((field) => (
+                      <option key={field} value={field}>
+                        {formatDimensionName(field)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {v.baseField && (
+                  <div>
+                    <span className="mb-1 block text-xs font-medium text-muted">Base item</span>
+                    <select
+                      className={nativeSelectClass}
+                      value={v.baseItem ?? ""}
+                      onChange={(e) => onUpdate({ baseItem: e.target.value })}
+                      disabled={loadingBaseItems}
+                    >
+                      <option value="">{loadingBaseItems ? "Loading…" : "Choose a value…"}</option>
+                      {baseItemOptions.map((member) => (
+                        <option key={member} value={member}>
+                          {member}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-medium text-muted">Format:</span>
               <select className={nativeSelectClass} value={format.type} onChange={(e) => onUpdateFormat({ type: e.target.value })}>
@@ -944,10 +1100,15 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
   const dimensionOptions = dimensions.map((d) => ({ value: d.field, label: d.displayName }));
   const measureOptions = measures.map((m) => ({ value: m.field, label: m.displayName }));
   // A calculated field's own LeftField/RightField must reference a real cube measure only (no
-  // chaining calculated-on-calculated — see the backend's CalculatedField), but once declared its
-  // name becomes usable anywhere a regular measure is, including as a Value.
+  // chaining calculated-on-calculated — see the backend's CalculatedField), but once FULLY
+  // declared (name AND both measures — matches PivotBuilder.jsx's own completeness check before
+  // sending a query) its name becomes usable anywhere a regular measure is, including as a Value.
+  // Requiring only `f.name` here used to let an incomplete calculated field be picked in Values —
+  // a real bug caught live 2026-09-27: the backend would then try to reference a measure that was
+  // never actually declared, since PivotBuilder.jsx drops an incomplete calculated field from the
+  // query entirely while the dangling Value reference stayed selected.
   const calculatedFieldOptions = value.calculatedFields
-    .filter((f) => f.name)
+    .filter((f) => f.name && f.leftField && f.rightField)
     .map((f) => ({ value: f.name, label: `${f.name} (calculated)` }));
   const valueFieldOptions = [...measureOptions, ...calculatedFieldOptions];
 
@@ -1115,9 +1276,21 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
             label="Columns"
             options={dimensions.map((d) => d.field)}
             value={value.columns}
-            onChange={(columns) =>
-              onChange({ ...value, columns, calculatedItems: clearOrphanedCalculatedItems(value.calculatedItems, value.rows, columns) })
-            }
+            onChange={(columns) => {
+              // Dropping a column field also drops any grouping/calculated item that referenced
+              // it — the backend rejects both on a field that's no longer in Rows/Columns
+              // (ValidateGroupings, ValidateCalculatedItems). A field still present in Rows keeps
+              // its grouping (it didn't actually leave either axis).
+              const stillGrouped = (field) => columns.includes(field) || value.rows.includes(field);
+              const dateGroupings = value.dateGroupings.filter((g) => stillGrouped(g.field));
+              const numericGroupings = value.numericGroupings.filter((g) => stillGrouped(g.field));
+              const calculatedItems = clearOrphanedCalculatedItems(value.calculatedItems, value.rows, columns);
+              // columnLevelSorts' `level` values are positional indexes into Columns — any add,
+              // remove, or reorder here can shift which field a stored index actually points to,
+              // so they're cleared rather than risking a rule silently applying to the wrong
+              // field (same defensive-clear approach as groupings/calculatedItems above).
+              onChange({ ...value, columns, dateGroupings, numericGroupings, calculatedItems, columnLevelSorts: [] });
+            }}
             dragSourceKey="columns"
             onFieldDropped={moveField}
           />
@@ -1127,13 +1300,14 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
             options={dimensions.map((d) => d.field)}
             value={value.rows}
             onChange={(rows) => {
-              // Dropping a row field also drops any grouping/calculated item that referenced it —
-              // the backend rejects both on a field that's no longer in Rows/Columns
-              // (ValidateGroupings, ValidateCalculatedItems).
-              const dateGroupings = value.dateGroupings.filter((g) => rows.includes(g.field));
-              const numericGroupings = value.numericGroupings.filter((g) => rows.includes(g.field));
+              // Mirror of the Columns handler above — a field still present in Columns keeps its
+              // grouping.
+              const stillGrouped = (field) => rows.includes(field) || value.columns.includes(field);
+              const dateGroupings = value.dateGroupings.filter((g) => stillGrouped(g.field));
+              const numericGroupings = value.numericGroupings.filter((g) => stillGrouped(g.field));
               const calculatedItems = clearOrphanedCalculatedItems(value.calculatedItems, rows, value.columns);
-              onChange({ ...value, rows, dateGroupings, numericGroupings, calculatedItems });
+              // Mirror of the columnLevelSorts clear above.
+              onChange({ ...value, rows, dateGroupings, numericGroupings, calculatedItems, rowLevelSorts: [] });
             }}
             dragSourceKey="rows"
             onFieldDropped={moveField}
@@ -1178,13 +1352,15 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
               onFieldDropped={moveField}
               isFieldAccepted={(field) => valueFieldOptions.some((opt) => opt.value === field)}
               isEmpty={value.values.length === 0}
-              emptyText="Pick measures above"
+              emptyText="No measures selected — use the dropdown above to add one"
+              emptyIsDropTarget={false}
             >
               <div className="flex flex-wrap gap-1.5">
                 {value.values.map((v, index) => (
                   <ValuePill
                     key={index}
                     v={v}
+                    rows={value.rows}
                     onUpdate={(patch) => updateValue(index, patch)}
                     onUpdateFormat={(patch) => updateValueFormat(index, patch)}
                     onRemove={() => removeValue(index)}
@@ -1196,8 +1372,16 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
           </div>
         </div>
 
-        <RowGroupingEditor
-          rows={value.rows}
+        <AxisGroupingEditor
+          label="Group Rows by"
+          fields={value.rows}
+          dateGroupings={value.dateGroupings}
+          numericGroupings={value.numericGroupings}
+          onChange={(dateGroupings, numericGroupings) => onChange({ ...value, dateGroupings, numericGroupings })}
+        />
+        <AxisGroupingEditor
+          label="Group Columns by"
+          fields={value.columns}
           dateGroupings={value.dateGroupings}
           numericGroupings={value.numericGroupings}
           onChange={(dateGroupings, numericGroupings) => onChange({ ...value, dateGroupings, numericGroupings })}
@@ -1211,7 +1395,11 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
           trigger={(toggle) => (
             <button type="button" onClick={toggle} className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
               Sort
-              {value.sort && <span className="rounded-full bg-gold/20 px-1.5 text-gold">1</span>}
+              {(value.sort || value.rowLevelSorts.length > 0 || value.columnLevelSorts.length > 0) && (
+                <span className="rounded-full bg-gold/20 px-1.5 text-gold">
+                  {value.sort ? 1 : value.rowLevelSorts.length + value.columnLevelSorts.length}
+                </span>
+              )}
               <ChevronDown className="h-3.5 w-3.5" />
             </button>
           )}
@@ -1219,10 +1407,12 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
           {() => (
             <SortEditor
               sort={value.sort}
+              rowLevelSorts={value.rowLevelSorts}
+              columnLevelSorts={value.columnLevelSorts}
               values={value.values}
               rows={value.rows}
               columns={value.columns}
-              onChange={(sort) => onChange({ ...value, sort })}
+              onChange={(patch) => onChange({ ...value, ...patch })}
             />
           )}
         </Popover>
@@ -1268,6 +1458,59 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
         <Popover
           trigger={(toggle) => (
             <button type="button" onClick={toggle} className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
+              No-Data Items
+              {value.showItemsWithNoData.length > 0 && (
+                <span className="rounded-full bg-gold/20 px-1.5 text-gold">{value.showItemsWithNoData.length}</span>
+              )}
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          )}
+        >
+          {() => (
+            <div className="max-w-xs">
+              <p className="mb-2 text-xs text-muted">
+                Excel's "Show items with no data" — keeps a Row/Column member visible even with zero facts, instead of hiding it. Uses more
+                cube resources; the query is rejected if the estimated result is too large.
+              </p>
+              <label className="mb-2 flex items-center gap-2 text-sm font-medium text-ink">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-gold"
+                  checked={value.showItemsWithNoData.includes("Rows")}
+                  onChange={(e) =>
+                    onChange({
+                      ...value,
+                      showItemsWithNoData: e.target.checked
+                        ? [...value.showItemsWithNoData, "Rows"]
+                        : value.showItemsWithNoData.filter((a) => a !== "Rows"),
+                    })
+                  }
+                />
+                Show Rows with no data
+              </label>
+              <label className="flex items-center gap-2 text-sm font-medium text-ink">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-gold"
+                  checked={value.showItemsWithNoData.includes("Columns")}
+                  onChange={(e) =>
+                    onChange({
+                      ...value,
+                      showItemsWithNoData: e.target.checked
+                        ? [...value.showItemsWithNoData, "Columns"]
+                        : value.showItemsWithNoData.filter((a) => a !== "Columns"),
+                    })
+                  }
+                />
+                Show Columns with no data
+              </label>
+            </div>
+          )}
+        </Popover>
+
+        <Popover
+          trigger={(toggle) => (
+            <button type="button" onClick={toggle} className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
               <Plus className="h-3.5 w-3.5" /> Calculated Field
               {value.calculatedFields.length > 0 && (
                 <span className="rounded-full bg-gold/20 px-1.5 text-gold">{value.calculatedFields.length}</span>
@@ -1279,7 +1522,20 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
             <CalculatedFieldsEditor
               calculatedFields={value.calculatedFields}
               measureOptions={measureOptions}
-              onChange={(calculatedFields) => onChange({ ...value, calculatedFields })}
+              onChange={(calculatedFields) => {
+                // A Value referencing a calculated field becomes invalid the moment that field is
+                // removed, or edited back to incomplete, AFTER already being picked in Values —
+                // same dangling-reference bug as calculatedFieldOptions' own fix above, just from
+                // the other direction (edited/removed after selection instead of selected before
+                // completion).
+                const validFieldNames = new Set(
+                  measureOptions
+                    .map((m) => m.value)
+                    .concat(calculatedFields.filter((f) => f.name && f.leftField && f.rightField).map((f) => f.name)),
+                );
+                const values = value.values.filter((v) => validFieldNames.has(v.field));
+                onChange({ ...value, calculatedFields, values });
+              }}
             />
           )}
         </Popover>

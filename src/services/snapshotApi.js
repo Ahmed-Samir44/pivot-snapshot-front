@@ -17,16 +17,39 @@ async function request(path, options = {}) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.error || `Request to ${path} failed with status ${response.status}`);
+    const error = new Error(data?.error || `Request to ${path} failed with status ${response.status}`);
+    // Structured fields (type/actualRows/maxRows/canOverride, etc.) carried on the Error object —
+    // same "details, not just message" convention as pivotApi.js's queryPivot, so a caller can
+    // offer a specific "confirm and save anyway" retry (see SnapshotTooLargeException).
+    error.details = data;
+    throw error;
   }
   return data;
 }
 
-export function saveSnapshot(name, pivotRequest, pivotResult, tableStyle = "Default", includeChart = false, chartType = "Bar", reportLayout = "Tabular") {
+export function saveSnapshot(
+  name,
+  pivotRequest,
+  pivotResult,
+  tableStyle = "Default",
+  includeChart = false,
+  chartType = "Bar",
+  reportLayout = "Tabular",
+  maxRowsOverride = null,
+) {
   return request("/api/snapshots", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, request: pivotRequest, result: pivotResult, tableStyle, includeChart, chartType, reportLayout }),
+    body: JSON.stringify({
+      name,
+      request: pivotRequest,
+      result: pivotResult,
+      tableStyle,
+      includeChart,
+      chartType,
+      reportLayout,
+      ...(maxRowsOverride ? { maxRowsOverride } : {}),
+    }),
   });
 }
 
@@ -67,8 +90,11 @@ export function getVersion(versionId) {
   return request(`/api/snapshots/versions/${versionId}`);
 }
 
-export function compareVersions(versionA, versionB) {
-  return request(`/api/snapshots/compare?versionA=${versionA}&versionB=${versionB}`);
+// 2026-09-24: generalized from exactly 2 versions to N (2+) — versionIds is repeated as a query
+// param (ASP.NET Core's standard array-binding convention, matching SnapshotController.Compare).
+export function compareVersions(versionIds) {
+  const query = versionIds.map((id) => `versionIds=${id}`).join("&");
+  return request(`/api/snapshots/compare?${query}`);
 }
 
 // Deactivates (not deletes) a version — see DataverseSnapshotStorageService.DeactivateVersionAsync

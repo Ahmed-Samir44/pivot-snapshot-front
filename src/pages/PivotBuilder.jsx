@@ -4,6 +4,7 @@ import AppShell from "../components/layout/AppShell";
 import FieldPicker from "../components/pivot/FieldPicker";
 import PivotGrid from "../components/pivot/PivotGrid";
 import PivotChart from "../components/pivot/PivotChart";
+import { chartUnavailableReason } from "../utils/chartLayout";
 import { queryPivot } from "../services/pivotApi";
 import { getDimensions, getMeasures } from "../services/cubeMetaApi";
 import { saveSnapshot } from "../services/snapshotApi";
@@ -19,12 +20,15 @@ const EMPTY_REQUEST = {
   valuesPlacement: "Columns",
   filters: [],
   sort: null,
+  rowLevelSorts: [],
+  columnLevelSorts: [],
   showGrandTotals: false,
   showSubtotals: false,
   calculatedFields: [],
   calculatedItems: [],
   dateGroupings: [],
   numericGroupings: [],
+  showItemsWithNoData: [],
 };
 
 // PivotResult only carries member VALUES (e.g. "Cardiology"), not the field's own name — this
@@ -70,6 +74,11 @@ export default function PivotBuilder() {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
   const [saveError, setSaveError] = useState(null);
+  // Set only for SnapshotTooLargeException ("SnapshotTooLarge") — mirrors cellsWarning's "warn,
+  // then let the user explicitly confirm" flow, but (like cardinalityWarning, unlike cellsWarning)
+  // this one has a hard ceiling: a saved snapshot is reopened by other people later, not a
+  // one-time view only the current user sees (see StorageOptions.AbsoluteMaxSnapshotRows).
+  const [rowsWarning, setRowsWarning] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
 
@@ -77,6 +86,16 @@ export default function PivotBuilder() {
   // error.details) — a distinct state from `error` because this one gets its own warning UI with
   // an explicit "run anyway" retry, not just an error message.
   const [cardinalityWarning, setCardinalityWarning] = useState(null);
+
+  // Set only for PivotResultTooLargeException ("ResultTooLarge") — unlike cardinalityWarning,
+  // there's no absolute ceiling here (see PivotRequest.MaxCellsOverride's WHY comment): this is
+  // the browser's own "this table will be huge" warning, not a shared-server crash risk, so the
+  // "run anyway" retry always works once the user confirms.
+  const [cellsWarning, setCellsWarning] = useState(null);
+  // Sticky accumulator for maxMembersOverride/maxCellsOverride once the user explicitly confirms
+  // one of the two warnings below — see runQuery's own WHY comment for why this must NOT reset
+  // per-call (a real ping-ponging-warnings bug caught live 2026-09-27 when it did).
+  const [confirmedOverrides, setConfirmedOverrides] = useState({});
 
   useEffect(() => {
     Promise.all([getDimensions(), getMeasures()])
@@ -87,14 +106,29 @@ export default function PivotBuilder() {
       .catch((err) => setMetaError(err.message));
   }, []);
 
-  // maxMembersOverride is only ever set by the user explicitly confirming the cardinality
-  // warning below (runQueryWithOverride) — never sent by default, so a normal "Run query" click
-  // always goes through CardinalityGuard's ordinary safe limit.
-  const runQuery = async (maxMembersOverride) => {
+  // newOverride is only ever set by the user explicitly confirming one of the two warnings below
+  // (runQueryWithOverride/runQueryWithCellsOverride) — never sent by default, so a normal "Run
+  // query" click always goes through the ordinary safe limits. It's merged with confirmedOverrides
+  // (not replacing it): the backend checks cardinality first, then result size only once that
+  // passes, so overriding cardinality can surface a FRESH "result too large" warning next — and
+  // confirming that one must still carry the already-confirmed cardinality override forward, or
+  // the very next attempt fails the cardinality check all over again.
+  const runQuery = async (newOverride = {}) => {
     setLoading(true);
     setError(null);
     setCardinalityWarning(null);
+    setCellsWarning(null);
     setSaveMessage(null);
+    const overrides = { ...confirmedOverrides, ...newOverride };
+    // Persisted BEFORE the request even runs, not just on success: confirming maxMembersOverride
+    // can get an attempt PAST the cardinality check but still fail later at the result-size check
+    // (a fresh, different warning) — that later failure must not un-remember the override that
+    // already worked, or the very next retry loses it and fails cardinality all over again. This
+    // was the actual remaining half of the 2026-09-27 ping-ponging-warnings bug: the first fix
+    // (merging confirmedOverrides into every attempt) was correct but only PERSISTED the merge on
+    // a fully successful query, so a retry that hit a SECOND, later warning still lost the first
+    // one's confirmation.
+    setConfirmedOverrides(overrides);
     try {
       const cleaned = {
         rows: request.rows.filter(Boolean),
@@ -103,6 +137,8 @@ export default function PivotBuilder() {
         valuesPlacement: request.valuesPlacement,
         filters: request.filters.filter((f) => f.field && isFilterComplete(f)),
         sort: request.sort,
+        rowLevelSorts: request.rowLevelSorts,
+        columnLevelSorts: request.columnLevelSorts,
         showGrandTotals: request.showGrandTotals,
         showSubtotals: request.showSubtotals,
         calculatedFields: request.calculatedFields.filter((f) => f.name && f.leftField && f.rightField),
@@ -112,9 +148,15 @@ export default function PivotBuilder() {
         calculatedItems: request.calculatedItems.filter(
           (i) => i.field && i.name && (i.positiveMembers.length > 0 || i.negativeMembers.length > 0),
         ),
-        dateGroupings: request.dateGroupings.filter((g) => request.rows.includes(g.field)),
-        numericGroupings: request.numericGroupings.filter((g) => request.rows.includes(g.field) && g.binSize > 0),
-        ...(maxMembersOverride ? { maxMembersOverride } : {}),
+        // A grouped field can be in Rows OR Columns (see GroupingProcessor) — checking only Rows
+        // here would silently strip a Columns-axis grouping right before it's sent.
+        dateGroupings: request.dateGroupings.filter((g) => request.rows.includes(g.field) || request.columns.includes(g.field)),
+        numericGroupings: request.numericGroupings.filter(
+          (g) => (request.rows.includes(g.field) || request.columns.includes(g.field)) && g.binSize > 0,
+        ),
+        showItemsWithNoData: request.showItemsWithNoData,
+        ...(overrides.maxMembersOverride ? { maxMembersOverride: overrides.maxMembersOverride } : {}),
+        ...(overrides.maxCellsOverride ? { maxCellsOverride: overrides.maxCellsOverride } : {}),
       };
       const data = await queryPivot(cleaned);
       setResult(data);
@@ -122,6 +164,8 @@ export default function PivotBuilder() {
     } catch (err) {
       if (err.details?.type === "HighCardinalityField") {
         setCardinalityWarning(err.details);
+      } else if (err.details?.type === "ResultTooLarge") {
+        setCellsWarning(err.details);
       } else {
         setError(err.message);
       }
@@ -134,24 +178,41 @@ export default function PivotBuilder() {
 
   const runQueryWithOverride = () => {
     if (cardinalityWarning) {
-      runQuery(cardinalityWarning.absoluteMaxMembersPerField);
+      runQuery({ maxMembersOverride: cardinalityWarning.absoluteMaxMembersPerField });
     }
   };
 
-  const handleSave = async () => {
+  const runQueryWithCellsOverride = () => {
+    if (cellsWarning) {
+      runQuery({ maxCellsOverride: cellsWarning.actualCells });
+    }
+  };
+
+  const handleSave = async (maxRowsOverride) => {
     if (!snapshotName.trim() || !result || !lastQuery) {
       return;
     }
     setSaving(true);
     setSaveError(null);
     setSaveMessage(null);
+    setRowsWarning(null);
     try {
-      const saved = await saveSnapshot(snapshotName.trim(), lastQuery, result, tableStyle, includeChart, chartType, reportLayout);
+      const saved = await saveSnapshot(snapshotName.trim(), lastQuery, result, tableStyle, includeChart, chartType, reportLayout, maxRowsOverride);
       setSaveMessage(`Saved as version ${saved.versionNumber}.`);
     } catch (err) {
-      setSaveError(err.message);
+      if (err.details?.type === "SnapshotTooLarge") {
+        setRowsWarning(err.details);
+      } else {
+        setSaveError(err.message);
+      }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveWithRowsOverride = () => {
+    if (rowsWarning) {
+      handleSave(rowsWarning.actualRows);
     }
   };
 
@@ -224,6 +285,19 @@ export default function PivotBuilder() {
         </div>
       )}
 
+      {cellsWarning && (
+        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">
+          <p>{cellsWarning.error}</p>
+          <p className="mt-1 text-sm">
+            A table this large can be slow to scroll or read — unlike the cube-side limit above, there&apos;s no hard ceiling here, so you can proceed if
+            you&apos;re sure this is what you want.
+          </p>
+          <button type="button" onClick={runQueryWithCellsOverride} disabled={loading} className="btn-secondary mt-2 disabled:cursor-not-allowed disabled:opacity-50">
+            Show all {cellsWarning.actualCells.toLocaleString()} cells anyway
+          </button>
+        </div>
+      )}
+
       <div className="mt-6">
         <PivotGrid
           result={result}
@@ -235,11 +309,10 @@ export default function PivotBuilder() {
         />
       </div>
 
-      {includeChart && lastQuery?.valuesPlacement === "Rows" && (
-        <p className="mt-4 text-sm text-muted">
-          No chart is drawn while values are on Rows — see the "Show values on" setting above.
-        </p>
-      )}
+      {includeChart &&
+        chartUnavailableReason(result, lastQuery) && (
+          <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-muted">{chartUnavailableReason(result, lastQuery)}</p>
+        )}
       {includeChart && (
         <PivotChart result={result} valueFields={lastQuery?.values} chartType={chartType} valuesPlacement={lastQuery?.valuesPlacement} />
       )}
@@ -272,6 +345,7 @@ export default function PivotBuilder() {
           >
             <option value="Tabular">Layout: Tabular</option>
             <option value="Compact">Layout: Compact</option>
+            <option value="Outline">Layout: Outline</option>
           </select>
           <label className="flex items-center gap-2 text-sm text-ink">
             <input type="checkbox" checked={includeChart} onChange={(e) => setIncludeChart(e.target.checked)} />
@@ -291,7 +365,7 @@ export default function PivotBuilder() {
           )}
           <button
             type="button"
-            onClick={handleSave}
+            onClick={() => handleSave()}
             disabled={saving || !snapshotName.trim()}
             className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -309,6 +383,28 @@ export default function PivotBuilder() {
           {saveMessage && <span className="text-sm font-medium text-green-700">{saveMessage}</span>}
           {saveError && <span className="text-sm font-medium text-red-700">{saveError}</span>}
           {exportError && <span className="text-sm font-medium text-red-700">{exportError}</span>}
+        </div>
+      )}
+
+      {rowsWarning && (
+        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">
+          <p>{rowsWarning.error}</p>
+          {rowsWarning.canOverride ? (
+            <>
+              <p className="mt-1 text-sm">
+                A saved snapshot is reopened by other people later, so an unusually large one stays slow/heavy for everyone who opens it — unlike the
+                live view above, this has a hard ceiling. Only proceed if you&apos;re sure this size is needed.
+              </p>
+              <button type="button" onClick={handleSaveWithRowsOverride} disabled={saving} className="btn-secondary mt-2 disabled:cursor-not-allowed disabled:opacity-50">
+                I understand, save all {rowsWarning.actualRows.toLocaleString()} rows anyway
+              </button>
+            </>
+          ) : (
+            <p className="mt-1 text-sm">
+              The row count ({rowsWarning.actualRows.toLocaleString()}) exceeds the absolute limit ({rowsWarning.absoluteMaxRows.toLocaleString()}) — you
+              must narrow the pivot before saving; there is no override available here.
+            </p>
+          )}
         </div>
       )}
     </AppShell>
