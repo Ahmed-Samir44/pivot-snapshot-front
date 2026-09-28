@@ -1,16 +1,36 @@
-# React + Vite
+# Pivot Snapshot Builder — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 19 + Vite single-page app for the [Pivot Snapshot Builder](https://github.com/Ahmed-Samir44/pivot-snapshot-back)
+backend. An interactive, Excel-PivotTable-style report builder against a live SQL Server Analysis
+Services cube, with saved-snapshot history and side-by-side version comparison.
 
-Currently, two official plugins are available:
+**Full project history, architecture decisions, and current status live in the backend repo's
+[DECISIONS.md](https://github.com/Ahmed-Samir44/pivot-snapshot-back/blob/master/DECISIONS.md)** —
+it covers both repos, not just the backend (see its own section 0). Read
+`## 3. الحالة الحالية للتنفيذ` there for the latest "what's done / what's left" summary.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Three pages (`react-router-dom`, `HashRouter`):
 
-## React Compiler
+1. **Pivot Builder** (`/`) — build and run a live pivot, save it as a snapshot.
+2. **Snapshot History** (`/history`) — browse saved pivot definitions and their versions.
+3. **Compare Snapshots** (`/compare`) — pick 2+ saved versions with the same structure and see
+   what changed between them.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Running locally
 
-## Expanding the Oxlint configuration
+```bash
+npm install
+npm run dev -- --port 5180
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+Needs the backend running at `http://localhost:5191` (or set `VITE_API_BASE_URL`) and
+`VITE_DATAVERSE_ENVIRONMENT_URL` for the Dataverse-backed snapshot storage — see
+`src/services/dataverseAuth.js` for the sign-in flow (a hand-rolled PKCE flow, not MSAL.js — see
+its own comment for why).
+
+## Build / lint
+
+```bash
+npm run build
+npm run lint
+```
