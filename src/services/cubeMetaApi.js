@@ -14,6 +14,19 @@ async function getJson(path) {
   return response.json();
 }
 
+// Table names only (fast — no column join) — the field picker loads from this first, then calls
+// getDimensionsForTable per table the user actually picks (see its own comment) instead of this
+// eagerly loading every table's columns up front (2301 fields as of 2026-09-27, several seconds).
+export function getTables() {
+  return getJson("/api/cube/tables");
+}
+
+// Columns for one table (its `field` from getTables, e.g. "[Dim Doctor]") — called only for tables
+// the user has picked in the "Which tables do you want to work with?" multiselect.
+export function getDimensionsForTable(table) {
+  return getJson(`/api/cube/dimensions/table?${new URLSearchParams({ table }).toString()}`);
+}
+
 export function getDimensions() {
   return getJson("/api/cube/dimensions");
 }

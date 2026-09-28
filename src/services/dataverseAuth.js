@@ -172,6 +172,10 @@ export function signOut() {
   clearTokens();
 }
 
+// Shared by every concurrent caller currently refreshing — see getDataverseAccessToken's own WHY
+// comment on the race this closes.
+let refreshPromise = null;
+
 // Returns a valid Dataverse access token for the already-signed-in account — refreshes silently
 // via the backend when the cached one is expired or about to be, only throwing when there's
 // nothing left to refresh from (caller should fall back to signIn()).
@@ -191,10 +195,24 @@ export async function getDataverseAccessToken() {
     throw new Error("Not signed in.");
   }
 
-  const tokenResponse = await exchangeWithBackend({
-    grantType: "refresh_token",
-    refreshToken: tokens.refreshToken,
-  });
-  const refreshed = writeTokens(tokenResponse);
+  // Concurrent callers (e.g. Promise.all([getDimensions(), getMeasures()]) in PivotBuilder,
+  // both needing a token at once) must share ONE in-flight refresh, not each fire their own —
+  // two independent refresh_token exchanges racing against the SAME stored refresh token can
+  // both read it before either writes back, and if the token endpoint rotates the refresh token
+  // (routine for Azure AD), whichever exchange lands second is using an already-invalidated
+  // refresh token and fails outright. Caught live, 2026-09-27: dimensions/measures silently
+  // never loaded after a long session had let the cached token expire, with no visible error
+  // anywhere — exactly this race.
+  if (!refreshPromise) {
+    refreshPromise = exchangeWithBackend({
+      grantType: "refresh_token",
+      refreshToken: tokens.refreshToken,
+    })
+      .then((tokenResponse) => writeTokens(tokenResponse))
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  const refreshed = await refreshPromise;
   return refreshed.accessToken;
 }

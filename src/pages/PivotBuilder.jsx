@@ -6,7 +6,7 @@ import PivotGrid from "../components/pivot/PivotGrid";
 import PivotChart from "../components/pivot/PivotChart";
 import { chartUnavailableReason } from "../utils/chartLayout";
 import { queryPivot } from "../services/pivotApi";
-import { getDimensions, getMeasures } from "../services/cubeMetaApi";
+import { getTables, getDimensionsForTable, getMeasures } from "../services/cubeMetaApi";
 import { saveSnapshot } from "../services/snapshotApi";
 
 // This screen renders a live, interactive pivot (React state + re-fetch on every change).
@@ -39,6 +39,22 @@ function fieldLabels(fieldIds, dimensions) {
   return fieldIds.map((id) => dimensions.find((d) => d.field === id)?.displayName ?? id);
 }
 
+// Which tables the "Available fields" picker actually works with, out of everything the cube's
+// schema has (302 tables as of 2026-09-27, mostly internal/system tables no business user needs).
+// Kept in the browser, not the backend: the user asked for a per-user pick ("خلي اليوزر يختار"),
+// not one shared setting for everyone.
+const ENABLED_TABLES_STORAGE_KEY = "pivotSnapshot.enabledTables";
+
+function readEnabledTables() {
+  try {
+    const raw = localStorage.getItem(ENABLED_TABLES_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 // A filter is only ready to send once whichever fields ITS mode actually needs are filled in —
 // each mode uses a different subset of PivotFilter's optional fields (see the backend's
 // MdxPivotQueryBuilder.ValidateFilters for the authoritative per-mode rules this mirrors).
@@ -56,15 +72,73 @@ function isFilterComplete(filter) {
   }
 }
 
+// Everything in `request` EXCEPT each value's `format`/`conditionalFormat` — those two are pure
+// display settings (see displayValues' own WHY comment below) that must NOT mark the on-screen
+// result as stale, unlike every other field here (rows, columns, filters, sort, groupings,
+// totals, showItemsWithNoData, valuesPlacement, calculatedFields/Items, and even a value's
+// showValuesAs — that one DOES need a fresh query since it's computed server-side). Used to detect
+// "the user changed something that actually invalidates the table currently on screen."
+function structuralSignature(req) {
+  return JSON.stringify({
+    ...req,
+    values: req.values.map(({ format: _format, conditionalFormat: _conditionalFormat, ...structural }) => structural),
+  });
+}
+
 export default function PivotBuilder() {
   const [request, setRequest] = useState(EMPTY_REQUEST);
   const [lastQuery, setLastQuery] = useState(null); // the exact cleaned request that produced `result`
   const [result, setResult] = useState(null);
+  // structuralSignature(request) as of the last successful run — compared on every `request` change
+  // below to clear a stale result instead of leaving a table on screen that no longer matches the
+  // current Rows/Columns/Filters/etc (explicitly requested, 2026-09-27: a table left over from a
+  // previous run was confusing once the fields it was built from had already changed).
+  const [lastRunSignature, setLastRunSignature] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [dimensions, setDimensions] = useState([]);
   const [measures, setMeasures] = useState([]);
   const [metaError, setMetaError] = useState(null);
+  // Separate from `loading` above (that one's for Run query). `tables` is the fast, columns-free
+  // catalog (302 tables) the multiselect below picks from; `fieldsByTable` is a cache of each
+  // table's own columns ever fetched, fetched lazily one table at a time instead of eagerly
+  // loading every table's columns up front (2301 fields, several seconds — explicitly asked for
+  // live, 2026-09-27, after the earlier "load everything" version made the panel sit empty that
+  // whole time with nothing saying so).
+  const [tables, setTables] = useState([]);
+  const [tablesLoading, setTablesLoading] = useState(true);
+  const [enabledTableNames, setEnabledTableNames] = useState(readEnabledTables);
+  const [fieldsByTable, setFieldsByTable] = useState({});
+  const [fieldsLoading, setFieldsLoading] = useState(false);
+  // Filtered down to CURRENTLY enabled tables, not the whole cache — un-picking a table in the
+  // multiselect must make it (and its columns) disappear from the picker right away, even though
+  // fieldsByTable itself keeps its columns cached so re-picking it later is instant instead of a
+  // fresh fetch (caught live, 2026-09-27: un-picking "Diagnosis" left it sitting in "Selected
+  // tables" below since dimensions was built from the whole cache instead of just what's enabled).
+  const dimensions = enabledTableNames.flatMap((name) => fieldsByTable[name] ?? []);
+
+  const updateEnabledTables = (names) => {
+    setEnabledTableNames(names);
+    try {
+      localStorage.setItem(ENABLED_TABLES_STORAGE_KEY, JSON.stringify(names));
+    } catch {
+      // Per-browser convenience only — nothing breaks if this can't be saved (private window,
+      // storage disabled, quota); the picker just won't remember the choice next time.
+    }
+  };
+
+  // Number format and conditional format are pure display settings — computed entirely client-side
+  // from cell values already in `result`, no cube round-trip needed. But the grid/chart/export/save
+  // below all key off `lastQuery.values` (the frozen snapshot from the last successful query, whose
+  // field order/count actually matches `result`'s columns) rather than the live `request.values` —
+  // so picking Color scale in a value pill's popover looked like it silently did nothing until you
+  // clicked Run query again (caught live, 2026-09-27). Overlaying just `format`/`conditionalFormat`
+  // from the live request onto lastQuery's values (matched by field name) fixes that without risking
+  // a mismatch when the live request has ADDED/REMOVED a value field entirely — that still correctly
+  // needs a fresh Run query, since `result` wouldn't have that field's column yet.
+  const displayValues = lastQuery?.values?.map((v) => {
+    const live = request.values.find((rv) => rv.field === v.field);
+    return live ? { ...v, format: live.format, conditionalFormat: live.conditionalFormat } : v;
+  });
 
   const [snapshotName, setSnapshotName] = useState("");
   const [tableStyle, setTableStyle] = useState("Default");
@@ -74,11 +148,6 @@ export default function PivotBuilder() {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
   const [saveError, setSaveError] = useState(null);
-  // Set only for SnapshotTooLargeException ("SnapshotTooLarge") — mirrors cellsWarning's "warn,
-  // then let the user explicitly confirm" flow, but (like cardinalityWarning, unlike cellsWarning)
-  // this one has a hard ceiling: a saved snapshot is reopened by other people later, not a
-  // one-time view only the current user sees (see StorageOptions.AbsoluteMaxSnapshotRows).
-  const [rowsWarning, setRowsWarning] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
 
@@ -98,13 +167,73 @@ export default function PivotBuilder() {
   const [confirmedOverrides, setConfirmedOverrides] = useState({});
 
   useEffect(() => {
-    Promise.all([getDimensions(), getMeasures()])
-      .then(([dims, meas]) => {
-        setDimensions(dims);
+    Promise.all([getTables(), getMeasures()])
+      .then(([tbls, meas]) => {
+        setTables(tbls);
         setMeasures(meas);
       })
-      .catch((err) => setMetaError(err.message));
+      .catch((err) => {
+        // A rejection here isn't always a plain Error with a real .message (caught live,
+        // 2026-09-27: a concurrent-token-refresh race — see dataverseAuth.js's WHY comment —
+        // produced one whose falsy .message made {metaError && (...)} render nothing at all,
+        // a completely silent failure with no visible error anywhere). Falling back through
+        // toString()/JSON.stringify guarantees something is always shown here.
+        setMetaError(String(err?.message || err?.toString?.() || JSON.stringify(err) || "Unknown error."));
+      })
+      .finally(() => setTablesLoading(false));
   }, []);
+
+  // Lazily fetches columns for any ENABLED table not already in the cache — fires once on mount
+  // for whatever was already picked in a previous session (from localStorage) and again each time
+  // the user adds a table in the multiselect. Never re-fetches a table already cached, and never
+  // drops a table's columns from the cache just because it was un-picked (re-picking it later is
+  // then instant, and any field from it still placed on the pivot keeps working).
+  //
+  // enabledTableNames holds DISPLAY names ("Doctor"), matching what the multiselect shows and what
+  // FieldPicker's own column-grouping already keys on — but getDimensionsForTable needs the cube's
+  // raw identifier ("[Dim Doctor]"), only known once `tables` itself has loaded. Waiting on
+  // `tables.length` below avoids caching an empty result for a name whose real table just hasn't
+  // arrived yet (that name would otherwise look "already fetched" and never be retried).
+  useEffect(() => {
+    if (tables.length === 0) return;
+
+    const missing = enabledTableNames.filter((name) => !(name in fieldsByTable));
+    if (missing.length === 0) return;
+
+    setFieldsLoading(true);
+    Promise.all(
+      missing.map((name) => {
+        const table = tables.find((t) => t.displayName === name);
+        return table ? getDimensionsForTable(table.field).then((fields) => [name, fields]) : Promise.resolve([name, []]);
+      }),
+    )
+      .then((entries) => {
+        setFieldsByTable((prev) => {
+          const next = { ...prev };
+          for (const [name, fields] of entries) next[name] = fields;
+          return next;
+        });
+      })
+      .catch((err) => {
+        setMetaError(String(err?.message || err?.toString?.() || JSON.stringify(err) || "Unknown error."));
+      })
+      .finally(() => setFieldsLoading(false));
+  }, [enabledTableNames, fieldsByTable, tables]);
+
+  // Drop the table currently on screen the moment the user changes anything that would actually
+  // change the query (as opposed to a pure display tweak like Format/Conditional format, which
+  // structuralSignature ignores) — otherwise it just sits there looking current while it's really
+  // built from Rows/Columns/Filters/etc that no longer match what's selected (explicitly requested,
+  // 2026-09-27). Save/export messages are cleared alongside it since they describe that now-gone
+  // result too.
+  useEffect(() => {
+    if (result && structuralSignature(request) !== lastRunSignature) {
+      setResult(null);
+      setLastQuery(null);
+      setSaveMessage(null);
+      setExportError(null);
+    }
+  }, [request, result, lastRunSignature]);
 
   // newOverride is only ever set by the user explicitly confirming one of the two warnings below
   // (runQueryWithOverride/runQueryWithCellsOverride) — never sent by default, so a normal "Run
@@ -161,6 +290,7 @@ export default function PivotBuilder() {
       const data = await queryPivot(cleaned);
       setResult(data);
       setLastQuery(cleaned);
+      setLastRunSignature(structuralSignature(request));
     } catch (err) {
       if (err.details?.type === "HighCardinalityField") {
         setCardinalityWarning(err.details);
@@ -176,6 +306,28 @@ export default function PivotBuilder() {
     }
   };
 
+  // Clears the whole builder back to a blank slate — fields, result, every warning/message, saved
+  // overrides, and the save-panel inputs. Doesn't touch dimensions/measures (still the same cube,
+  // no need to re-fetch metadata) or loading state (a reset mid-query just lets that request finish
+  // and get its result silently discarded when it lands, same as any other stale-response case).
+  const handleReset = () => {
+    setRequest(EMPTY_REQUEST);
+    setLastQuery(null);
+    setResult(null);
+    setError(null);
+    setCardinalityWarning(null);
+    setCellsWarning(null);
+    setConfirmedOverrides({});
+    setSnapshotName("");
+    setTableStyle("Default");
+    setIncludeChart(false);
+    setChartType("Bar");
+    setReportLayout("Tabular");
+    setSaveMessage(null);
+    setSaveError(null);
+    setExportError(null);
+  };
+
   const runQueryWithOverride = () => {
     if (cardinalityWarning) {
       runQuery({ maxMembersOverride: cardinalityWarning.absoluteMaxMembersPerField });
@@ -188,31 +340,22 @@ export default function PivotBuilder() {
     }
   };
 
-  const handleSave = async (maxRowsOverride) => {
+  const handleSave = async () => {
     if (!snapshotName.trim() || !result || !lastQuery) {
       return;
     }
     setSaving(true);
     setSaveError(null);
     setSaveMessage(null);
-    setRowsWarning(null);
     try {
-      const saved = await saveSnapshot(snapshotName.trim(), lastQuery, result, tableStyle, includeChart, chartType, reportLayout, maxRowsOverride);
+      const saved = await saveSnapshot(snapshotName.trim(), { ...lastQuery, values: displayValues }, result, tableStyle, includeChart, chartType, reportLayout);
       setSaveMessage(`Saved as version ${saved.versionNumber}.`);
     } catch (err) {
-      if (err.details?.type === "SnapshotTooLarge") {
-        setRowsWarning(err.details);
-      } else {
-        setSaveError(err.message);
-      }
+      // SnapshotTooLarge included — a flat, non-overridable ceiling now (removed 2026-09-27 on
+      // request), so this just shows like any other save error rather than a confirm-and-retry.
+      setSaveError(err.message);
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleSaveWithRowsOverride = () => {
-    if (rowsWarning) {
-      handleSave(rowsWarning.actualRows);
     }
   };
 
@@ -229,7 +372,7 @@ export default function PivotBuilder() {
         result,
         rowFieldLabels: fieldLabels(lastQuery.rows, dimensions),
         columnFieldLabels: fieldLabels(lastQuery.columns, dimensions),
-        valueFields: lastQuery.values,
+        valueFields: displayValues,
         valuesPlacement: lastQuery.valuesPlacement,
         filename: snapshotName.trim() || "Pivot",
       });
@@ -254,11 +397,22 @@ export default function PivotBuilder() {
       )}
 
       <div className="mb-6">
-        <FieldPicker value={request} onChange={setRequest} dimensions={dimensions} measures={measures} />
+        <FieldPicker
+          value={request}
+          onChange={setRequest}
+          dimensions={dimensions}
+          measures={measures}
+          tables={tables}
+          tablesLoading={tablesLoading}
+          enabledTableNames={enabledTableNames}
+          onEnabledTableNamesChange={updateEnabledTables}
+          fieldsLoading={fieldsLoading}
+          onReset={handleReset}
+        />
       </div>
 
       <button type="button" onClick={() => runQuery()} disabled={loading} className="btn-primary disabled:cursor-not-allowed disabled:opacity-50">
-        {loading ? "Loading…" : "Run query"}
+        {loading ? "Running…" : "Run query"}
       </button>
 
       {error && <p className="mt-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-red-800">{error}</p>}
@@ -303,7 +457,7 @@ export default function PivotBuilder() {
           result={result}
           rowFieldLabels={fieldLabels(lastQuery?.rows, dimensions)}
           columnFieldLabels={fieldLabels(lastQuery?.columns, dimensions)}
-          valueFields={lastQuery?.values}
+          valueFields={displayValues}
           layout={reportLayout}
           valuesPlacement={lastQuery?.valuesPlacement}
         />
@@ -314,7 +468,7 @@ export default function PivotBuilder() {
           <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-muted">{chartUnavailableReason(result, lastQuery)}</p>
         )}
       {includeChart && (
-        <PivotChart result={result} valueFields={lastQuery?.values} chartType={chartType} valuesPlacement={lastQuery?.valuesPlacement} />
+        <PivotChart result={result} valueFields={displayValues} chartType={chartType} valuesPlacement={lastQuery?.valuesPlacement} />
       )}
 
       {result && (
@@ -386,27 +540,6 @@ export default function PivotBuilder() {
         </div>
       )}
 
-      {rowsWarning && (
-        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">
-          <p>{rowsWarning.error}</p>
-          {rowsWarning.canOverride ? (
-            <>
-              <p className="mt-1 text-sm">
-                A saved snapshot is reopened by other people later, so an unusually large one stays slow/heavy for everyone who opens it — unlike the
-                live view above, this has a hard ceiling. Only proceed if you&apos;re sure this size is needed.
-              </p>
-              <button type="button" onClick={handleSaveWithRowsOverride} disabled={saving} className="btn-secondary mt-2 disabled:cursor-not-allowed disabled:opacity-50">
-                I understand, save all {rowsWarning.actualRows.toLocaleString()} rows anyway
-              </button>
-            </>
-          ) : (
-            <p className="mt-1 text-sm">
-              The row count ({rowsWarning.actualRows.toLocaleString()}) exceeds the absolute limit ({rowsWarning.absoluteMaxRows.toLocaleString()}) — you
-              must narrow the pivot before saving; there is no override available here.
-            </p>
-          )}
-        </div>
-      )}
     </AppShell>
   );
 }

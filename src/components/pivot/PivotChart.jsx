@@ -18,6 +18,7 @@ const BAR_GAP = 8;
 // PivotBuilder.jsx to explain — flagged live 2026-09-27 — why a large pivot silently shows no
 // chart, instead of it looking broken) — kept out of this file so mixing component and
 // non-component exports here doesn't break React Fast Refresh.
+// Must stay in sync with PivotChartRenderer.cs's identical array (saved snapshot vs. live preview).
 const SLICE_COLORS = ["#AE8C67", "#6a7380", "#63BE7B", "#F8696B", "#FFEB84", "#638EC6", "#9a7b57", "#1f2430", "#c9a876", "#8a94a3"];
 
 // One CATEGORY per detail row (labels[0]). One SERIES per detail column GROUP of the FIRST value

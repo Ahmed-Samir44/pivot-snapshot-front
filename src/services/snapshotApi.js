@@ -18,25 +18,15 @@ async function request(path, options = {}) {
   const data = await response.json().catch(() => null);
   if (!response.ok) {
     const error = new Error(data?.error || `Request to ${path} failed with status ${response.status}`);
-    // Structured fields (type/actualRows/maxRows/canOverride, etc.) carried on the Error object —
-    // same "details, not just message" convention as pivotApi.js's queryPivot, so a caller can
-    // offer a specific "confirm and save anyway" retry (see SnapshotTooLargeException).
+    // Structured fields (type/actualRows/maxRows, etc.) carried on the Error object — same
+    // "details, not just message" convention as pivotApi.js's queryPivot.
     error.details = data;
     throw error;
   }
   return data;
 }
 
-export function saveSnapshot(
-  name,
-  pivotRequest,
-  pivotResult,
-  tableStyle = "Default",
-  includeChart = false,
-  chartType = "Bar",
-  reportLayout = "Tabular",
-  maxRowsOverride = null,
-) {
+export function saveSnapshot(name, pivotRequest, pivotResult, tableStyle = "Default", includeChart = false, chartType = "Bar", reportLayout = "Tabular") {
   return request("/api/snapshots", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -48,7 +38,6 @@ export function saveSnapshot(
       includeChart,
       chartType,
       reportLayout,
-      ...(maxRowsOverride ? { maxRowsOverride } : {}),
     }),
   });
 }

@@ -59,10 +59,22 @@ export default function HierarchicalCubePathSelect({
   value = [],
   onChange,
   label,
+  icon: Icon = null,
   placeholderAdd = "Choose dimension and field(s), then add — all matching paths are added at once.",
   addButtonLabel = "Add",
   dragSourceKey = null,
   onFieldDropped = null,
+  // true when the caller wraps several of these in one shared card (Columns + Rows inside the
+  // Fields strip's merged "real drop zones" card, 2026-09-27) — drops this component's own
+  // border/shadow/background/padding so it doesn't nest a card inside a card, keeping only the
+  // flex layout its pill list relies on.
+  bare = false,
+  // "right" for whichever instance ends up rightmost on screen (Rows, once Filters/Columns/Rows
+  // merged into one card next to the Values card pinned at the strip's right edge) — Popover's
+  // default "left" expands rightward with nowhere to go there and gets clipped by the browser edge
+  // (same overflow bug already fixed once for the Values pill's own popover, caught live again here
+  // for this one, 2026-09-27).
+  align = "left",
 }) {
   const [step1, setStep1] = useState(null);
   const [step2Multi, setStep2Multi] = useState([]);
@@ -170,17 +182,19 @@ export default function HierarchicalCubePathSelect({
   };
 
   return (
-    // flex h-full flex-col: this box sits in a CSS grid row (FieldPicker's "Drop zones" strip)
-    // that stretches every card to match the tallest sibling — without this, the <ul> drop target
-    // below stayed sized to its own pill content, leaving genuine leftover white space inside a
-    // stretched card that LOOKED droppable but wasn't (caught live, 2026-09-23). flex-1 on the
-    // <ul> below is what actually claims that leftover space.
-    <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-bold uppercase tracking-wide text-muted">
+    // flex h-full flex-col: this box sits in a flex row (FieldPicker's "Fields" strip) that
+    // stretches every card to match the tallest sibling — without this, the <ul> drop target below
+    // stayed sized to its own pill content, leaving genuine leftover white space inside a stretched
+    // card that LOOKED droppable but wasn't (caught live, 2026-09-23). flex-1 on the <ul> below is
+    // what actually claims that leftover space.
+    <div className={`flex h-full flex-col p-2 ${bare ? "" : "rounded-xl border border-slate-200 bg-white shadow-sm"}`}>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
+          {Icon && <Icon className="h-3.5 w-3.5" />}
           {label} {value.length > 0 && <span className="text-gold">({value.length})</span>}
         </span>
         <Popover
+          align={align}
           trigger={(toggle) => (
             <button
               type="button"
@@ -250,7 +264,7 @@ export default function HierarchicalCubePathSelect({
           "start" keeps the pills their natural size while the extra height still counts as part
           of the droppable area (the <ul> itself still gets the drop handlers). */}
       <ul
-        className={`flex min-h-[2.25rem] flex-1 flex-wrap content-start gap-1.5 rounded-lg ${value.length === 0 ? "items-center" : "items-start"} ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
+        className={`flex min-h-[2rem] flex-1 flex-wrap content-start gap-1.5 rounded-lg ${value.length === 0 ? "items-center" : "items-start"} ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
           value.length === 0 ? "border-2 border-dashed border-slate-200 px-2" : ""
         }`}
         onDragOver={dragSourceKey && onFieldDropped ? handleDragOver : undefined}

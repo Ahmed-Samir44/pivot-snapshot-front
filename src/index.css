@@ -16,7 +16,7 @@
   }
 
   .btn-primary {
-    @apply bg-gradient-to-r from-gold to-gold-strong text-white font-bold py-2 px-4 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105;
+    @apply bg-gradient-to-r from-gold to-gold-strong text-white font-bold py-2 px-4 rounded-xl shadow-gold-button hover:shadow-gold-button-hover transition-all duration-200 hover:scale-105;
   }
 
   .btn-secondary {

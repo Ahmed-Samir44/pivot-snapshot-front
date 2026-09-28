@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import Select from "react-select";
-import { X, GripVertical, Plus, ChevronDown } from "lucide-react";
+import { X, GripVertical, Plus, ChevronDown, Filter, Columns3, Rows3, Sigma, Loader2 } from "lucide-react";
 import HierarchicalCubePathSelect from "../forms/HierarchicalCubePathSelect";
 import MultiSelectField from "../forms/MultiSelectField";
 import Popover from "../forms/Popover";
@@ -27,37 +27,8 @@ const SHOW_VALUES_AS_OPTIONS = [
 
 const DEFAULT_FORMAT = { type: "General", decimalPlaces: 2, currencySymbol: "EGP" };
 
-// Same categorical palette PivotChart.jsx/PivotChartRenderer.cs already use for chart series — a
-// distinct color per dimension group's card header (like the reference ERD tool's per-domain
-// node colors) reusing an existing app-wide palette instead of inventing a clashing new one.
-const GROUP_HEADER_COLORS = [
-  "#AE8C67", "#6a7380", "#63BE7B", "#F8696B", "#FFEB84", "#638EC6", "#9a7b57", "#1f2430", "#c9a876", "#8a94a3",
-];
-
-// The palette includes a light yellow (#FFEB84) that white text would nearly vanish on — picked
-// per color via relative luminance instead of assuming every entry is dark enough for white text.
-function readableTextColorFor(hex) {
-  const r = parseInt(hex.slice(1, 3), 16) / 255;
-  const g = parseInt(hex.slice(3, 5), 16) / 255;
-  const b = parseInt(hex.slice(5, 7), 16) / 255;
-  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return luminance > 0.6 ? "#1f2430" : "#ffffff";
-}
-
 const nativeSelectClass =
   "rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent";
-
-function SectionCard({ title, badge, children }) {
-  return (
-    <div className="card">
-      <h3 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-muted">
-        {title}
-        {badge > 0 && <span className="rounded-full bg-gold/20 px-2 py-0.5 text-xs font-bold text-gold">{badge}</span>}
-      </h3>
-      {children}
-    </div>
-  );
-}
 
 // A row of colored name+count chips, each toggling whether the full thing it represents is
 // shown below — the SAME show/hide-by-picking-a-chip pattern used twice in this file: once for
@@ -69,30 +40,26 @@ function SectionCard({ title, badge, children }) {
 function ToggleChipRow({ items, visibleNames, onToggle, onSelectAll, onClearAll }) {
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">
-      {items.map(({ name, badge }, index) => {
-        const headerColor = GROUP_HEADER_COLORS[index % GROUP_HEADER_COLORS.length];
-        const textColor = readableTextColorFor(headerColor);
+      {items.map(({ name, badge }) => {
         const isVisible = visibleNames.includes(name);
-        const badgeStyle = { background: textColor === "#ffffff" ? "rgba(255,255,255,0.3)" : "rgba(31,36,48,0.15)", color: textColor };
         return (
           <button
             key={name}
             type="button"
             onClick={() => onToggle(name)}
-            className={`flex items-center gap-2.5 rounded-lg px-4 py-2.5 text-sm font-bold uppercase tracking-wide shadow-sm transition ${
+            // Solid gold for every chip regardless of table — a distinct rainbow color per table
+            // (one of 10 cycling colors) looked inconsistent with the rest of the app's single
+            // gold/ink theme, especially once tables became a user-picked, per-browser subset
+            // rather than a small fixed handful (flagged live, 2026-09-27).
+            className={`flex items-center gap-2.5 rounded-lg bg-gold px-4 py-2.5 text-sm font-bold uppercase tracking-wide text-white shadow-sm transition ${
               isVisible ? "ring-2 ring-ink/25 ring-offset-2" : ""
             }`}
-            style={{ background: headerColor, color: textColor }}
             aria-pressed={isVisible}
             title={isVisible ? `Hide ${name}` : `Show ${name}`}
           >
             {name}
-            {badge > 0 && (
-              <span className="rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none" style={badgeStyle}>
-                {badge}
-              </span>
-            )}
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-sm font-bold leading-none" style={badgeStyle}>
+            {badge > 0 && <span className="rounded-full bg-white/30 px-1.5 py-0.5 text-[10px] font-bold leading-none">{badge}</span>}
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/30 text-sm font-bold leading-none">
               {isVisible ? "−" : "+"}
             </span>
           </button>
@@ -128,7 +95,7 @@ function ToggleChipRow({ items, visibleNames, onToggle, onSelectAll, onClearAll 
 // across 8+ dimensions, and a single ungrouped list of same-weight buttons became unreadable at
 // that size (caught live 2026-09-22: "ايه الشكل القذر دا"). Matches Excel's own Field List, which
 // is always grouped by table/dimension with a bold header per group, never one flat list.
-function AvailableFieldsPanel({ dimensions, isPlaced }) {
+function AvailableFieldsPanel({ dimensions, isPlaced, tables, tablesLoading, enabledTableNames, onEnabledTableNamesChange, fieldsLoading }) {
   const groups = [];
   const groupIndexByName = new Map();
   const addToGroup = (groupName, field, label) => {
@@ -139,6 +106,9 @@ function AvailableFieldsPanel({ dimensions, isPlaced }) {
     groups[groupIndexByName.get(groupName)].fields.push({ field, label });
   };
 
+  // `dimensions` only ever holds columns for tables PivotBuilder has already fetched (i.e. every
+  // currently-enabled table) — so grouping it is enough on its own, no separate filter needed
+  // against enabledTableNames here.
   dimensions.forEach((d) => {
     const dotIndex = d.displayName.indexOf(".");
     const groupName = dotIndex === -1 ? d.displayName : d.displayName.slice(0, dotIndex);
@@ -146,52 +116,84 @@ function AvailableFieldsPanel({ dimensions, isPlaced }) {
     addToGroup(groupName, d.field, label);
   });
 
-  // No table shown until the user explicitly picks one (+ chip or "Select all") — a real cube
-  // has 8+ tables and 20+ columns, so opening with every column list expanded is exactly the
-  // wall-of-content this whole redesign exists to avoid.
+  // No table's COLUMN list shown until the user explicitly picks one (+ chip or "Select all")
+  // even among their enabled tables — a handful of tables can still mean 20+ columns each, so
+  // opening with every column list expanded is exactly the wall-of-content this redesign exists
+  // to avoid.
   const [visibleGroupNames, setVisibleGroupNames] = useState([]);
-  const allGroupNames = groups.map((g) => g.name);
   const visibleGroups = groups.filter((g) => visibleGroupNames.includes(g.name));
 
   const toggleGroup = (name) => {
     setVisibleGroupNames((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
   };
 
+  // No overarching card title or intro paragraph — THREE distinct labeled sub-sections below
+  // already say everything: "TABLES" (the multiselect — every table that EXISTS), "SELECTED
+  // TABLES" (the chip row — every table you've actually picked, click a chip to expand/collapse
+  // its columns), "DIMENSIONS" (the picked-and-expanded tables' actual draggable columns). A
+  // generic "Available fields" heading above all three read as one more, redundant label once
+  // those three already existed (flagged live, 2026-09-27 — removed on request).
   return (
-    <SectionCard title="Available fields">
-      <p className="mb-3 text-xs text-muted">
-        Pick which tables to show (+ to reveal its columns, − to hide them again), then drag a column into Filters, Rows, or Columns below. Measures are picked
-        separately in the Values box.
-      </p>
-      <ToggleChipRow
-        items={groups.map((g) => ({ name: g.name, badge: g.fields.length }))}
-        visibleNames={visibleGroupNames}
-        onToggle={toggleGroup}
-        onSelectAll={() => setVisibleGroupNames(allGroupNames)}
-        onClearAll={() => setVisibleGroupNames([])}
-      />
-      {/* items-start: without it, CSS grid stretches every card in a row to match the row's
+    <div className="card">
+      <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-muted">Tables</p>
+      {/* tablesLoading: just the table NAMES (302 of them) — fast, no column join, so this is
+          brief. fieldsLoading: columns for whichever tables are newly picked — see PivotBuilder's
+          own WHY comment on why this is fetched lazily per table instead of all 2301 up front. */}
+      {tablesLoading ? (
+        <p className="mb-2 flex items-center gap-1.5 text-xs text-muted">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading the list of tables…
+        </p>
+      ) : (
+        <>
+          <MultiSelectField
+            options={tables.map((t) => t.displayName)}
+            value={enabledTableNames}
+            onChange={onEnabledTableNamesChange}
+            placeholder="Search and pick tables…"
+          />
+          {fieldsLoading && (
+            <p className="mb-2 flex items-center gap-1.5 text-xs text-muted">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading columns…
+            </p>
+          )}
+          {enabledTableNames.length === 0 ? (
+            <p className="mb-2 text-xs text-muted">Pick at least one table above to see its columns here.</p>
+          ) : (
+            <>
+              <p className="mb-1.5 mt-3 text-xs font-bold uppercase tracking-wide text-muted">Selected tables</p>
+              <ToggleChipRow
+                items={groups.map((g) => ({ name: g.name, badge: g.fields.length }))}
+                visibleNames={visibleGroupNames}
+                onToggle={toggleGroup}
+                onSelectAll={() => setVisibleGroupNames(groups.map((g) => g.name))}
+                onClearAll={() => setVisibleGroupNames([])}
+              />
+            </>
+          )}
+        </>
+      )}
+      {/* Dimensions label only once something's actually expanded — no point heading an empty
+          grid. items-start: without it, CSS grid stretches every card in a row to match the row's
           TALLEST sibling (e.g. a 10-field table forcing a 2-field table's card to the same
-          height) — each card should only be as tall as its own field list. */}
-      <div className="grid max-h-[30rem] grid-cols-1 items-start gap-3 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {visibleGroups.map((group) => {
-          const groupIndex = groups.indexOf(group);
-          const headerColor = GROUP_HEADER_COLORS[groupIndex % GROUP_HEADER_COLORS.length];
-          const textColor = readableTextColorFor(headerColor);
-          return (
+          height) — each card should only be as tall as its own field list, up to its own scroll
+          cap (see the <ul>'s own comment below) rather than a max-height on the WHOLE grid, which
+          used to scroll every card together — including the mostly-empty ones — just because ONE
+          table's list was long (flagged live, 2026-09-27, with a single 33-field table). */}
+      {visibleGroups.length > 0 && <p className="mb-1.5 mt-3 text-xs font-bold uppercase tracking-wide text-muted">Dimensions</p>}
+      <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {visibleGroups.map((group) => (
           <div key={group.name} className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between gap-2 px-3 py-1.5" style={{ background: headerColor }}>
-              <span className="truncate text-xs font-bold uppercase tracking-wide" style={{ color: textColor }}>
-                {group.name}
-              </span>
-              <span
-                className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold"
-                style={{ background: textColor === "#ffffff" ? "rgba(255,255,255,0.25)" : "rgba(31,36,48,0.12)", color: textColor }}
-              >
-                {group.fields.length}
-              </span>
+            {/* Solid gold, same as every table's chip above — no more one-of-10 rainbow color per
+                table (see ToggleChipRow's own WHY comment). */}
+            <div className="flex items-center justify-between gap-2 bg-gold px-3 py-1.5">
+              <span className="truncate text-xs font-bold uppercase tracking-wide text-white">{group.name}</span>
+              <span className="shrink-0 rounded-full bg-white/25 px-2 py-0.5 text-[10px] font-bold text-white">{group.fields.length}</span>
             </div>
-            <ul>
+            {/* Scrolls THIS table's own list past 30rem, instead of the old max-height on the whole
+                grid above scrolling every visible card together over one long table. */}
+            <ul className="max-h-[30rem] overflow-y-auto">
               {group.fields.map(({ field, label }, fieldIndex) => (
                 <li
                   key={field}
@@ -207,10 +209,9 @@ function AvailableFieldsPanel({ dimensions, isPlaced }) {
               ))}
             </ul>
           </div>
-          );
-        })}
+        ))}
       </div>
-    </SectionCard>
+    </div>
   );
 }
 
@@ -247,7 +248,7 @@ function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, empty
   return (
     <div
       className={`flex-1 rounded-lg ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
-        isEmpty && emptyIsDropTarget ? "min-h-[3rem] border-2 border-dashed border-slate-200 p-3" : isEmpty ? "min-h-[3rem] p-3" : ""
+        isEmpty && emptyIsDropTarget ? "min-h-[2rem] border-2 border-dashed border-slate-200 p-2" : isEmpty ? "" : ""
       }`}
       onDragOver={(e) => {
         e.preventDefault();
@@ -981,7 +982,14 @@ function ValuePill({ v, onUpdate, onUpdateFormat, onRemove, onDropReorder, rows 
 
   return (
     <div onDragOver={(e) => e.preventDefault()} onDrop={onDropReorder}>
+      {/* align="right": the Values card sits flush against the right edge of the "Fields"
+          strip (it's a w-fit card pushed there by Filters/Columns/Rows' flex-1 — see FieldPicker's
+          own WHY comment on that grid), so Popover's default left-aligned/expand-right panel had
+          nowhere to expand into and was clipped by the browser's edge (caught live, 2026-09-27).
+          Opening it expanding leftward, into the room Filters/Columns/Rows have, keeps it on
+          screen. */}
       <Popover
+        align="right"
         trigger={(toggle) => (
           <span
             draggable
@@ -1096,7 +1104,18 @@ function ValuePill({ v, onUpdate, onUpdateFormat, onRemove, onDropReorder, rows 
   );
 }
 
-export default function FieldPicker({ value, onChange, dimensions, measures }) {
+export default function FieldPicker({
+  value,
+  onChange,
+  dimensions,
+  measures,
+  tables,
+  tablesLoading,
+  enabledTableNames,
+  onEnabledTableNamesChange,
+  fieldsLoading,
+  onReset,
+}) {
   const dimensionOptions = dimensions.map((d) => ({ value: d.field, label: d.displayName }));
   const measureOptions = measures.map((m) => ({ value: m.field, label: m.displayName }));
   // A calculated field's own LeftField/RightField must reference a real cube measure only (no
@@ -1227,91 +1246,138 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
 
   return (
     <div className="grid grid-cols-1 gap-6">
-      <AvailableFieldsPanel dimensions={dimensions} isPlaced={isFieldPlaced} />
+      <AvailableFieldsPanel
+        dimensions={dimensions}
+        isPlaced={isFieldPlaced}
+        tables={tables}
+        tablesLoading={tablesLoading}
+        enabledTableNames={enabledTableNames}
+        onEnabledTableNamesChange={onEnabledTableNamesChange}
+        fieldsLoading={fieldsLoading}
+      />
 
-      {/* Compact "Drop Zones" strip — Filters/Columns/Rows/Values always visible as small boxes,
-          each its own drop target + pill list. A pill shows only its field/measure name; the
-          full add/edit form (dimension picker, filter mode, show-values-as, ...) lives in a
-          Popover behind the box's "+" or, for Filters/Values, behind the pill itself — one click
-          away instead of permanently occupying space, per-item since a filter/value pill needs
-          its OWN config, not just a name. */}
+      {/* Compact fields strip — Filters/Columns/Rows/Values always visible as small boxes, each
+          with its own pill list. A pill shows only its field/measure name; the full add/edit form
+          (dimension picker, filter mode, show-values-as, ...) lives in a Popover behind the box's
+          "+" or, for Filters/Values, behind the pill itself — one click away instead of
+          permanently occupying space, per-item since a filter/value pill needs its OWN config, not
+          just a name. Labeled "Fields", not "Drop zones": Values doesn't actually accept a field
+          dropped onto it — measures have no drag source anywhere (added only via its "Choose
+          measures…" select, see AvailableFieldsPanel's own WHY comment) — only Filters/Columns/Rows
+          are real drop targets, so calling all four "drop zones" was misleading (flagged live,
+          2026-09-27). */}
       <div>
-        <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Drop zones</p>
-        <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-xs font-bold uppercase tracking-wide text-muted">
-                Filters {value.filters.length > 0 && <span className="text-gold">({value.filters.length})</span>}
-              </span>
-              <button
-                type="button"
-                onClick={addFilter}
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold hover:bg-gold/25"
-                aria-label="Add filter"
-                title="Add filter"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <ZoneDropArea zoneKey="filters" onFieldDropped={moveField} isEmpty={value.filters.length === 0}>
-              <div className="flex flex-wrap gap-1.5">
-                {value.filters.map((filter, index) => (
-                  <FilterPill
-                    key={index}
-                    filter={filter}
-                    dimensionOptions={dimensionOptions}
-                    // TopN/BottomN's ByMeasureField must match a field already in Values (see
-                    // MdxPivotQueryBuilder.ValidateFilters) — not just any cube measure, so this is
-                    // value.values, not the full measureOptions list used elsewhere in this component.
-                    selectedValueOptions={value.values.filter((v) => v.field).map((v) => ({ value: v.field, label: v.field }))}
-                    onChange={(patch) => updateFilter(index, patch)}
-                    onRemove={() => removeFilter(index)}
-                  />
-                ))}
+        {/* Reset sits at the right of this row, roughly above the Values card below (the
+            rightmost of the four) — moved out of the page header per explicit request,
+            2026-09-27. */}
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-bold uppercase tracking-wide text-muted">Fields</p>
+          <button type="button" onClick={onReset} className="btn-secondary px-3 py-1.5 text-xs">
+            Reset
+          </button>
+        </div>
+        {/* flex, not grid: Values is a fixed w-fit card (it only needs enough width for its
+            "Values on: ○ Columns ○ Rows" line — see its own comment below), and a 4-column grid
+            left the rest of that track empty. flex-1 on the other three lets them actually claim
+            that freed width instead of leaving blank space (flagged live from a screenshot,
+            2026-09-27). */}
+        <div className="flex flex-wrap items-stretch gap-2">
+          {/* Filters/Columns/Rows share ONE card now (requested live, 2026-09-27, right after
+              renaming this strip's own label from "Drop zones" to "Fields" for the same reason):
+              they're the three fields that actually accept a dropped field, so grouping them into
+              one visual card and leaving Values — which never accepts one — as its own separate
+              card makes that distinction visible, not just documented in a comment. divide-x draws
+              the seam between them instead of three separate borders/shadows. No h-full on this
+              outer card: "height: 100%" computes to a non-auto value, which per the flexbox spec
+              DISABLES align-self:stretch (stretch only overrides a cross-size that computes to
+              auto) — caught live the same day on the old separate-cards layout, see displayValues'
+              sibling fix in PivotBuilder.jsx for the analogous bug. */}
+          <div className="flex min-w-[220px] flex-1 items-stretch divide-x divide-slate-200 self-stretch rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex min-w-[180px] flex-1 flex-col p-2">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
+                  <Filter className="h-3.5 w-3.5" />
+                  Filters {value.filters.length > 0 && <span className="text-gold">({value.filters.length})</span>}
+                </span>
+                <button
+                  type="button"
+                  onClick={addFilter}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold hover:bg-gold/25"
+                  aria-label="Add filter"
+                  title="Add filter"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
               </div>
-            </ZoneDropArea>
+              <ZoneDropArea zoneKey="filters" onFieldDropped={moveField} isEmpty={value.filters.length === 0}>
+                <div className="flex flex-wrap gap-1.5">
+                  {value.filters.map((filter, index) => (
+                    <FilterPill
+                      key={index}
+                      filter={filter}
+                      dimensionOptions={dimensionOptions}
+                      // TopN/BottomN's ByMeasureField must match a field already in Values (see
+                      // MdxPivotQueryBuilder.ValidateFilters) — not just any cube measure, so this is
+                      // value.values, not the full measureOptions list used elsewhere in this component.
+                      selectedValueOptions={value.values.filter((v) => v.field).map((v) => ({ value: v.field, label: v.field }))}
+                      onChange={(patch) => updateFilter(index, patch)}
+                      onRemove={() => removeFilter(index)}
+                    />
+                  ))}
+                </div>
+              </ZoneDropArea>
+            </div>
+
+            <div className="min-w-[180px] flex-1">
+              <HierarchicalCubePathSelect
+                bare
+                label="Columns"
+                icon={Columns3}
+                options={dimensions.map((d) => d.field)}
+                value={value.columns}
+                onChange={(columns) => {
+                  // Dropping a column field also drops any grouping/calculated item that referenced
+                  // it — the backend rejects both on a field that's no longer in Rows/Columns
+                  // (ValidateGroupings, ValidateCalculatedItems). A field still present in Rows keeps
+                  // its grouping (it didn't actually leave either axis).
+                  const stillGrouped = (field) => columns.includes(field) || value.rows.includes(field);
+                  const dateGroupings = value.dateGroupings.filter((g) => stillGrouped(g.field));
+                  const numericGroupings = value.numericGroupings.filter((g) => stillGrouped(g.field));
+                  const calculatedItems = clearOrphanedCalculatedItems(value.calculatedItems, value.rows, columns);
+                  // columnLevelSorts' `level` values are positional indexes into Columns — any add,
+                  // remove, or reorder here can shift which field a stored index actually points to,
+                  // so they're cleared rather than risking a rule silently applying to the wrong
+                  // field (same defensive-clear approach as groupings/calculatedItems above).
+                  onChange({ ...value, columns, dateGroupings, numericGroupings, calculatedItems, columnLevelSorts: [] });
+                }}
+                dragSourceKey="columns"
+                onFieldDropped={moveField}
+              />
+            </div>
+
+            <div className="min-w-[180px] flex-1">
+              <HierarchicalCubePathSelect
+                bare
+                align="right"
+                label="Rows"
+                icon={Rows3}
+                options={dimensions.map((d) => d.field)}
+                value={value.rows}
+                onChange={(rows) => {
+                  // Mirror of the Columns handler above — a field still present in Columns keeps its
+                  // grouping.
+                  const stillGrouped = (field) => rows.includes(field) || value.columns.includes(field);
+                  const dateGroupings = value.dateGroupings.filter((g) => stillGrouped(g.field));
+                  const numericGroupings = value.numericGroupings.filter((g) => stillGrouped(g.field));
+                  const calculatedItems = clearOrphanedCalculatedItems(value.calculatedItems, rows, value.columns);
+                  // Mirror of the columnLevelSorts clear above.
+                  onChange({ ...value, rows, dateGroupings, numericGroupings, calculatedItems, rowLevelSorts: [] });
+                }}
+                dragSourceKey="rows"
+                onFieldDropped={moveField}
+              />
+            </div>
           </div>
-
-          <HierarchicalCubePathSelect
-            label="Columns"
-            options={dimensions.map((d) => d.field)}
-            value={value.columns}
-            onChange={(columns) => {
-              // Dropping a column field also drops any grouping/calculated item that referenced
-              // it — the backend rejects both on a field that's no longer in Rows/Columns
-              // (ValidateGroupings, ValidateCalculatedItems). A field still present in Rows keeps
-              // its grouping (it didn't actually leave either axis).
-              const stillGrouped = (field) => columns.includes(field) || value.rows.includes(field);
-              const dateGroupings = value.dateGroupings.filter((g) => stillGrouped(g.field));
-              const numericGroupings = value.numericGroupings.filter((g) => stillGrouped(g.field));
-              const calculatedItems = clearOrphanedCalculatedItems(value.calculatedItems, value.rows, columns);
-              // columnLevelSorts' `level` values are positional indexes into Columns — any add,
-              // remove, or reorder here can shift which field a stored index actually points to,
-              // so they're cleared rather than risking a rule silently applying to the wrong
-              // field (same defensive-clear approach as groupings/calculatedItems above).
-              onChange({ ...value, columns, dateGroupings, numericGroupings, calculatedItems, columnLevelSorts: [] });
-            }}
-            dragSourceKey="columns"
-            onFieldDropped={moveField}
-          />
-
-          <HierarchicalCubePathSelect
-            label="Rows"
-            options={dimensions.map((d) => d.field)}
-            value={value.rows}
-            onChange={(rows) => {
-              // Mirror of the Columns handler above — a field still present in Columns keeps its
-              // grouping.
-              const stillGrouped = (field) => rows.includes(field) || value.columns.includes(field);
-              const dateGroupings = value.dateGroupings.filter((g) => stillGrouped(g.field));
-              const numericGroupings = value.numericGroupings.filter((g) => stillGrouped(g.field));
-              const calculatedItems = clearOrphanedCalculatedItems(value.calculatedItems, rows, value.columns);
-              // Mirror of the columnLevelSorts clear above.
-              onChange({ ...value, rows, dateGroupings, numericGroupings, calculatedItems, rowLevelSorts: [] });
-            }}
-            dragSourceKey="rows"
-            onFieldDropped={moveField}
-          />
 
           {/* No separate aggregation dropdown: confirmed against the real cube (2026-09-21) that
               measures are pre-built with their aggregation baked in — see PivotValueField in the
@@ -1320,15 +1386,24 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
               AvailableFieldsPanel's WHY comment); a pill's own Popover then covers Show Values
               As/Format/Conditional format, and pills can still be drag-reordered among themselves
               since that order affects the generated MDX (see handleValueRowDrop). */}
-          <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-xs font-bold uppercase tracking-wide text-muted">
+          {/* justify-self-start + w-fit: the grid track this sits in is as wide as the other 3
+              cards, but this card's own content (a short select + two radio labels) doesn't need
+              that width — stretching it to fill the track just left a lot of empty space on the
+              right (flagged live from a screenshot, 2026-09-27). w-fit rather than a guessed fixed
+              width so it hugs the "Values on: ○ Columns ○ Rows" line exactly, whatever that line's
+              actual rendered width is — a hardcoded w-56 was narrower than that line and wrapped
+              "Values on:" onto two lines (also caught live). */}
+          {/* No h-full here either — see the Filters card's WHY comment above; same fix. */}
+          <div className="flex w-fit flex-none flex-col self-stretch rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
+                <Sigma className="h-3.5 w-3.5" />
                 Values {value.values.length > 0 && <span className="text-gold">({value.values.length})</span>}
               </span>
             </div>
             <Select
               isMulti
-              className="react-select-container mb-2"
+              className="react-select-container mb-1.5"
               classNamePrefix="react-select"
               placeholder="Choose measures…"
               options={valueFieldOptions}
@@ -1336,23 +1411,49 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
               onChange={(selected) => setSelectedValueFields((selected ?? []).map((opt) => opt.value))}
               menuPortalTarget={typeof document !== "undefined" ? document.body : null}
               menuPosition="fixed"
-              styles={{ menuPortal: (base) => ({ ...base, zIndex: 10000 }) }}
+              styles={{
+                menuPortal: (base) => ({ ...base, zIndex: 10000 }),
+                // Compact card, not react-select's default ~38px control — shrunk alongside the
+                // rest of the Drop Zones strip (caught live, 2026-09-27: the strip was still too
+                // tall after the "Values on" line-break fix, because this control's default
+                // height was the next biggest contributor).
+                control: (base) => ({ ...base, minHeight: "30px", minWidth: "180px" }),
+                valueContainer: (base) => ({ ...base, padding: "0 6px" }),
+                indicatorsContainer: (base) => ({ ...base, height: "30px" }),
+              }}
             />
-            <select
-              className={`${nativeSelectClass} mb-2 w-full`}
-              value={value.valuesPlacement ?? "Columns"}
-              onChange={(e) => onChange({ ...value, valuesPlacement: e.target.value })}
+            {/* role="radiogroup" instead of a real <fieldset>/<legend>: a <legend> is block-level
+                and forces its own line above the radios, which — via the "Fields" strip's
+                items-stretch — was making every OTHER card stretch taller to match (caught live,
+                2026-09-27). A single-line label + radios keeps the same height this box had with
+                the old <select>. */}
+            <div
+              className="mb-1.5 flex items-center gap-3 whitespace-nowrap"
+              role="radiogroup"
+              aria-label="Values on"
               title="Excel's own 'drag Σ Values between Columns and Rows' — see DECISIONS.md for this phase's scope cuts (needs a Column field, Normal-only Show Values As, no chart)"
             >
-              <option value="Columns">Values on: Columns</option>
-              <option value="Rows">Values on: Rows</option>
-            </select>
+              <span className="text-xs font-medium text-muted">Values on:</span>
+              {["Columns", "Rows"].map((placement) => (
+                <label key={placement} className="flex items-center gap-1.5 text-sm text-ink">
+                  <input
+                    type="radio"
+                    name="valuesPlacement"
+                    value={placement}
+                    checked={(value.valuesPlacement ?? "Columns") === placement}
+                    onChange={(e) => onChange({ ...value, valuesPlacement: e.target.value })}
+                    className="h-4 w-4 accent-gold"
+                  />
+                  {placement}
+                </label>
+              ))}
+            </div>
             <ZoneDropArea
               zoneKey="values"
               onFieldDropped={moveField}
               isFieldAccepted={(field) => valueFieldOptions.some((opt) => opt.value === field)}
               isEmpty={value.values.length === 0}
-              emptyText="No measures selected — use the dropdown above to add one"
+              emptyText=""
               emptyIsDropTarget={false}
             >
               <div className="flex flex-wrap gap-1.5">
@@ -1389,9 +1490,16 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
       </div>
 
       {/* Secondary, optional settings — small pill controls instead of full-width cards, each
-          opening a Popover with its existing (unchanged) editor. */}
-      <div className="flex flex-wrap items-center gap-2">
+          opening a Popover with its existing (unchanged) editor. items-start, not items-center:
+          each Popover below is `inline` now (its panel renders in normal flow under its own
+          button, pushing "Run query" down instead of floating over it) — with items-center, one
+          button's column growing taller than its siblings' would re-center ALL of them against the
+          new row height, making the untouched buttons visibly drift down/float instead of staying
+          put at the top (caught live, 2026-09-27). items-start keeps every trigger button flush at
+          the row's top regardless of which one panel, if any, is open. */}
+      <div className="flex flex-wrap items-start gap-2">
         <Popover
+          inline
           trigger={(toggle) => (
             <button type="button" onClick={toggle} className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
               Sort
@@ -1418,6 +1526,7 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
         </Popover>
 
         <Popover
+          inline
           trigger={(toggle) => (
             <button type="button" onClick={toggle} className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
               Totals
@@ -1456,6 +1565,7 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
         </Popover>
 
         <Popover
+          inline
           trigger={(toggle) => (
             <button type="button" onClick={toggle} className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
               No-Data Items
@@ -1509,6 +1619,7 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
         </Popover>
 
         <Popover
+          inline
           trigger={(toggle) => (
             <button type="button" onClick={toggle} className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
               <Plus className="h-3.5 w-3.5" /> Calculated Field
@@ -1541,6 +1652,7 @@ export default function FieldPicker({ value, onChange, dimensions, measures }) {
         </Popover>
 
         <Popover
+          inline
           trigger={(toggle) => (
             <button type="button" onClick={toggle} className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs">
               <Plus className="h-3.5 w-3.5" /> Calculated Item
