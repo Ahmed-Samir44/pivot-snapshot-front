@@ -3,10 +3,89 @@
 // MDX bracket path by hand with browsing the fields the backend's /api/cube/dimensions returns.
 import { useMemo, useState } from "react";
 import Select from "react-select";
-import { Plus, X } from "lucide-react";
+import { Plus, ChevronDown } from "lucide-react";
 import Popover from "./Popover";
 import { parseCubeBracketSegments, formatCubeBracketLabel, formatDimensionName } from "../../utils/cubeMeta";
 import { setFieldDragPayload, readFieldDragPayload } from "../../utils/dragDrop";
+import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
+
+// One placed field pill (Rows or Columns) — its own component, not inlined in the .map() below,
+// for the same reason it always was (hooks can't live inside a loop whose length changes).
+function PlacedFieldPill({ fullPath, dragSourceKey, onDragStart, onPillDrop, onRemove, contextMenuTargets, onMoveTo }) {
+  // Σ Values can move to the OTHER dimension axis (Rows<->Columns) but never to Filters — it isn't
+  // a real field, so "Move to Filters" is dropped for it specifically, unlike every other target.
+  const isMeasuresPlaceholder = fullPath === MEASURES_PLACEHOLDER;
+  const moveTargets = isMeasuresPlaceholder ? contextMenuTargets.filter((t) => t.zoneKey !== "filters") : contextMenuTargets;
+  const menuItems = [
+    { label: "Remove field", onSelect: () => onRemove(fullPath) },
+    ...(moveTargets.length > 0 ? [{ divider: true }] : []),
+    ...moveTargets.map((target) => ({
+      label: target.label,
+      onSelect: () => onMoveTo(fullPath, target.zoneKey),
+    })),
+  ];
+
+  return (
+    <li
+      draggable={Boolean(dragSourceKey)}
+      onDragStart={(e) => onDragStart(e, fullPath)}
+      onDragOver={dragSourceKey ? (e) => e.preventDefault() : undefined}
+      onDrop={dragSourceKey ? (e) => onPillDrop(e, fullPath) : undefined}
+      // min-w-0: a flex child (this <li>, inside the parent <ul>'s flex row) defaults to
+      // min-width:auto, refusing to shrink below its own content's width even with w-full set —
+      // the same trap as PivotBuilder.jsx's own flex-1/min-w-0 WHY comment, just on a flex item
+      // instead of a grid track. Left unset, a long field name could force this pill (and the
+      // whole row) wider than the card, spilling out past its right edge.
+      className={`w-full min-w-0 ${dragSourceKey ? "cursor-grab active:cursor-grabbing" : ""}`}
+    >
+      {/* Excel's own field-button look: a full-width plain bordered button with a dropdown
+          chevron, not a colored chip (flagged live, 2026-10-04, against a screenshot of real
+          Excel's field list). A LEFT click on this arrow is the only way to open this menu — real
+          Excel has no right-click path for it either (confirmed live, 2026-10-05), so there's no
+          second, separately-positioned context menu here anymore. */}
+      <Popover
+        align="right"
+        fullWidth
+        // This panel is a short menu list, not a form — the shared default (min-w-[22rem], sized
+        // for Popover's OTHER callers' real forms/selects) would make it far wider than this
+        // narrow docked pane, pushing it past the card's own edge (caught live, 2026-10-05).
+        panelClassName="!min-w-[11rem] !max-w-[14rem] !p-1"
+        trigger={(toggle) => (
+          <button
+            type="button"
+            onClick={toggle}
+            className="flex w-full items-center justify-between gap-1 rounded border border-slate-300 bg-white px-2 py-1.5 text-left text-xs font-medium text-ink shadow-sm hover:bg-slate-50"
+          >
+            <span className="min-w-0 truncate">{formatDimensionName(fullPath)}</span>
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted" />
+          </button>
+        )}
+      >
+        {(closeMenu) => (
+          <div className="flex flex-col gap-1 text-sm">
+            {menuItems.map((item, i) =>
+              item.divider ? (
+                <div key={`divider-${i}`} className="my-1 border-t border-slate-100" />
+              ) : (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => {
+                    item.onSelect();
+                    closeMenu();
+                  }}
+                  className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+                >
+                  {item.label}
+                </button>
+              ),
+            )}
+          </div>
+        )}
+      </Popover>
+    </li>
+  );
+}
 
 const selectStyles = {
   menuPortal: (base) => ({ ...base, zIndex: 10000 }),
@@ -75,6 +154,17 @@ export default function HierarchicalCubePathSelect({
   // (same overflow bug already fixed once for the Values pill's own popover, caught live again here
   // for this one, 2026-09-27).
   align = "left",
+  // Rejects a cross-zone drop whose field isn't one this zone can actually hold — without this, a
+  // measure dragged from the Values pill landed here unguarded (Values is the only zone that had
+  // its own isFieldAccepted check) and corrupted state: `onChange([...value, measureName])` just
+  // pushed a measure name into the Rows/Columns array, a dimension-only list (caught live,
+  // 2026-09-28). Defaults to accepting everything so existing callers that never needed this are
+  // unaffected.
+  isFieldAccepted = () => true,
+  // Extra "Move to [zone]" entries for each pill's right-click menu, e.g.
+  // [{ zoneKey: "filters", label: "Move to Filters" }] — never includes Values, dimension fields
+  // can't go there. Defaults to none so callers that don't pass it just get "Remove field".
+  contextMenuTargets = [],
 }) {
   const [step1, setStep1] = useState(null);
   const [step2Multi, setStep2Multi] = useState([]);
@@ -151,9 +241,15 @@ export default function HierarchicalCubePathSelect({
   const handleDrop = (e) => {
     if (!dragSourceKey || !onFieldDropped) return;
     e.preventDefault();
+    // Stops the drop from bubbling up to PivotBuilder's own page-level "dropped outside every
+    // zone = remove the field" fallback (Excel's own behavior: drag a field out of the Field List
+    // entirely, anywhere on the page, and it's removed) — this IS a recognized zone, so the drop
+    // ends here whether or not it's actually accepted below, same as Excel doing nothing (not
+    // removing) when you drop ON a zone but the field doesn't belong there.
+    e.stopPropagation();
     setDragOver(false);
     const payload = readFieldDragPayload(e);
-    if (payload && payload.source !== dragSourceKey) {
+    if (payload && payload.source !== dragSourceKey && isFieldAccepted(payload.field)) {
       onFieldDropped(payload.field, payload.source, dragSourceKey);
     }
   };
@@ -176,7 +272,7 @@ export default function HierarchicalCubePathSelect({
       const targetIndex = withoutDragged.indexOf(targetFullPath);
       if (targetIndex === -1) return;
       onChange([...withoutDragged.slice(0, targetIndex), payload.field, ...withoutDragged.slice(targetIndex)]);
-    } else if (onFieldDropped) {
+    } else if (onFieldDropped && isFieldAccepted(payload.field)) {
       onFieldDropped(payload.field, payload.source, dragSourceKey);
     }
   };
@@ -264,7 +360,7 @@ export default function HierarchicalCubePathSelect({
           "start" keeps the pills their natural size while the extra height still counts as part
           of the droppable area (the <ul> itself still gets the drop handlers). */}
       <ul
-        className={`flex min-h-[2rem] flex-1 flex-wrap content-start gap-1.5 rounded-lg ${value.length === 0 ? "items-center" : "items-start"} ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
+        className={`flex min-h-[6rem] flex-1 flex-wrap content-start gap-1.5 rounded-lg ${value.length === 0 ? "items-center" : "items-start"} ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
           value.length === 0 ? "border-2 border-dashed border-slate-200 px-2" : ""
         }`}
         onDragOver={dragSourceKey && onFieldDropped ? handleDragOver : undefined}
@@ -273,21 +369,16 @@ export default function HierarchicalCubePathSelect({
       >
         {value.length === 0 && <span className="text-xs text-muted">Drop a field here</span>}
         {value.map((fullPath) => (
-          <li
+          <PlacedFieldPill
             key={fullPath}
-            draggable={Boolean(dragSourceKey)}
-            onDragStart={(e) => handleDragStart(e, fullPath)}
-            onDragOver={dragSourceKey ? (e) => e.preventDefault() : undefined}
-            onDrop={dragSourceKey ? (e) => handlePillDrop(e, fullPath) : undefined}
-            className={`inline-flex items-center gap-1 rounded-md bg-gold px-2 py-1 text-xs font-medium text-white ${
-              dragSourceKey ? "cursor-grab active:cursor-grabbing" : ""
-            }`}
-          >
-            <span>{formatDimensionName(fullPath)}</span>
-            <button type="button" onClick={() => remove(fullPath)} className="rounded p-0.5 hover:bg-white/20" aria-label="Remove">
-              <X className="h-3 w-3" />
-            </button>
-          </li>
+            fullPath={fullPath}
+            dragSourceKey={dragSourceKey}
+            onDragStart={handleDragStart}
+            onPillDrop={handlePillDrop}
+            onRemove={remove}
+            contextMenuTargets={contextMenuTargets}
+            onMoveTo={(field, toZone) => dragSourceKey && onFieldDropped && onFieldDropped(field, dragSourceKey, toZone)}
+          />
         ))}
       </ul>
     </div>

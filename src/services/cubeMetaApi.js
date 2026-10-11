@@ -5,9 +5,14 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5191
 // Same access-gate reasoning as pivotApi.js: the cube has no per-user access control of its own,
 // so this token (not any Dataverse permission it happens to also carry) is what stops an
 // unauthenticated caller from listing the cube's fields/members at all.
-async function getJson(path) {
+//
+// `signal` (optional, an AbortController's) lets a caller cancel an in-flight request it no
+// longer needs — e.g. a member search superseded by the next keystroke — so the backend's own
+// Cancel()-on-abort handling (see CubeMetadataService.cs) actually stops the cube-side work
+// instead of it running to completion for a response nobody will use (requested live, 2026-10-05).
+async function getJson(path, signal) {
   const accessToken = await getDataverseAccessToken();
-  const response = await fetch(`${API_BASE_URL}${path}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  const response = await fetch(`${API_BASE_URL}${path}`, { headers: { Authorization: `Bearer ${accessToken}` }, signal });
   if (!response.ok) {
     throw new Error(`Request to ${path} failed with status ${response.status}`);
   }
@@ -23,8 +28,8 @@ export function getTables() {
 
 // Columns for one table (its `field` from getTables, e.g. "[Dim Doctor]") — called only for tables
 // the user has picked in the "Which tables do you want to work with?" multiselect.
-export function getDimensionsForTable(table) {
-  return getJson(`/api/cube/dimensions/table?${new URLSearchParams({ table }).toString()}`);
+export function getDimensionsForTable(table, signal) {
+  return getJson(`/api/cube/dimensions/table?${new URLSearchParams({ table }).toString()}`, signal);
 }
 
 export function getDimensions() {
@@ -40,8 +45,8 @@ export function getMeasures() {
 // only ever offer whichever members land in the cube's own default order, unrelated to what the
 // user actually typed (confirmed live 2026-09-23: a real, active doctor wasn't in the first 500
 // at all, so no amount of typing their name found them).
-export function getMembers(field, search) {
+export function getMembers(field, search, signal) {
   const query = new URLSearchParams({ field });
   if (search) query.set("search", search);
-  return getJson(`/api/cube/members?${query.toString()}`);
+  return getJson(`/api/cube/members?${query.toString()}`, signal);
 }

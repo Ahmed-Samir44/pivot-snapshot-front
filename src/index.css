@@ -30,4 +30,32 @@
   .card {
     @apply glass-panel p-6 hover:shadow-2xl transition-all duration-300;
   }
+
+  /* Thin, gold-tinted scrollbar replacing the browser's own default — requested live 2026-10-07
+     for Modal.jsx's snapshot preview, whose default OS scrollbar also squared off the card's
+     rounded corners on the side it sits on (a plain `overflow-auto` scrollbar doesn't respect its
+     container's own border-radius). Kept as a reusable class (not Modal-specific) since any other
+     scrollable box in the app (PivotGrid's grid area, FieldPicker's field list) has the exact same
+     default-scrollbar-vs-rounded-corner mismatch, should it ever come up there too. Firefox
+     (scrollbar-width/scrollbar-color) and WebKit/Chromium (::-webkit-scrollbar-*) need separate
+     rules — there's no single cross-browser scrollbar-styling property yet.
+     stroke/transparent track (not a filled one) so it blends into whatever background sits behind
+     the scrollable box instead of drawing its own, unrelated rectangle. */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.gold.DEFAULT') transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-gold/60 rounded-full;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-gold-strong;
+  }
 }

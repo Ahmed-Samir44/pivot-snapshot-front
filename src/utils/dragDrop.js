@@ -19,3 +19,71 @@ export function readFieldDragPayload(event) {
     return null;
   }
 }
+
+// A CalculatedItem's Field must still be a Rows or Columns field — the backend rejects one that
+// isn't (see MdxPivotQueryBuilder.ValidateCalculatedItems) — so it needs to be dropped the moment
+// its field leaves both axes, same idea as dateGroupings/numericGroupings being dropped when their
+// field leaves Rows.
+export function clearOrphanedCalculatedItems(calculatedItems, rows, columns) {
+  return calculatedItems.filter((item) => rows.includes(item.field) || columns.includes(item.field));
+}
+
+// Several request pieces reference a Value by its bare FIELD NAME (Filter.byMeasureField for
+// TopN/BottomN/GreaterThan/LessThan/Between, Sort.byMeasureField, RowLevelSorts/ColumnLevelSorts'
+// own byMeasureField) — removing that Value from Values used to leave these references dangling,
+// which the backend rejects on the very next query with no indication of which setting is stale
+// (caught 2026-10-06, full codebase review: e.g. sort Rows by value of "Revenue", then drag
+// "Revenue" out of Values — the axis Sort still says byMeasureField: "Revenue"). Mirrors
+// clearOrphanedCalculatedItems's own "drop/reset whatever referenced the thing that's gone" idea.
+export function clearDanglingMeasureReferences(request, remainingValueFields) {
+  const stillExists = (field) => remainingValueFields.includes(field);
+  return {
+    ...request,
+    // A filter's OWN field stays — only its value-dependent mode gets reset to a safe default,
+    // same shape FilterRow's own handleModeChange uses for any other mode switch.
+    filters: request.filters.map((f) =>
+      f.byMeasureField && !stillExists(f.byMeasureField)
+        ? { field: f.field, mode: "Members", includedMembers: [], labelText: "", n: 10, byMeasureField: null, value: null, valueTo: null }
+        : f,
+    ),
+    sort: request.sort?.byMeasureField && !stillExists(request.sort.byMeasureField) ? null : request.sort,
+    rowLevelSorts: request.rowLevelSorts.filter((s) => !s.byMeasureField || stillExists(s.byMeasureField)),
+    columnLevelSorts: request.columnLevelSorts.filter((s) => !s.byMeasureField || stillExists(s.byMeasureField)),
+  };
+}
+
+// Same idea as clearDanglingMeasureReferences, for a Value's own baseField (Show Values As
+// PercentOf/DifferenceFrom/PercentDifferenceFrom) — baseField/baseItem target a ROWS field, not a
+// measure, so this triggers when a ROWS field (not a Value) is removed instead.
+export function clearDanglingBaseFieldReferences(values, remainingRowFields) {
+  return values.map((v) =>
+    v.baseField && !remainingRowFields.includes(v.baseField) ? { ...v, baseField: null, baseItem: "" } : v,
+  );
+}
+
+// Excel's own "drag a field out of the Field List entirely and it's removed" — not just dragging
+// it back onto the Available Fields panel specifically (FieldPicker's own moveField "available"
+// case), but dropping it ANYWHERE on the page outside every recognized zone. Lives here (not in
+// FieldPicker.jsx, which only exports components) so PivotBuilder.jsx's own page-level catch-all
+// drop handler can reuse the exact same removal — every zone's own onDrop already stops
+// propagation before reaching that handler (see each one's own WHY comment), so it only ever fires
+// for a drop that landed nowhere FieldPicker itself recognizes.
+export function removeFieldEverywhere(request, field) {
+  const rows = request.rows.filter((f) => f !== field);
+  const columns = request.columns.filter((f) => f !== field);
+  // Same reasoning as moveField's own WHY comment in FieldPicker.jsx — a removed field shifts every
+  // OTHER level-sort entry's own positional `level` index, so a stale rowLevelSorts/columnLevelSorts
+  // left over from before this removal would point at the wrong field (or an out-of-range one).
+  return {
+    ...request,
+    rows,
+    columns,
+    values: request.values.filter((v) => v.field !== field),
+    filters: request.filters.filter((f) => f.field !== field),
+    dateGroupings: request.dateGroupings.filter((g) => g.field !== field),
+    numericGroupings: request.numericGroupings.filter((g) => g.field !== field),
+    calculatedItems: clearOrphanedCalculatedItems(request.calculatedItems, rows, columns),
+    rowLevelSorts: request.rows.includes(field) ? [] : request.rowLevelSorts,
+    columnLevelSorts: request.columns.includes(field) ? [] : request.columnLevelSorts,
+  };
+}

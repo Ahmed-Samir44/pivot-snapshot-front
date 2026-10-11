@@ -1,10 +1,10 @@
 import { formatNumber } from "../../utils/numberFormat";
-import { MAX_BARS } from "../../utils/chartLayout";
+import { measuresPlacementSupportsChart } from "../../utils/chartLayout";
 
 // Live-preview mirror of the backend's PivotChartRenderer.cs (same three chart types, same
-// first-value-field-only scope, same MaxBars cap, same multi-series-from-a-Columns-field support
-// added 2026-09-24) — actual <svg> elements, not an HTML canvas or charting library, so what the
-// user sees here is what the saved snapshot will actually contain.
+// first-value-field-only scope, same multi-series-from-a-Columns-field support added 2026-09-24)
+// — actual <svg> elements, not an HTML canvas or charting library, so what the user sees here is
+// what the saved snapshot will actually contain.
 const WIDTH = 640;
 const HEIGHT = 320;
 const PADDING_LEFT = 40;
@@ -14,10 +14,6 @@ const PADDING_TOP = 20;
 // PivotChartRenderer.cs's own comment on the same constant.
 const LEGEND_ROW_HEIGHT = 16;
 const BAR_GAP = 8;
-// MAX_BARS lives in ../../utils/chartLayout.js (shared with chartUnavailableReason, used by
-// PivotBuilder.jsx to explain — flagged live 2026-09-27 — why a large pivot silently shows no
-// chart, instead of it looking broken) — kept out of this file so mixing component and
-// non-component exports here doesn't break React Fast Refresh.
 // Must stay in sync with PivotChartRenderer.cs's identical array (saved snapshot vs. live preview).
 const SLICE_COLORS = ["#AE8C67", "#6a7380", "#63BE7B", "#F8696B", "#FFEB84", "#638EC6", "#9a7b57", "#1f2430", "#c9a876", "#8a94a3"];
 
@@ -30,7 +26,7 @@ const SLICE_COLORS = ["#AE8C67", "#6a7380", "#63BE7B", "#F8696B", "#FFEB84", "#6
 // GrandTotalsProcessor/ShowValuesAsProcessor exclude it from their own sums.
 function extractSeries(result, valueCount) {
   const categoryRows = result.rowHeaders.map((row, r) => (row.isTotal ? null : { row, r })).filter(Boolean);
-  if (categoryRows.length === 0 || categoryRows.length > MAX_BARS) return null;
+  if (categoryRows.length === 0) return null;
 
   const categories = categoryRows.map(({ row }) => row.labels[0]);
 
@@ -227,12 +223,12 @@ function PieChart({ data }) {
   );
 }
 
-export default function PivotChart({ result, valueFields, chartType = "Bar", valuesPlacement = "Columns" }) {
+export default function PivotChart({ result, valueFields, chartType = "Bar", rows, columns }) {
   // v1 scope cut, mirrors the backend's PivotChartRenderer.Render exactly: extractSeries assumes
-  // categories are ROWS and series are COLUMN groups — correct only when measures are on Columns.
-  // With measures on Rows, consecutive rows ARE the different measures for the same dim-combo, so
-  // no chart is drawn rather than a meaningless mixed one.
-  if (!result || !valueFields?.length || result.columnHeaders.length === 0 || valuesPlacement === "Rows") {
+  // categories are ROWS and series are COLUMN groups of a fixed, contiguous stride — correct only
+  // when Σ Values is in Columns AND innermost there. Anywhere else, no chart is drawn rather than
+  // a meaningless mixed one.
+  if (!result || !valueFields?.length || result.columnHeaders.length === 0 || !measuresPlacementSupportsChart(rows, columns)) {
     return null;
   }
 

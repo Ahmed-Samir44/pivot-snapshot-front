@@ -1,6 +1,7 @@
 // Ported from the Segmentation project's src/utils/constants.js — generic MDX bracket-path
 // parsing/formatting, not project-specific logic, so reusing it keeps both tools' field pickers
 // behaving identically for the same kind of input.
+import { MEASURES_PLACEHOLDER } from "./measuresPlacement";
 
 /** Split an MDX bracket path into each segment, e.g. "[A].[B].[C]" -> ["A", "B", "C"]. */
 export function parseCubeBracketSegments(path) {
@@ -19,6 +20,13 @@ export function formatCubeBracketLabel(segment) {
 
 /** Friendly label for a full bracket path, deduping a repeated trailing segment. */
 export function formatDimensionName(dimension) {
+  // MEASURES_PLACEHOLDER is a reserved sentinel, not a real cube field — Excel's own literal
+  // label for the "Σ Values" pseudo-field, wherever it's placed (mirrors the backend's
+  // FieldLabelFormatter.Format exactly).
+  if (dimension === MEASURES_PLACEHOLDER) {
+    return "Σ Values";
+  }
+
   const parts = String(dimension)
     .replace(/\[Dim\s+/g, "[")
     .replace(/\[|\]/g, "")

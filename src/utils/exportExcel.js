@@ -1,6 +1,15 @@
 import ExcelJS from "exceljs";
 import { formatForColumn } from "./numberFormat";
 import { computeVisibleLevels } from "./pivotGridLayout";
+import { measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "./measuresPlacement";
+import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "./conditionalFormat";
+
+// ExcelJS wants ARGB ("FFRRGGBB"), this app's own ConditionalFormat colors are plain "#RRGGBB" —
+// alpha is always opaque (FF), matching every hardcoded color this export already used before
+// colors became customizable.
+function toArgb(hex) {
+  return `FF${hex.replace("#", "").toUpperCase()}`;
+}
 
 const SUBTOTAL_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF6E9D8" } }; // ~bg-gold/10
 const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } }; // slate-100
@@ -9,18 +18,59 @@ const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F
 // format CODE instead of a display string — the cell keeps its real numeric value (sortable,
 // summable in Excel) with Excel doing the formatting, instead of exporting pre-formatted text.
 //
-// Percentage is the one non-obvious case: our values are already on a 0–100 scale (38.43, not
-// 0.3843 — see numberFormat.js), but Excel's real "0.00%" format code MULTIPLIES the underlying
-// number by 100 for display. Using that would double-apply the scaling (38.43 -> "3843.00%").
-// Appending a literal quoted "%" character instead (not Excel's percent operator) shows the
-// number exactly as-is with a % suffix, matching this app's own convention everywhere else.
+// Percentage uses Excel's own real percent operator ('%', not a quoted literal) — our stored
+// values are a plain ratio (0.3843, not 38.43, fixed 2026-10-05, see numberFormat.js's own WHY
+// comment), exactly what Excel's built-in *100-on-render behavior for '%' expects, so no
+// workaround is needed here anymore.
 function excelNumberFormat(format) {
   const type = format?.type ?? "General";
   const decimals = Math.min(Math.max(format?.decimalPlaces ?? 2, 0), 10);
   const decimalPart = decimals > 0 ? "." + "0".repeat(decimals) : "";
+  // No currency is assumed by default — see numberFormat.js's own WHY comment (an earlier "EGP"
+  // default was hardcoded here without ever having been asked for, flagged live 2026-10-06). The
+  // quoted-literal prefix (and its separating space) is dropped entirely when empty, not left as a
+  // dangling `"" ` that would still show a stray leading space in the exported cell.
+  const symbol = (format?.currencySymbol ?? "").replace(/"/g, "");
+  const currencyPrefix = symbol ? `"${symbol}" ` : "";
   if (type === "Number") return `#,##0${decimalPart}`;
-  if (type === "Currency") return `"${(format?.currencySymbol ?? "EGP").replace(/"/g, "")}" #,##0${decimalPart}`;
-  if (type === "Percentage") return `#,##0${decimalPart}"%"`;
+  if (type === "Currency") return `${currencyPrefix}#,##0${decimalPart}`;
+  if (type === "Percentage") return `#,##0${decimalPart}%`;
+  // Excel's own accounting format section syntax (positive;negative;zero): the negative section
+  // in parentheses is what gives Accounting its own distinct look from Currency. The explicit
+  // third (zero) section matches real Excel's own built-in Accounting format showing a plain dash
+  // for zero — without it, a 2-section code falls back to the POSITIVE section for zero ("0.00"
+  // instead of "-"), the same mismatch just fixed in NumberFormatter.cs/numberFormat.js (added
+  // 2026-10-06, full codebase review).
+  if (type === "Accounting") return `${currencyPrefix}#,##0${decimalPart};(${currencyPrefix}#,##0${decimalPart});${currencyPrefix}"-"`;
+  // Date/Time/Fraction/Scientific: real Excel format codes applied to the SAME raw number our own
+  // NumberFormatter.cs/numberFormat.js already treat as an Excel-style serial — Excel's own date
+  // system uses the identical 1899-12-30 epoch, so letting Excel itself render these (rather than
+  // exporting pre-formatted text) shows the exact same date/time/fraction/scientific value as the
+  // live grid, while keeping the cell a real, sortable number in the exported file.
+  if (type === "Date") return "yyyy-mm-dd";
+  if (type === "Time") return "hh:mm:ss";
+  if (type === "Fraction") return "# ??/??";
+  if (type === "Scientific") return `0${decimalPart}E+00`;
+  // Text: Excel's own "@" format code only changes how NEW typed input is interpreted, not how an
+  // already-numeric cell displays — General is the closer real-world match for an exported numeric
+  // cell than "@" would be.
+  if (type === "Text") return "General";
+  // Special: each preset mask (see numberFormat.js's SPECIAL_MASKS) IS already valid Excel number
+  // format syntax as-is ('0' placeholders + literal punctuation) — no translation needed.
+  if (type === "Special") {
+    const masks = {
+      ZipCode: "00000",
+      ZipCodePlus4: "00000-0000",
+      PhoneNumber: "(000) 000-0000",
+      SocialSecurityNumber: "000-00-0000",
+    };
+    return masks[format?.specialType] ?? masks.ZipCode;
+  }
+  // Custom: the user typed a real Excel format code directly — pass it straight through so Excel
+  // renders it exactly as it would any other custom-formatted cell, instead of re-deriving it
+  // through our own best-effort FormatAsCustom parser (which is for THIS app's own grid/snapshot
+  // display, not for an exported cell Excel will format itself).
+  if (type === "Custom") return format?.customFormatCode?.trim() || "General";
   return "General";
 }
 
@@ -68,14 +118,18 @@ function excelConditionalFormatRule(format) {
     return {
       type: "colorScale",
       cfvo: [{ type: "min" }, { type: "percentile", value: 50 }, { type: "max" }],
-      color: [{ argb: "FFF8696B" }, { argb: "FFFFEB84" }, { argb: "FF63BE7B" }],
+      color: [
+        { argb: toArgb(format.minColor || DEFAULT_MIN_COLOR) },
+        { argb: toArgb(format.midColor || DEFAULT_MID_COLOR) },
+        { argb: toArgb(format.maxColor || DEFAULT_MAX_COLOR) },
+      ],
     };
   }
   if (format.type === "DataBar") {
     return {
       type: "dataBar",
       cfvo: [{ type: "min" }, { type: "max" }],
-      color: { argb: "FF638EC6" },
+      color: { argb: toArgb(format.barColor || DEFAULT_BAR_COLOR) },
       minLength: 0,
       maxLength: 100,
     };
@@ -100,16 +154,31 @@ function excelConditionalFormatRule(format) {
 // warning and can't produce real numeric cells or native conditional formatting at all.
 export async function exportPivotToExcel({
   result,
+  rows = [],
+  columns = [],
   rowFieldLabels = [],
   columnFieldLabels = [],
   valueFields = [],
-  valuesPlacement = "Columns",
   filename = "Pivot",
 }) {
   const { rowHeaders, columnHeaders, cells } = result;
   const rowDepth = rowHeaders[0]?.labels.length ?? 0;
-  const columnDepth = columnHeaders[0]?.labels.length ?? 0;
-  const rowFieldLabelsWithMeasure = valuesPlacement === "Rows" ? [...rowFieldLabels, "Σ Values"] : rowFieldLabels;
+  // Same floor-of-1 fallback PivotGrid.jsx uses for its own on-screen rendering (see that file's own
+  // WHY comment) — with no Value fields at all, Columns can legitimately come back with ZERO
+  // headers, but the row-field title row below still needs ONE pass of the
+  // `for (let level = 0; level < columnDepth; level++)` loop to render at all. Missing here meant
+  // the exported .xlsx silently dropped the row headers' own title row for a Values-less pivot,
+  // even though the live grid correctly showed it (caught 2026-10-06, full codebase review).
+  const columnDepth = columnHeaders[0]?.labels.length ?? (rowHeaders.length > 0 ? 1 : 0);
+  // Where (if either) Σ Values sits — rowFieldLabels/columnFieldLabels already carry "Σ Values" at
+  // that same position (PivotBuilder.jsx's fieldLabels helper maps the sentinel to that label), so
+  // no separate "append Σ Values" step is needed here anymore.
+  const rowsMeasuresIndex = measuresIndexOf(rows);
+  const columnsMeasuresIndex = measuresIndexOf(columns);
+  const measuresInRows = rowsMeasuresIndex >= 0;
+  const captionToIndex = valueFields.length
+    ? buildCaptionToIndex(measuresInRows ? rowHeaders : columnHeaders, measuresInRows ? rowsMeasuresIndex : columnsMeasuresIndex, valueFields.length)
+    : new Map();
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Pivot", { views: [{ state: "frozen", xSplit: rowDepth, ySplit: columnDepth + (columnFieldLabels.length > 0 ? 1 : 0) }] });
@@ -137,7 +206,7 @@ export async function exportPivotToExcel({
     if (level === 0) {
       for (let rl = 0; rl < rowDepth; rl++) {
         const cell = row.getCell(rl + 1);
-        cell.value = rowFieldLabelsWithMeasure[rl] ?? "";
+        cell.value = rowFieldLabels[rl] ?? "";
         cell.font = { bold: true };
         cell.fill = HEADER_FILL;
         if (columnDepth > 1) sheet.mergeCells(columnHeaderStartRow, rl + 1, columnHeaderStartRow + columnDepth - 1, rl + 1);
@@ -190,13 +259,15 @@ export async function exportPivotToExcel({
     }
   }
 
-  // Data cells — same measure-lookup rule as PivotGrid ("measures are the fastest-varying
-  // factor"): whichever axis actually carries the crossjoin (Columns by default, or Rows when
-  // ValuesPlacement.Rows) determines which PivotValueField a given cell belongs to.
+  // Data cells — same measure-lookup rule as PivotGrid: whichever axis actually carries Σ Values
+  // determines which PivotValueField a given cell belongs to, read directly off that header's own
+  // caption at the sentinel's position (not a fixed stride — see utils/measuresPlacement.js).
   rowHeaders.forEach((rowHeader, rowIndex) => {
     const excelRow = firstDataRow + rowIndex;
     columnHeaders.forEach((colHeader, colIndex) => {
-      const measureIndex = valuesPlacement === "Rows" ? rowIndex : colIndex;
+      const measureIndex = measuresInRows
+        ? measureIndexOf(rowHeader, rowsMeasuresIndex, captionToIndex)
+        : measureIndexOf(colHeader, columnsMeasuresIndex, captionToIndex);
       const value = cells[rowIndex][colIndex];
       const isTotalCell = rowHeader.isTotal || colHeader.isTotal;
       const cell = sheet.getRow(excelRow).getCell(rowDepth + colIndex + 1);
@@ -212,11 +283,11 @@ export async function exportPivotToExcel({
   // Total/Grand-Total rows or columns — same exclusion detailRangeForColumn/Row already applies
   // for the live grid's min/max, done here as actual excluded RANGES instead, so Excel computes
   // min/max live over just the real data rather than a snapshot of it).
-  if (valuesPlacement === "Rows") {
+  if (measuresInRows) {
     rowHeaders.forEach((rowHeader, rowIndex) => {
       if (rowHeader.isTotal) return;
-      const measureIndex = rowIndex;
-      const valueField = valueFields.length ? valueFields[measureIndex % valueFields.length] : null;
+      const measureIndex = measureIndexOf(rowHeader, rowsMeasuresIndex, captionToIndex);
+      const valueField = measureIndex !== null ? valueFields[measureIndex] : null;
       const rule = excelConditionalFormatRule(valueField?.conditionalFormat);
       if (!rule) return;
       const excelRow = firstDataRow + rowIndex;
@@ -229,8 +300,8 @@ export async function exportPivotToExcel({
   } else {
     columnHeaders.forEach((colHeader, colIndex) => {
       if (colHeader.isTotal) return;
-      const measureIndex = colIndex;
-      const valueField = valueFields.length ? valueFields[measureIndex % valueFields.length] : null;
+      const measureIndex = measureIndexOf(colHeader, columnsMeasuresIndex, captionToIndex);
+      const valueField = measureIndex !== null ? valueFields[measureIndex] : null;
       const rule = excelConditionalFormatRule(valueField?.conditionalFormat);
       if (!rule) return;
       const excelCol = sheet.getColumn(rowDepth + colIndex + 1).letter;

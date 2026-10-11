@@ -209,6 +209,25 @@ export async function getDataverseAccessToken() {
       refreshToken: tokens.refreshToken,
     })
       .then((tokenResponse) => writeTokens(tokenResponse))
+      .catch(() => {
+        // The refresh token itself is dead (AADSTS50173 and friends — issued BEFORE the account's
+        // own TokensValidFrom, almost always because the password was changed/reset since logging
+        // in), not a transient network blip: no amount of retrying gets a NEW token out of an
+        // already-revoked refresh token. Every caller up the stack (getTables/getDimensions/
+        // queryPivot/...) used to just surface this raw Azure AD error text as a generic "Couldn't
+        // load X from the API" message, leaving the user stuck since nothing in the UI offered a
+        // way back to a working session (caught live, 2026-10-05/06, hit twice in one day with no
+        // recovery path but a manual localStorage.clear() in devtools). Clearing the dead tokens and
+        // redirecting straight to Microsoft's own login page is what real Excel/Office apps do the
+        // moment a cached credential stops working — the user re-authenticates and lands back on
+        // the exact same page via handlePendingRedirect(), no raw error ever shown.
+        clearTokens();
+        signIn().catch(() => {});
+        // signIn() navigates the whole tab away and never resolves in the normal sense (see its own
+        // WHY comment) — this rejection only matters for the brief window before that navigation
+        // actually takes effect, so whatever awaits getDataverseAccessToken() just stays pending.
+        return new Promise(() => {});
+      })
       .finally(() => {
         refreshPromise = null;
       });

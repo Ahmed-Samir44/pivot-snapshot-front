@@ -26,7 +26,18 @@ async function request(path, options = {}) {
   return data;
 }
 
-export function saveSnapshot(name, pivotRequest, pivotResult, tableStyle = "Default", includeChart = false, chartType = "Bar", reportLayout = "Tabular") {
+export function saveSnapshot(
+  name,
+  pivotRequest,
+  pivotResult,
+  tableStyle = "Default",
+  includeChart = false,
+  chartType = "Bar",
+  reportLayout = "Tabular",
+  repeatItemLabels = false,
+  builderStateJson = null,
+  versionName = null,
+) {
   return request("/api/snapshots", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -38,6 +49,9 @@ export function saveSnapshot(name, pivotRequest, pivotResult, tableStyle = "Defa
       includeChart,
       chartType,
       reportLayout,
+      repeatItemLabels,
+      builderStateJson,
+      versionName,
     }),
   });
 }
@@ -77,13 +91,6 @@ export function getDeactivatedVersions(definitionId) {
 
 export function getVersion(versionId) {
   return request(`/api/snapshots/versions/${versionId}`);
-}
-
-// 2026-09-24: generalized from exactly 2 versions to N (2+) — versionIds is repeated as a query
-// param (ASP.NET Core's standard array-binding convention, matching SnapshotController.Compare).
-export function compareVersions(versionIds) {
-  const query = versionIds.map((id) => `versionIds=${id}`).join("&");
-  return request(`/api/snapshots/compare?${query}`);
 }
 
 // Deactivates (not deletes) a version — see DataverseSnapshotStorageService.DeactivateVersionAsync

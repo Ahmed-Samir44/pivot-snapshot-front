@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ChevronRight, CirclePause, CirclePlay, Eye, FileSpreadsheet, Trash2, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ChevronRight, CirclePause, CirclePlay, Eye, FileSpreadsheet, Pencil, Trash2, X } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import Modal from "../components/forms/Modal";
 import ConfirmModal from "../components/forms/ConfirmModal";
@@ -19,6 +20,29 @@ import {
   deleteVersion,
 } from "../services/snapshotApi";
 import { formatDimensionName } from "../utils/cubeMeta";
+import { hideMeasuresLabelIfSingleValue } from "../utils/measuresPlacement";
+import { BUILDER_STATE_STORAGE_KEY } from "./PivotBuilder";
+
+// BuilderStateJson is null for any version saved BEFORE this existed (2026-10-07) — parsed once
+// here rather than at each of its 3 call sites (the preview's layout/repeatItemLabels props, and
+// the Edit button's own enabled check). Falls back to the same defaults PivotGrid/PivotBuilder
+// already use on their own, so an old version's preview renders exactly as it always has.
+// "Version 3" normally, "Version 3 — Q3 Final" when a label was given at save time (see
+// PivotBuilder.jsx's versionName field) — additive, never replacing the number itself.
+function versionLabel(v) {
+  return v.versionName ? `Version ${v.versionNumber} — ${v.versionName}` : `Version ${v.versionNumber}`;
+}
+
+function parseBuilderState(builderStateJson) {
+  if (!builderStateJson) return null;
+  try {
+    return JSON.parse(builderStateJson);
+  } catch {
+    // Treated the same as "never existed" — a corrupted blob shouldn't crash the preview, just
+    // fall back to defaults and disable Edit (see its own disabled check below).
+    return null;
+  }
+}
 
 // A plain Set-backed multi-select for one list — its own little state machine (toggle one, toggle
 // all, clear) reused across all four lists (Active/Deactivated × Pivots/Versions) instead of
@@ -114,6 +138,7 @@ function BulkActionBar({ selection, onDeactivate, onReactivate, onDelete }) {
 }
 
 export default function SnapshotHistory() {
+  const navigate = useNavigate();
   const [definitions, setDefinitions] = useState([]);
   const [deactivatedDefinitions, setDeactivatedDefinitions] = useState([]);
   const [selectedDefinitionId, setSelectedDefinitionId] = useState(null);
@@ -260,10 +285,11 @@ export default function SnapshotHistory() {
       const pivotName = definitions.find((d) => d.id === selectedDefinitionId)?.name ?? "Pivot";
       await exportPivotToExcel({
         result: previewVersion.result,
+        rows: previewVersion.rows,
+        columns: previewVersion.columns,
         rowFieldLabels: previewVersion.rows.map(formatDimensionName),
-        columnFieldLabels: previewVersion.columns.map(formatDimensionName),
+        columnFieldLabels: hideMeasuresLabelIfSingleValue(previewVersion.columns, previewVersion.values.length).map(formatDimensionName),
         valueFields: previewVersion.values,
-        valuesPlacement: previewVersion.valuesPlacement,
         filename: `${pivotName}_v${previewVersion.versionNumber}`,
       });
     } catch (err) {
@@ -271,6 +297,48 @@ export default function SnapshotHistory() {
     } finally {
       setExporting(false);
     }
+  };
+
+  // Hands this version's COMPLETE saved config to the Builder page via the exact same localStorage
+  // slot it already restores from on its own mount (see PivotBuilder.jsx's BUILDER_STATE_STORAGE_KEY
+  // WHY comment) — Edit is just "restore THIS instead of whatever was there before," reusing that
+  // existing restore path rather than a new one. Only offered when builderStateJson actually exists
+  // (see its own disabled check at the button below) — a version saved before 2026-10-07 has no way
+  // to recover its Sort/Totals/Calculated Items/Groupings, and silently dropping those on Edit would
+  // be a worse surprise than just not offering it.
+  const applyEdit = () => {
+    try {
+      localStorage.setItem(BUILDER_STATE_STORAGE_KEY, previewVersion.builderStateJson);
+    } catch {
+      // Same no-op-on-failure as every other localStorage write in this app — worst case, the
+      // Builder just opens blank instead of restoring this version, no worse than Edit not existing.
+    }
+    navigate("/");
+  };
+
+  // Edit overwrites whatever's currently in that SAME localStorage slot — if the Builder has an
+  // in-progress, un-saved pivot sitting there, Edit would silently discard it with no way back
+  // (caught live 2026-10-11, right after shipping Edit itself: "عندك شغل مش محفوظ، متأكد؟"). Only
+  // warns when there's something actually worth losing (a non-empty Rows/Columns/Values, same
+  // "isPivotEmpty" definition PivotBuilder.jsx's own auto-run effect uses) — an untouched/already-
+  // reset Builder has nothing to warn about.
+  const [pendingEditOverwrite, setPendingEditOverwrite] = useState(false);
+  const handleEdit = () => {
+    if (!previewVersion?.builderStateJson) return;
+    let hasUnsavedWork = false;
+    try {
+      const existing = JSON.parse(localStorage.getItem(BUILDER_STATE_STORAGE_KEY) || "null");
+      const req = existing?.request;
+      hasUnsavedWork = Boolean(req && (req.rows?.length > 0 || req.columns?.length > 0 || req.values?.length > 0));
+    } catch {
+      // An unreadable/corrupted existing entry has nothing worth protecting either.
+      hasUnsavedWork = false;
+    }
+    if (hasUnsavedWork) {
+      setPendingEditOverwrite(true);
+      return;
+    }
+    applyEdit();
   };
 
   return (
@@ -393,7 +461,7 @@ export default function SnapshotHistory() {
             {versions.map((v) => (
               <ListRow
                 key={v.id}
-                label={`Version ${v.versionNumber}`}
+                label={versionLabel(v)}
                 sublabel={new Date(v.createdAtUtc).toLocaleString()}
                 onClick={() => openPreview(v.id, v.versionNumber)}
                 trailingIcon={Eye}
@@ -402,7 +470,7 @@ export default function SnapshotHistory() {
                 actions={
                   <button
                     type="button"
-                    onClick={() => setPendingConfirm({ action: "deactivate-version", ids: [v.id], label: `Version ${v.versionNumber}` })}
+                    onClick={() => setPendingConfirm({ action: "deactivate-version", ids: [v.id], label: versionLabel(v) })}
                     className="rounded-full p-2 text-orange-500 hover:bg-orange-50 hover:text-orange-700"
                     title="Deactivate this version"
                     aria-label={`Deactivate version ${v.versionNumber}`}
@@ -442,7 +510,7 @@ export default function SnapshotHistory() {
                 {deactivatedVersions.map((v) => (
                   <ListRow
                     key={v.id}
-                    label={`Version ${v.versionNumber}`}
+                    label={versionLabel(v)}
                     sublabel={new Date(v.createdAtUtc).toLocaleString()}
                     onClick={() => openPreview(v.id, v.versionNumber)}
                     trailingIcon={Eye}
@@ -461,7 +529,7 @@ export default function SnapshotHistory() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setPendingConfirm({ action: "delete-version", ids: [v.id], label: `Version ${v.versionNumber}` })}
+                          onClick={() => setPendingConfirm({ action: "delete-version", ids: [v.id], label: versionLabel(v) })}
                           className="rounded-full p-2 text-muted hover:bg-red-50 hover:text-red-700"
                           title="Delete this version permanently"
                           aria-label={`Delete version ${v.versionNumber} permanently`}
@@ -527,28 +595,65 @@ export default function SnapshotHistory() {
         />
       )}
 
-      {previewVersion && (
-        <Modal title={`Version ${previewVersion.versionNumber} — interactive preview`} onClose={() => setPreviewVersion(null)}>
-          <div className="mb-3 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={handleExport}
-              disabled={exporting}
-              className="btn-secondary inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <FileSpreadsheet className="h-4 w-4" style={{ color: "#217346" }} />
-              {exporting ? "Exporting…" : "Export to Excel"}
-            </button>
-            {exportError && <span className="text-sm font-medium text-red-700">{exportError}</span>}
-          </div>
-          <PivotGrid
-            result={previewVersion.result}
-            rowFieldLabels={previewVersion.rows.map(formatDimensionName)}
-            columnFieldLabels={previewVersion.columns.map(formatDimensionName)}
-            valueFields={previewVersion.values}
-            valuesPlacement={previewVersion.valuesPlacement}
-          />
-        </Modal>
+      {previewVersion && (() => {
+        const builderState = parseBuilderState(previewVersion.builderStateJson);
+        return (
+          <Modal title={`${versionLabel(previewVersion)} — interactive preview`} onClose={() => setPreviewVersion(null)}>
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleEdit}
+                disabled={!builderState}
+                title={builderState ? "Open this version in the Builder to keep editing it" : "This version was saved before Edit support existed"}
+                className="btn-secondary inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Pencil className="h-4 w-4" />
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={handleExport}
+                disabled={exporting}
+                className="btn-secondary inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FileSpreadsheet className="h-4 w-4" style={{ color: "#217346" }} />
+                {exporting ? "Exporting…" : "Export to Excel"}
+              </button>
+              {exportError && <span className="text-sm font-medium text-red-700">{exportError}</span>}
+            </div>
+            <PivotGrid
+              result={previewVersion.result}
+              rows={previewVersion.rows}
+              columns={previewVersion.columns}
+              rowFieldLabels={previewVersion.rows.map(formatDimensionName)}
+              columnFieldLabels={hideMeasuresLabelIfSingleValue(previewVersion.columns, previewVersion.values.length).map(formatDimensionName)}
+              valueFields={previewVersion.values}
+              layout={builderState?.reportLayout ?? "Tabular"}
+              repeatItemLabels={builderState?.repeatItemLabels ?? false}
+              boundedHeight={false}
+            />
+          </Modal>
+        );
+      })()}
+
+      {/* Rendered AFTER previewVersion's own Modal above (not before) — with both using the
+          same z-50 backdrop, DOM order decides which one visually sits on top of the other
+          (later wins). This needs to win, since it opens FROM a button inside that same preview
+          Modal — placed earlier, it rendered BEHIND the still-open preview, invisible underneath
+          it (caught live 2026-10-11, "الصفحة اللي دوست فيها edit مش بتتقفل فال overrite دي بتظهر
+          تحتها"). */}
+      {pendingEditOverwrite && (
+        <ConfirmModal
+          title="Overwrite unsaved work?"
+          message="The Builder page has an in-progress pivot that hasn't been saved as a snapshot yet. Opening this version for editing will replace it — that unsaved work can't be recovered afterward."
+          confirmLabel="Overwrite and continue"
+          danger
+          onConfirm={() => {
+            setPendingEditOverwrite(false);
+            applyEdit();
+          }}
+          onCancel={() => setPendingEditOverwrite(false)}
+        />
       )}
     </AppShell>
   );
