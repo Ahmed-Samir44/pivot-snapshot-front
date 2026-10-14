@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { formatForColumn } from "./numberFormat";
-import { buildRowHeaderGroups, buildDisplayRows } from "./pivotGridLayout";
+import { buildRowHeaderGroups, buildDisplayRows, buildColumnHeaderRows } from "./pivotGridLayout";
 import { measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "./measuresPlacement";
 import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "./conditionalFormat";
 
@@ -174,6 +174,9 @@ export async function exportPivotToExcel({
   // A drilldown COMBINED with other Rows fields (Drilldown v3): its slot's index in `rows` (-1 =
   // none). Laid out like any Rows field; buildDisplayRows indents the slot by member depth.
   drillSlot = -1,
+  // Columns drilldown (C4): its slot in `columns` (-1 = none) — header rows and spans come from
+  // buildColumnHeaderRows, the same as the live grid and the saved snapshot.
+  columnsDrillSlot = -1,
 }) {
   const { rowHeaders, columnHeaders, cells } = result;
   // MAX across every row — a drilldown's rows have different depths.
@@ -190,7 +193,8 @@ export async function exportPivotToExcel({
   // `for (let level = 0; level < columnDepth; level++)` loop to render at all. Missing here meant
   // the exported .xlsx silently dropped the row headers' own title row for a Values-less pivot,
   // even though the live grid correctly showed it (caught 2026-10-06, full codebase review).
-  const columnDepth = columnHeaders[0]?.labels.length ?? (rowHeaders.length > 0 ? 1 : 0);
+  const columnHeaderRows = buildColumnHeaderRows(columnHeaders, columnsDrillSlot);
+  const columnDepth = columnHeaders.length > 0 ? columnHeaderRows.length : rowHeaders.length > 0 ? 1 : 0;
   // Where (if either) Σ Values sits — rowFieldLabels/columnFieldLabels already carry "Σ Values" at
   // that same position (PivotBuilder.jsx's fieldLabels helper maps the sentinel to that label), so
   // no separate "append Σ Values" step is needed here anymore.
@@ -236,7 +240,12 @@ export async function exportPivotToExcel({
     }
     // A Grand Total column shows its caption once, in the top header row, like Excel.
     const levelLabels = columnHeaders.map((c) => (c.captionLevel === -1 && c.caption ? (level === 0 ? c.caption : "") : c.labels[level]));
-    for (const run of mergeRuns(levelLabels)) {
+    // With a Columns drilldown, the runs are the spans from buildColumnHeaderRows (a parent over its
+    // children, blanks under a collapsed member) instead of runs of equal labels.
+    const runs = columnsDrillSlot >= 0
+      ? columnHeaderRows[level].map((cell) => ({ start: cell.sourceIndex, end: cell.sourceIndex + cell.span, label: cell.text }))
+      : mergeRuns(levelLabels);
+    for (const run of runs) {
       const startCol = rowDepth + run.start + 1;
       const endCol = rowDepth + run.end;
       const cell = row.getCell(startCol);

@@ -46,6 +46,40 @@ export function reconcileDrilldown(drilldown, rows) {
   return { rows: rows.filter((f) => f !== top), rowsHierarchyDrilldown: null };
 }
 
+// Columns drilldown (C4, 2026-10-14): the same slot rule for BOTH axes, plus Excel's own way of
+// putting a hierarchy on columns — moving its pill there. A drilldown whose slot moved to the OTHER
+// axis follows it (expansions reset, like any reorder in Excel), unless that axis already has a
+// drilldown or a field of the same hierarchy. Per-level sorts on the axis that gains a drilldown are
+// cleared (the backend rejects them there). `next` is the whole request after the edit; returns the
+// pieces to spread into it.
+export function reconcileDrilldowns(next) {
+  const fresh = (d) => ({ topLevelField: d.topLevelField, expandedMemberUniqueNames: [] });
+  const clashes = (axisFields, top) => axisFields.some((f) => f !== top && hierarchyOf(f) === hierarchyOf(top));
+  let { rows, columns, rowsHierarchyDrilldown: rowsDrill = null, columnsHierarchyDrilldown: colsDrill = null } = next;
+  let { rowLevelSorts = [], columnLevelSorts = [] } = next;
+
+  if (rowsDrill && !rows.includes(rowsDrill.topLevelField) && columns.includes(rowsDrill.topLevelField) && !colsDrill && !clashes(columns, rowsDrill.topLevelField)) {
+    colsDrill = fresh(rowsDrill);
+    rowsDrill = null;
+    columnLevelSorts = [];
+  } else if (colsDrill && !columns.includes(colsDrill.topLevelField) && rows.includes(colsDrill.topLevelField) && !rowsDrill && !clashes(rows, colsDrill.topLevelField)) {
+    rowsDrill = fresh(colsDrill);
+    colsDrill = null;
+    rowLevelSorts = [];
+  }
+
+  const r = reconcileDrilldown(rowsDrill, rows);
+  const c = reconcileDrilldown(colsDrill, columns);
+  return {
+    rows: r.rows,
+    columns: c.rows,
+    rowsHierarchyDrilldown: r.rowsHierarchyDrilldown,
+    columnsHierarchyDrilldown: c.rowsHierarchyDrilldown,
+    rowLevelSorts,
+    columnLevelSorts,
+  };
+}
+
 // Several request pieces reference a Value by its bare FIELD NAME (Filter.byMeasureField for
 // TopN/BottomN/GreaterThan/LessThan/Between, Sort.byMeasureField, RowLevelSorts/ColumnLevelSorts'
 // own byMeasureField) — removing that Value from Values used to leave these references dangling,

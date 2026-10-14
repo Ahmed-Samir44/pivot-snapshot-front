@@ -9,7 +9,7 @@ import { SortEditor, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, Con
 import { formatNumber, formatForColumn } from "../../utils/numberFormat";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
-import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys } from "../../utils/pivotGridLayout";
+import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys, buildColumnHeaderRows } from "../../utils/pivotGridLayout";
 import { MEASURES_PLACEHOLDER, measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "../../utils/measuresPlacement";
 import { applyReportSubtotals } from "../../utils/subtotals";
 import { drillthroughPivot } from "../../services/pivotApi";
@@ -659,6 +659,13 @@ export default function PivotGrid({
   // drilldownSubtotals). Passed explicitly rather than read off `request`, since a read-only
   // snapshot preview has no live request.
   drilldownSubtotals = "Top",
+  // Columns drilldown (C4, 2026-10-14): its slot among `columns` (-1 = none) — header rows come from
+  // buildColumnHeaderRows (parents spanning their children). The +/- callbacks get the member, the
+  // header cell's first column (for its outer items) and the member's ancestors; a read-only
+  // preview passes none, so no toggles are drawn.
+  columnsDrillSlot = -1,
+  isColumnDrilldownMemberExpanded = null,
+  onToggleColumnDrilldownMember = null,
   request = null,
   onChange = null,
   onRefresh = null,
@@ -794,7 +801,10 @@ export default function PivotGrid({
   // columnDepth})` loop a few lines down. columnDepth === 0 would skip that loop entirely and drop
   // the row headers' own title row along with the (correctly absent) column ones — caught live,
   // 2026-10-05, the first time this zero-Values case became reachable at all.
-  const columnDepth = columnHeaders[0]?.labels.length ?? (rowHeaders.length > 0 ? 1 : 0);
+  // Columns drilldown (C2): a drilldown slot adds one header row per member depth — the shared
+  // buildColumnHeaderRows (mirrored by the backend's ColumnHeaderLayout) decides rows and spans.
+  const columnHeaderRows = buildColumnHeaderRows(columnHeaders, columnsDrillSlot);
+  const columnDepth = columnHeaders.length > 0 ? columnHeaderRows.length : rowHeaders.length > 0 ? 1 : 0;
 
   const toggleGroup = (key) => {
     setCollapsed((prev) => {
@@ -1142,12 +1152,37 @@ export default function PivotGrid({
                     )}
                   </>
                 )}
-                {columnHeaders.map((col, colIndex) => (
-                  <th key={colIndex} className={`${headerCellBorder} ${headerBg} px-2 py-2`}>
-                    {/* A Grand Total column shows its caption once, in the top header row, like Excel. */}
-                    <HeaderCell isTotal={col.isTotal}>{col.captionLevel === -1 && col.caption ? (level === 0 ? col.caption : "") : col.labels[level]}</HeaderCell>
-                  </th>
-                ))}
+                {/* A Grand Total column shows its caption once, in the top header row, like Excel; an
+                    expanded Columns drilldown member spans its children (buildColumnHeaderRows). */}
+                {(columnHeaderRows[level] ?? []).map((cell) => {
+                  const column = columnHeaders[cell.sourceIndex];
+                  const uniqueName = cell.memberUniqueName && cell.memberUniqueName.endsWith("]") ? cell.memberUniqueName : null;
+                  const toggle = uniqueName && onToggleColumnDrilldownMember;
+                  // A member's ancestors: those of the column it heads, down to the member itself.
+                  const allAncestors = column?.drill?.ancestorUniqueNames ?? [];
+                  const ownIndex = allAncestors.indexOf(uniqueName);
+                  const ancestors = ownIndex >= 0 ? allAncestors.slice(0, ownIndex) : allAncestors;
+                  const expanded = toggle ? (isColumnDrilldownMemberExpanded?.(uniqueName, column) ?? false) : false;
+                  return (
+                    <th key={cell.sourceIndex} colSpan={cell.span > 1 ? cell.span : undefined} className={`${headerCellBorder} ${headerBg} px-2 py-2`}>
+                      {toggle ? (
+                        <span className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => onToggleColumnDrilldownMember(uniqueName, column, ancestors)}
+                            className="text-white/70 hover:text-white"
+                            aria-label={expanded ? "Collapse" : "Expand"}
+                          >
+                            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                          </button>
+                          <HeaderCell isTotal={cell.isTotal}>{cell.text}</HeaderCell>
+                        </span>
+                      ) : (
+                        <HeaderCell isTotal={cell.isTotal}>{cell.text}</HeaderCell>
+                      )}
+                    </th>
+                  );
+                })}
               </tr>
             ))}
           </thead>

@@ -15,7 +15,7 @@ import {
   clearOrphanedCalculatedItems,
   clearDanglingMeasureReferences,
   clearDanglingBaseFieldReferences,
-  reconcileDrilldown,
+  reconcileDrilldowns,
 } from "../../utils/dragDrop";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
 import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "../../utils/conditionalFormat";
@@ -2553,8 +2553,8 @@ export default function FieldPicker({
     next.values = clearDanglingBaseFieldReferences(next.values, next.rows);
     Object.assign(next, clearDanglingMeasureReferences(next, next.values.map((v) => v.field)));
     // Drilldown v3: the drilldown is a Rows slot now — it survives this move unless its own slot
-    // left Rows or a same-hierarchy field arrived (see reconcileDrilldown).
-    Object.assign(next, reconcileDrilldown(next.rowsHierarchyDrilldown, next.rows));
+    // left Rows or a same-hierarchy field arrived (see reconcileDrilldowns — it can also follow its pill to Columns).
+    Object.assign(next, reconcileDrilldowns(next));
 
     onChange(next);
   };
@@ -2639,7 +2639,7 @@ export default function FieldPicker({
     Object.assign(next, clearDanglingMeasureReferences(next, next.values.map((v) => v.field)));
     // Drilldown v3: same rule as moveField's — "+ Rows" ends the drilldown only if it adds a level
     // of the drilldown's OWN hierarchy (or "+ Cols" takes its slot away).
-    Object.assign(next, reconcileDrilldown(next.rowsHierarchyDrilldown, next.rows));
+    Object.assign(next, reconcileDrilldowns(next));
 
     onChange(next);
   };
@@ -2647,20 +2647,24 @@ export default function FieldPicker({
   // Real Excel's per-member OLAP drilldown (PLAN 8). Since Drilldown v3 (2026-10-14) the hierarchy
   // JOINS Rows as one slot (its top-level field, appended at the end like any field added to Rows)
   // instead of replacing Rows — the other Rows fields stay, and the slot can be dragged/reordered
-  // among them like a normal pill (see reconcileDrilldown for when drilldown mode ends). Any flat
+  // among them like a normal pill (see reconcileDrilldowns for when drilldown mode ends). Any flat
   // levels of this SAME hierarchy already in Rows are dropped: SSAS can't put one hierarchy on an
   // axis twice. Σ Values moves to Columns (the backend requires it there for a combined drilldown),
   // and show-items-with-no-data is cleared (not supported alongside a combined drilldown).
   const startDrilldown = (topLevelField) => {
     const sameHierarchy = (f) => f.split("].[").slice(0, 2).join("].[") === topLevelField.split("].[").slice(0, 2).join("].[");
     const otherRows = value.rows.filter((f) => !sameHierarchy(f) && f !== MEASURES_PLACEHOLDER);
+    // The same hierarchy can't sit on Columns too (flat levels or a Columns drilldown).
+    const otherColumns = value.columns.filter((f) => !sameHierarchy(f));
     const columns =
-      value.rows.includes(MEASURES_PLACEHOLDER) && !value.columns.includes(MEASURES_PLACEHOLDER) ? [...value.columns, MEASURES_PLACEHOLDER] : value.columns;
+      value.rows.includes(MEASURES_PLACEHOLDER) && !otherColumns.includes(MEASURES_PLACEHOLDER) ? [...otherColumns, MEASURES_PLACEHOLDER] : otherColumns;
+    const columnsDrill = value.columnsHierarchyDrilldown;
     onChange({
       ...value,
       rows: [...otherRows, topLevelField],
       columns,
       rowsHierarchyDrilldown: { topLevelField, expandedMemberUniqueNames: [] },
+      columnsHierarchyDrilldown: columnsDrill && !sameHierarchy(columnsDrill.topLevelField) ? columnsDrill : null,
       rowLevelSorts: [],
       fieldSubtotals: value.fieldSubtotals.filter((s) => otherRows.includes(s.field)),
       fieldsShowingItemsWithNoData: [],
@@ -2852,7 +2856,8 @@ export default function FieldPicker({
                 // remove, or reorder here can shift which field a stored index actually points to,
                 // so they're cleared rather than risking a rule silently applying to the wrong
                 // field (same defensive-clear approach as groupings/calculatedItems above).
-                onChange({
+                // Columns drilldown (C4): its slot rule, same as Rows' (see reconcileDrilldowns).
+                const next = {
                   ...value,
                   rows,
                   columns,
@@ -2861,7 +2866,8 @@ export default function FieldPicker({
                   calculatedItems,
                   columnLevelSorts: [],
                   rowLevelSorts: newlyAddedToColumns.length > 0 ? [] : value.rowLevelSorts,
-                });
+                };
+                onChange({ ...next, ...reconcileDrilldowns(next) });
               }}
               dragSourceKey="columns"
               onFieldDropped={moveField}
@@ -2902,11 +2908,10 @@ export default function FieldPicker({
                 // Same orphaned-per-field cleanup, for Show Items With No Data (PLAN 7, 2026-10-13).
                 const fieldsShowingItemsWithNoData = value.fieldsShowingItemsWithNoData.filter((f) => rows.includes(f));
                 // Drilldown v3: the drilldown keeps its slot among these Rows fields unless it was
-                // removed or a same-hierarchy field joined (see reconcileDrilldown).
-                const drilldownState = reconcileDrilldown(value.rowsHierarchyDrilldown, rows);
-                onChange({
+                // removed or a same-hierarchy field joined (see reconcileDrilldowns — both axes).
+                const next = {
                   ...value,
-                  rows: drilldownState.rows,
+                  rows,
                   columns,
                   values,
                   dateGroupings,
@@ -2916,8 +2921,8 @@ export default function FieldPicker({
                   fieldsShowingItemsWithNoData,
                   rowLevelSorts: [],
                   columnLevelSorts: newlyAddedToRows.length > 0 ? [] : value.columnLevelSorts,
-                  rowsHierarchyDrilldown: drilldownState.rowsHierarchyDrilldown,
-                });
+                };
+                onChange({ ...next, ...reconcileDrilldowns(next) });
               }}
               dragSourceKey="rows"
               onFieldDropped={moveField}

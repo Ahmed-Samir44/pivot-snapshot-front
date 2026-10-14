@@ -46,6 +46,11 @@ function combinedDrillSlot(version) {
   return version.result.rowHeaders.find((h) => h.drill)?.drill.level ?? -1;
 }
 
+// A saved Columns drilldown (C4): its columns carry `drill`, whose level is the slot in Columns.
+function columnsDrillSlot(version) {
+  return version.result.columnHeaders.find((h) => h.drill)?.drill.level ?? -1;
+}
+
 // What the preview grid needs to lay a saved drilldown out (read-only — no expansions to toggle).
 function previewDrilldown(version) {
   if (isDrilldownVersion(version)) return { expandedMemberUniqueNames: [] };
@@ -339,6 +344,7 @@ export default function SnapshotHistory() {
         fieldLayouts: parseBuilderState(previewVersion.builderStateJson)?.fieldLayouts ?? [],
         drilldown: isDrilldownVersion(previewVersion),
         drillSlot: combinedDrillSlot(previewVersion),
+        columnsDrillSlot: columnsDrillSlot(previewVersion),
         drilldownSubtotals: parseBuilderState(previewVersion.builderStateJson)?.request?.subtotals ?? "Top",
       });
     } catch (err) {
@@ -684,6 +690,7 @@ export default function SnapshotHistory() {
               fieldLayouts={builderState?.fieldLayouts ?? []}
               // Read-only here: no onToggleDrilldownMember, so no +/- toggles — just the frozen rows.
               rowsHierarchyDrilldown={previewDrilldown(previewVersion)}
+              columnsDrillSlot={columnsDrillSlot(previewVersion)}
               // Older versions (no builder state) predate drilldown subtotals — Top = how they looked.
               drilldownSubtotals={builderState?.request?.subtotals ?? "Top"}
               boundedHeight={false}

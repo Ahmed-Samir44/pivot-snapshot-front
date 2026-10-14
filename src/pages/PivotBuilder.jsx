@@ -37,6 +37,56 @@ function visibleScopedExpansions(drilldown) {
   return scoped.filter((e) => (e.ancestors ?? []).every((a) => expanded.has(`${outerKey(e.outerUniqueNames)}\u0002${a}`)));
 }
 
+// Columns drilldown (C4, 2026-10-14): the Columns positions before the slot that are REAL fields —
+// Σ Values can sit there too, but it isn't part of an expansion's outer context (the backend's rule).
+function columnsOuterIndexes(columns, drilldown) {
+  const slot = columns.indexOf(drilldown.topLevelField);
+  return Array.from({ length: Math.max(0, slot) }, (_, i) => i).filter((i) => columns[i] !== MEASURES_PLACEHOLDER);
+}
+
+// The Columns drilldown as sent to the API: visible expansions only, scoped per outer item when real
+// fields sit before the slot (stale entries from an earlier field order are dropped).
+function cleanColumnsDrilldown(request) {
+  const d = request.columnsHierarchyDrilldown;
+  if (!d) return null;
+  const outerCount = columnsOuterIndexes(request.columns, d).length;
+  if (outerCount > 0) {
+    return {
+      topLevelField: d.topLevelField,
+      expandedMemberUniqueNames: [],
+      scopedExpansions: visibleScopedExpansions(d)
+        .filter((e) => e.memberUniqueName.endsWith("]") && e.outerUniqueNames.length === outerCount)
+        .map((e) => ({ outerUniqueNames: e.outerUniqueNames, memberUniqueName: e.memberUniqueName })),
+    };
+  }
+  return { topLevelField: d.topLevelField, expandedMemberUniqueNames: visibleDrilldownExpansions(d).filter((u) => u.endsWith("]")) };
+}
+
+// Toggles one member of a drilldown (either axis) in `current`: per outer item when `outerUniqueNames`
+// is non-empty, else in the context-free list. Like Excel, collapsing a member REMEMBERS expansions
+// under it — only this member leaves the list; `ancestors` is recorded so the hidden ones are skipped.
+function toggleDrilldownExpansion(current, uniqueName, outerUniqueNames, ancestors) {
+  if (outerUniqueNames.length > 0) {
+    const scoped = current.scopedExpansions ?? [];
+    const isThis = (e) => outerKey(e.outerUniqueNames) === outerKey(outerUniqueNames) && e.memberUniqueName === uniqueName;
+    const nextScoped = scoped.some(isThis) ? scoped.filter((e) => !isThis(e)) : [...scoped, { outerUniqueNames, memberUniqueName: uniqueName, ancestors }];
+    return { ...current, scopedExpansions: nextScoped };
+  }
+  const collapsing = current.expandedMemberUniqueNames.includes(uniqueName);
+  const expandedAncestors = { ...(current.expandedAncestors ?? {}) };
+  if (!collapsing) expandedAncestors[uniqueName] = ancestors;
+  const expanded = collapsing ? current.expandedMemberUniqueNames.filter((u) => u !== uniqueName) : [...current.expandedMemberUniqueNames, uniqueName];
+  return { ...current, expandedMemberUniqueNames: expanded, expandedAncestors };
+}
+
+function isDrilldownExpansionOn(current, uniqueName, outerUniqueNames) {
+  if (!current) return false;
+  if (outerUniqueNames.length > 0) {
+    return (current.scopedExpansions ?? []).some((e) => outerKey(e.outerUniqueNames) === outerKey(outerUniqueNames) && e.memberUniqueName === uniqueName);
+  }
+  return current.expandedMemberUniqueNames.includes(uniqueName);
+}
+
 // A request saved before Drilldown v3 kept a drilldown OUTSIDE Rows (Rows = []); it's a slot in Rows
 // now — put it there so the rest of the app (reconcileDrilldown, the Rows pills) sees it.
 function migrateDrilldownSlot(request) {
@@ -89,6 +139,9 @@ const EMPTY_REQUEST = {
   // FieldPicker.jsx's own startDrilldown/Rows-onChange WHY comments) — query-affecting, stays in
   // `request` and IS sent to queryPivot, same as fieldsShowingItemsWithNoData.
   rowsHierarchyDrilldown: null,
+  // Columns drilldown (C4, 2026-10-14) — same shape, a slot among `columns`. Started by moving a
+  // drilldown pill from Rows to Columns (see dragDrop.js reconcileDrilldowns).
+  columnsHierarchyDrilldown: null,
   // Excel's own Slicer control (Insert > Slicer) — a separate button-grid widget bound to a field,
   // distinct from the Filters drop zone/Report Filter rows even though it reads/writes the SAME
   // request.filters entry (Members mode). This array is purely "which fields get the Slicer widget
@@ -232,7 +285,8 @@ export default function PivotBuilder() {
         const prevColumnFieldCount = prev.columns.filter((f) => f !== MEASURES_PLACEHOLDER).length;
         const nextColumnFieldCount = withDefaultSort.columns.filter((f) => f !== MEASURES_PLACEHOLDER).length;
         const columnsJustGotFirstField = prevColumnFieldCount === 0 && nextColumnFieldCount > 0;
-        if (columnsJustGotFirstField && withDefaultSort.columnLevelSorts.length === 0) {
+        // Same exception as Rows for a Columns drilldown slot (C4).
+        if (columnsJustGotFirstField && withDefaultSort.columnLevelSorts.length === 0 && !withDefaultSort.columnsHierarchyDrilldown) {
           withDefaultSort = { ...withDefaultSort, columnLevelSorts: [{ level: 0, direction: "Ascending", byMeasureField: null }] };
         }
       }
@@ -255,7 +309,9 @@ export default function PivotBuilder() {
         // parent — mirrors MdxPivotQueryBuilder.ValidateSort, which counts the drilldown as the one
         // field), however many other Rows fields sit beside it. Without this, sorting "Row Labels"
         // A→Z/Z→A was silently cleared right here (caught live 2026-10-14).
-        const targetsDrilldown = withDefaultSort.sort.axis === "Rows" && withDefaultSort.rowsHierarchyDrilldown;
+        const targetsDrilldown =
+          (withDefaultSort.sort.axis === "Rows" && withDefaultSort.rowsHierarchyDrilldown) ||
+          (withDefaultSort.sort.axis === "Columns" && withDefaultSort.columnsHierarchyDrilldown);
         if (realFieldCount !== 1 && !targetsDrilldown) {
           return { ...withDefaultSort, sort: null };
         }
@@ -561,6 +617,9 @@ export default function PivotBuilder() {
                 topLevelField: request.rowsHierarchyDrilldown.topLevelField,
                 expandedMemberUniqueNames: visibleDrilldownExpansions(request.rowsHierarchyDrilldown).filter((u) => u.endsWith("]")),
               }),
+        // Columns drilldown (C4): the same visible-only rule; scoped exactly when REAL fields (not
+        // Σ Values) sit before its slot — mirrors MdxPivotQueryBuilder.ValidateColumnsDrilldown.
+        columnsHierarchyDrilldown: cleanColumnsDrilldown(request),
       };
       const data = await queryPivot(cleaned, { signal: controller.signal });
       if (token !== queryTokenRef.current) return; // a newer call already landed/owns the UI
@@ -776,6 +835,8 @@ export default function PivotBuilder() {
           return others.length === 0 ? { drilldown: true } : { drillSlot: lastQuery.rows.indexOf(d.topLevelField) };
         })(),
         drilldownSubtotals: lastQuery.subtotals,
+        // Columns drilldown (C4): header rows from buildColumnHeaderRows, same as the grid.
+        columnsDrillSlot: lastQuery.columnsHierarchyDrilldown ? lastQuery.columns.indexOf(lastQuery.columnsHierarchyDrilldown.topLevelField) : -1,
       });
     } catch (err) {
       setExportError(err.message);
@@ -911,6 +972,23 @@ export default function PivotBuilder() {
                   ? current.expandedMemberUniqueNames.filter((u) => u !== uniqueName)
                   : [...current.expandedMemberUniqueNames, uniqueName];
                 setRequest({ ...request, rowsHierarchyDrilldown: { ...current, expandedMemberUniqueNames: expanded, expandedAncestors: ancestors } });
+              }}
+              // Columns drilldown (C4): its slot in the DISPLAYED columns (lastQuery), and +/- on the
+              // header cells. Expansions are per outer item when real Columns fields sit before the
+              // slot — their members come from the clicked header's own column (Σ Values skipped).
+              columnsDrillSlot={lastQuery?.columnsHierarchyDrilldown ? lastQuery.columns.indexOf(lastQuery.columnsHierarchyDrilldown.topLevelField) : -1}
+              isColumnDrilldownMemberExpanded={(uniqueName, column) => {
+                const current = request.columnsHierarchyDrilldown;
+                if (!current || !lastQuery) return false;
+                const outer = columnsOuterIndexes(lastQuery.columns, current).map((i) => column?.uniqueNames?.[i]);
+                return isDrilldownExpansionOn(current, uniqueName, outer);
+              }}
+              onToggleColumnDrilldownMember={(uniqueName, column, ancestors) => {
+                const current = request.columnsHierarchyDrilldown;
+                if (!current || !lastQuery) return;
+                const outer = columnsOuterIndexes(lastQuery.columns, current).map((i) => column?.uniqueNames?.[i]);
+                if (outer.some((u) => !u)) return;
+                setRequest({ ...request, columnsHierarchyDrilldown: toggleDrilldownExpansion(current, uniqueName, outer, ancestors) });
               }}
               // request/onChange, not lastQuery: a header's Sort/Filter menu edits the LIVE field
               // config (same request/setRequest pair FieldPicker already uses) — rows/columns above

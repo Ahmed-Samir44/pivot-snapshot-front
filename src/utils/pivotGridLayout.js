@@ -353,3 +353,81 @@ export function applyCollapse(displayRows, collapsedKeys, rowHeaderGroups) {
   }
   return out;
 }
+
+// Columns drilldown, Phase C2 (2026-10-14): the header rows real Excel draws above the value cells —
+// mirrors the backend's ColumnHeaderLayout.Build exactly (keep both in sync). Returns one array per
+// header row of { text, span, isTotal, sourceIndex, memberUniqueName }.
+//
+// Without a Columns drilldown (drillSlot -1) it's the old shape: one row per Columns field, one cell
+// per column, a Grand Total caption once in the top row. With one, the slot's field becomes one row
+// PER MEMBER DEPTH: ancestors above, the member at its own depth, blank below (a collapsed member or
+// a total column). Adjacent columns with the same path down to a row merge into one cell there — an
+// expanded parent spans its children, and its "Egypt Total" column (moved right of them by the
+// backend's ColumnDrilldownLayoutProcessor) starts a new path at its depth.
+export function buildColumnHeaderRows(columnHeaders, drillSlot = -1) {
+  if (columnHeaders.length === 0) return [];
+  const labelCount = columnHeaders[0].labels.length;
+  const maxDepth = drillSlot >= 0 ? Math.max(...columnHeaders.map((c) => c.drill?.depth ?? 0)) : 0;
+  const rowCount = labelCount + maxDepth;
+  const entries = columnHeaders.map((column, c) => columnHeaderEntries(column, c, drillSlot, maxDepth, rowCount));
+
+  const rows = [];
+  for (let r = 0; r < rowCount; r++) {
+    const row = [];
+    let c = 0;
+    while (c < columnHeaders.length) {
+      let end = c + 1;
+      while (end < columnHeaders.length && entries[end][r].key === entries[c][r].key) end += 1;
+      const e = entries[c][r];
+      row.push({ text: e.text, span: end - c, isTotal: e.isTotal, sourceIndex: c, memberUniqueName: e.member });
+      c = end;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+function columnHeaderEntries(column, c, drillSlot, maxDepth, rowCount) {
+  const entries = [];
+  if (column.captionLevel === -1 && column.caption) {
+    for (let r = 0; r < rowCount; r++) entries.push({ text: r === 0 ? column.caption : "", key: `grand:${c}:${r}`, isTotal: true, member: null });
+    return entries;
+  }
+  if (drillSlot < 0) {
+    for (let r = 0; r < rowCount; r++) entries.push({ text: column.labels[r], key: `col:${c}:${r}`, isTotal: Boolean(column.isTotal), member: null });
+    return entries;
+  }
+
+  let path = "";
+  const depth = column.drill?.depth ?? 0;
+  const isTotal = Boolean(column.isTotal);
+  const isSlotTotal = isTotal && column.captionLevel === drillSlot;
+  let inTotal = false;
+  column.labels.forEach((label, f) => {
+    if (f !== drillSlot) {
+      // By label, not unique name (see ColumnHeaderLayout.cs): a total column has no uniqueNames,
+      // and its outer items must still merge with its siblings'.
+      path += "\u0001" + label;
+      entries.push({ text: label, key: path, isTotal: isTotal && (inTotal || f > drillSlot), member: null });
+      return;
+    }
+    const ancestors = column.drill?.ancestorUniqueNames ?? [];
+    const captions = column.drill?.ancestorCaptions ?? [];
+    const member = isSlotTotal ? (column.drill?.memberUniqueName ?? null) : (column.uniqueNames?.[f] ?? null);
+    for (let k = 0; k <= maxDepth; k++) {
+      if (k < depth) {
+        const ancestor = ancestors[k] ?? "";
+        path += "\u0001" + ancestor;
+        entries.push({ text: captions[k] ?? "", key: path, isTotal: false, member: ancestor });
+      } else if (k === depth) {
+        inTotal = isTotal;
+        path += "\u0001" + (isSlotTotal ? "total:" : "") + (member ?? label);
+        entries.push({ text: isSlotTotal ? (column.caption ?? label) : label, key: path, isTotal, member: isSlotTotal ? null : member });
+      } else {
+        path += "\u0001";
+        entries.push({ text: "", key: path, isTotal, member: null });
+      }
+    }
+  });
+  return entries;
+}
