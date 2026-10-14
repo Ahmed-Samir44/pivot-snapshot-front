@@ -16,6 +16,16 @@ import { readFieldDragPayload, FIELD_DRAG_MIME, removeFieldEverywhere } from "..
 // It is NOT the saved snapshot: "Save Snapshot" below freezes the CURRENT result (the one already
 // on screen) into a static HTML snapshot — it never re-queries the cube, so what gets saved is
 // guaranteed to match exactly what the user looked at before saving (see SnapshotStorageService).
+
+// The expanded drilldown members that are actually VISIBLE — every ancestor of theirs is expanded
+// too. A member with no recorded ancestry (state saved before 2026-10-14) counts as visible, which
+// is exactly the old behavior.
+function visibleDrilldownExpansions(drilldown) {
+  const expanded = new Set(drilldown.expandedMemberUniqueNames);
+  const ancestors = drilldown.expandedAncestors ?? {};
+  return drilldown.expandedMemberUniqueNames.filter((u) => (ancestors[u] ?? []).every((a) => expanded.has(a)));
+}
+
 const EMPTY_REQUEST = {
   rows: [],
   columns: [],
@@ -501,9 +511,15 @@ export default function PivotBuilder() {
         // persisted request, not component state. Filtering it out here means it self-heals on the
         // very next query instead of needing a manual Reset every time this specific cube quirk
         // happens to recur.
+        //
+        // Only VISIBLE expansions are sent (Drilldown v2, 2026-10-14): Excel remembers a member's
+        // expansion while one of its ancestors is collapsed, so state keeps every expanded member
+        // (plus its ancestry, frontend-only) and the query gets just those whose ancestors are all
+        // expanded — otherwise the hidden member's children would show up orphaned under the
+        // collapsed ancestor.
         rowsHierarchyDrilldown: request.rowsHierarchyDrilldown && {
-          ...request.rowsHierarchyDrilldown,
-          expandedMemberUniqueNames: request.rowsHierarchyDrilldown.expandedMemberUniqueNames.filter((u) => u.endsWith("]")),
+          topLevelField: request.rowsHierarchyDrilldown.topLevelField,
+          expandedMemberUniqueNames: visibleDrilldownExpansions(request.rowsHierarchyDrilldown).filter((u) => u.endsWith("]")),
         },
       };
       const data = await queryPivot(cleaned, { signal: controller.signal });
@@ -806,24 +822,23 @@ export default function PivotBuilder() {
               onToggleDrilldownMember={(uniqueName) => {
                 const current = request.rowsHierarchyDrilldown;
                 if (!current) return;
-                // Collapsing a member also collapses every expanded member UNDER it — otherwise their
-                // children stayed in the query and showed up orphaned under the collapsed parent
-                // (caught live 2026-10-14). Each drilldown row's uniqueNames is its full ancestry
-                // (see CubeQueryService.BuildDrilldownHeaders), so the current result tells us which
-                // expanded members sit below this one.
+                // Like Excel, collapsing a member REMEMBERS the expansions under it (Drilldown v2,
+                // 2026-10-14): only this member leaves the expanded list; its expanded descendants
+                // stay, and the query just skips them while an ancestor is collapsed (see
+                // visibleDrilldownExpansions). Expanding records the member's ancestry, read off its
+                // row's uniqueNames (its full ancestry — see CubeQueryService.BuildDrilldownHeaders),
+                // which is what makes that visibility check possible.
                 const collapsing = current.expandedMemberUniqueNames.includes(uniqueName);
-                const descendants = new Set();
-                if (collapsing) {
-                  (result?.rowHeaders ?? []).forEach((h) => {
-                    const names = h.uniqueNames ?? [];
-                    const at = names.indexOf(uniqueName);
-                    if (at >= 0) names.slice(at + 1).forEach((n) => descendants.add(n));
-                  });
+                const ancestors = { ...(current.expandedAncestors ?? {}) };
+                if (!collapsing) {
+                  const row = (result?.rowHeaders ?? []).find((h) => (h.uniqueNames ?? []).includes(uniqueName));
+                  const names = row?.uniqueNames ?? [];
+                  ancestors[uniqueName] = names.slice(0, names.indexOf(uniqueName));
                 }
                 const expanded = collapsing
-                  ? current.expandedMemberUniqueNames.filter((u) => u !== uniqueName && !descendants.has(u))
+                  ? current.expandedMemberUniqueNames.filter((u) => u !== uniqueName)
                   : [...current.expandedMemberUniqueNames, uniqueName];
-                setRequest({ ...request, rowsHierarchyDrilldown: { ...current, expandedMemberUniqueNames: expanded } });
+                setRequest({ ...request, rowsHierarchyDrilldown: { ...current, expandedMemberUniqueNames: expanded, expandedAncestors: ancestors } });
               }}
               // request/onChange, not lastQuery: a header's Sort/Filter menu edits the LIVE field
               // config (same request/setRequest pair FieldPicker already uses) — rows/columns above
