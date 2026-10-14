@@ -827,11 +827,22 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
           {(mode === "Members" || mode === "Exclude") && !membersFailed && (
             <MemberCheckboxList
               options={memberOptions}
-              value={draft.includedMembers}
-              onChange={(includedMembers) => setDraft((prev) => ({ ...prev, includedMembers }))}
-              placeholder={
-                loadingMembers ? "Loading members…" : mode === "Exclude" ? "Type to search values to exclude…" : "Type to search members…"
+              // In Exclude mode ("Include new items in manual filter") draft.includedMembers holds
+              // the EXCLUDED members, but the checklist must still show what's INCLUDED, exactly
+              // like Members mode — so the checked set is inverted here on the way in and out.
+              // Caught live 2026-10-14: the list showed excluded members as checked, so unchecking
+              // one excluded the OTHER member instead. On the way out, exclusions hidden by the
+              // current (server-filtered) search are kept, so searching can't silently drop them.
+              value={mode === "Exclude" ? memberOptions.filter((m) => !draft.includedMembers.includes(m)) : draft.includedMembers}
+              onChange={(checked) =>
+                setDraft((prev) => {
+                  if (mode !== "Exclude") return { ...prev, includedMembers: checked };
+                  const visible = new Set(memberOptions);
+                  const hiddenExclusions = prev.includedMembers.filter((m) => !visible.has(m));
+                  return { ...prev, includedMembers: [...hiddenExclusions, ...memberOptions.filter((m) => !checked.includes(m))] };
+                })
               }
+              placeholder={loadingMembers ? "Loading members…" : "Type to search members…"}
               isLoading={loadingMembers}
               showSelectMultiple={!showAdvancedFilters}
               onInputChange={(text, actionMeta) => {
@@ -871,7 +882,13 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
                 checked={mode === "Exclude"}
                 disabled={Boolean(memberSearch)}
                 onChange={(e) => {
-                  const complement = memberOptions.filter((m) => !draft.includedMembers.includes(m));
+                  // An empty Members selection means "no filter yet" (everyone), so its Exclude
+                  // equivalent is "exclude nobody" — not the complement, which would exclude
+                  // everyone and return an empty pivot.
+                  const complement =
+                    e.target.checked && mode === "Members" && draft.includedMembers.length === 0
+                      ? []
+                      : memberOptions.filter((m) => !draft.includedMembers.includes(m));
                   setDraft((prev) => ({ ...prev, mode: e.target.checked ? "Exclude" : "Members", includedMembers: complement }));
                 }}
               />
