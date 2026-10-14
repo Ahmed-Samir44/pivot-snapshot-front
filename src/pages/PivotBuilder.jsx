@@ -11,7 +11,7 @@ import { getTables, getDimensionsForTable, getMeasures } from "../services/cubeM
 import { saveSnapshot, listDefinitions } from "../services/snapshotApi";
 import { MEASURES_PLACEHOLDER, normalizeMeasuresPlacement, hideMeasuresLabelIfSingleValue } from "../utils/measuresPlacement";
 import { readFieldDragPayload, FIELD_DRAG_MIME, removeFieldEverywhere } from "../utils/dragDrop";
-import { isCompleteCalculatedField } from "../utils/calculatedFields";
+import { isCompleteCalculatedField, isCompleteCalculatedItem } from "../utils/calculatedFields";
 
 // This screen renders a live, interactive pivot (React state + re-fetch on every change).
 // It is NOT the saved snapshot: "Save Snapshot" below freezes the CURRENT result (the one already
@@ -579,9 +579,7 @@ export default function PivotBuilder() {
         // A CalculatedItem needs a field, a name, and at least one member on either side (see
         // MdxPivotQueryBuilder.ValidateCalculatedItems) — mirrors the calculatedFields cleaning
         // above.
-        calculatedItems: request.calculatedItems.filter(
-          (i) => i.field && i.name && (i.positiveMembers.length > 0 || i.negativeMembers.length > 0),
-        ),
+        calculatedItems: request.calculatedItems.filter(isCompleteCalculatedItem),
         // A grouped field can be in Rows OR Columns (see GroupingProcessor) — checking only Rows
         // here would silently strip a Columns-axis grouping right before it's sent.
         dateGroupings: request.dateGroupings.filter((g) => request.rows.includes(g.field) || request.columns.includes(g.field)),

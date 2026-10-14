@@ -5,7 +5,7 @@ import ContextMenu from "../forms/ContextMenu";
 import Modal from "../forms/Modal";
 import Slicer from "./Slicer";
 import Timeline from "./Timeline";
-import { SortEditor, FieldSortDialog, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, ConditionalFormatEditor, SHOW_VALUES_AS_OPTIONS, PERCENT_SHOW_VALUES_AS, DEFAULT_FORMAT } from "./FieldPicker";
+import { FieldSortDialog, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, ConditionalFormatEditor, SHOW_VALUES_AS_OPTIONS, PERCENT_SHOW_VALUES_AS, DEFAULT_FORMAT } from "./FieldPicker";
 import { formatNumber, formatForColumn } from "../../utils/numberFormat";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
@@ -513,29 +513,17 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
           </button>
         </div>
       ) : panel === "sortEditor" ? (
-        <div>
-          <button
-            type="button"
-            onClick={() => setPanel("sort")}
-            className="mb-2 inline-flex items-center gap-1 px-2 text-xs font-medium text-muted hover:text-ink"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" /> Back
-          </button>
-          {/* Same full SortEditor the field-header dropdown's own "More Sort Options…" opens
-              (FieldHeaderMenu above) — this cell menu's Sort flyout only had the two direct
-              Smallest/Largest shortcuts until now, unlike the field-header one, which is an
-              inconsistency real Excel doesn't have (its own cell Sort submenu has this same item
-              too) — caught during a full audit pass, 2026-10-05. */}
-          <SortEditor
-            sort={request.sort}
-            rowLevelSorts={request.rowLevelSorts}
-            columnLevelSorts={request.columnLevelSorts}
-            values={request.values}
-            rows={request.rows}
-            columns={request.columns}
-            onChange={(patch) => onChange({ ...request, ...patch })}
-          />
-        </div>
+        // Excel opens the per-field "Sort (<field>)" dialog here too (2026-10-14, against a screenshot)
+        // — for the cell's innermost Rows field (else its innermost Columns field).
+        (() => {
+          const realRows = request.rows.filter((f) => f !== MEASURES_PLACEHOLDER);
+          const realColumns = request.columns.filter((f) => f !== MEASURES_PLACEHOLDER);
+          const axis = realRows.length > 0 ? "Rows" : "Columns";
+          const sortField = axis === "Rows" ? realRows[realRows.length - 1] : realColumns[realColumns.length - 1];
+          if (!sortField) return <p className="p-2 text-sm text-muted">Add a Row or Column field to sort.</p>;
+          const level = (axis === "Rows" ? request.rows : request.columns).indexOf(sortField);
+          return <FieldSortDialog field={sortField} axis={axis} level={level} request={request} onChange={onChange} onBack={() => setPanel("sort")} onDone={onClose} />;
+        })()
       ) : panel === "numberFormat" ? (
         <NumberFormatEditor format={format} onUpdateFormat={updateFormat} onBack={() => setPanel("root")} onDone={onClose} />
       ) : panel === "settings" ? (

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Sigma, Rows3, Calculator, ListPlus, LayoutGrid, CalendarRange } from "lucide-react";
 import Popover from "../forms/Popover";
-import { CalculatedFieldDialog, CalculatedItemsEditor } from "./FieldPicker";
+import { CalculatedFieldDialog, CalculatedItemDialog } from "./FieldPicker";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
 import { applyReportSubtotals } from "../../utils/subtotals";
 import { isCompleteCalculatedField } from "../../utils/calculatedFields";
@@ -284,12 +284,13 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
               )}
             </RibbonButton>
             <RibbonButton icon={ListPlus} label="Calculated Item" badge={request.calculatedItems.length}>
-              {() => (
-                <CalculatedItemsEditor
+              {(close) => (
+                <CalculatedItemDialog
                   calculatedItems={request.calculatedItems}
                   rows={request.rows}
                   columns={request.columns}
-                  onChange={(calculatedItems) => onChange({ ...request, calculatedItems })}
+                  onApply={(calculatedItems) => onChange({ ...request, calculatedItems })}
+                  onClose={close}
                 />
               )}
             </RibbonButton>

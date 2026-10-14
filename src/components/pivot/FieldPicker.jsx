@@ -18,7 +18,7 @@ import {
   reconcileDrilldowns,
 } from "../../utils/dragDrop";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
-import { calculatedFieldFormula, formulaFieldReference, isCompleteCalculatedField } from "../../utils/calculatedFields";
+import { calculatedFieldFormula, calculatedItemFormula, formulaFieldReference, isCompleteCalculatedField } from "../../utils/calculatedFields";
 import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "../../utils/conditionalFormat";
 
 // Real Excel's own "Show values as" list — its exact order and wording (confirmed 2026-10-14 against
@@ -1285,70 +1285,6 @@ function CustomOrderEditor({ field, customOrder, onChange }) {
   );
 }
 
-// One Rows/Columns FIELD's own independent sort rule (Excel's real per-field "Sort A to
-// Z"/"Sort Largest to Smallest") — mutually exclusive with the single axis-wide Sort above (see
-// LevelSort's own WHY comment on the backend model for why this is what finally makes
-// measure-sort compatible with Subtotals). Only shown once an axis has 2+ fields — with exactly
-// one field, the single Sort dropdown above already covers both label and by-value sorting.
-function LevelSortEditor({ label, fields, levelSorts, values, onChange }) {
-  if (fields.length < 2) {
-    return null;
-  }
-
-  const modeFor = (level) => {
-    const rule = levelSorts.find((s) => s.level === level);
-    return rule ? (rule.byMeasureField ?? "label") : "none";
-  };
-  const directionFor = (level) => levelSorts.find((s) => s.level === level)?.direction ?? "Ascending";
-
-  const setRule = (level, mode, direction) => {
-    const withoutLevel = levelSorts.filter((s) => s.level !== level);
-    if (mode === "none") {
-      onChange(withoutLevel);
-      return;
-    }
-    onChange([...withoutLevel, { level, direction, byMeasureField: mode === "label" ? null : mode }]);
-  };
-
-  return (
-    <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
-      <p className="text-xs font-medium text-muted">{label}:</p>
-      {fields.map((field, level) => {
-        // Σ Values isn't a real field — no label/value to sort this level by (the backend rejects
-        // a LevelSort targeting its position outright, see ValidateAxisLevelSorts) — skipped here
-        // rather than filtered out of `fields` itself, since `level` must stay aligned with this
-        // field's REAL position in Rows/Columns for every OTHER row's own level value to stay
-        // correct.
-        if (field === MEASURES_PLACEHOLDER) {
-          return null;
-        }
-        const mode = modeFor(level);
-        const direction = directionFor(level);
-        return (
-          <div key={level} className="flex flex-wrap items-center gap-2">
-            <span className="min-w-[9rem] text-sm text-ink">{formatDimensionName(field)}</span>
-            <select className={nativeSelectClass} value={mode} onChange={(e) => setRule(level, e.target.value, direction)}>
-              <option value="none">No sorting</option>
-              <option value="label">By label</option>
-              {values.filter((v) => v.field).map((v) => (
-                <option key={v.field} value={v.field}>
-                  By value of {v.field}
-                </option>
-              ))}
-            </select>
-            {mode !== "none" && (
-              <select className={nativeSelectClass} value={direction} onChange={(e) => setRule(level, mode, e.target.value)}>
-                <option value="Ascending">Ascending</option>
-                <option value="Descending">Descending</option>
-              </select>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // "Sort by the field itself" in FieldSortDialog's "by" dropdowns (the other entries are Value fields).
 const SORT_BY_FIELD = "__field__";
 
@@ -1559,102 +1495,6 @@ function MoreSortOptions({ fieldName, summary, byField, byValue, firstKey, onOk,
   );
 }
 
-// onChange here takes the BUNDLED { sort, rowLevelSorts, columnLevelSorts } — all three interact
-// (Sort and *LevelSorts are mutually exclusive, enforced by clearing one when the other is set)
-// so they're easiest to manage together rather than as separate onChange callbacks.
-export function SortEditor({ sort, rowLevelSorts, columnLevelSorts, values, rows, columns, onChange }) {
-  const mode = sort === null ? "none" : sort.customOrder ? "custom" : sort.byMeasureField ? sort.byMeasureField : "label";
-  const axis = sort?.axis ?? "Rows";
-  // Σ Values isn't a real field — "sort/custom-order by its label" has no meaning, so it's
-  // excluded when picking which single field this axis-wide sort actually targets.
-  const targetField = (axis === "Columns" ? columns : rows).filter((f) => f !== MEASURES_PLACEHOLDER)[0] ?? null;
-
-  const handleModeChange = (nextMode) => {
-    // Setting the single axis-wide sort clears ALL level-by-level rules, on BOTH axes — the backend
-    // rejects `sort` whenever EITHER RowLevelSorts or ColumnLevelSorts is non-empty
-    // (ValidateLevelSorts), not just the same axis's (PivotBuilder's own default-sort-on-first-field
-    // can leave the OTHER axis's LevelSorts populated too, caught live 2026-10-06).
-    const clearLevelSorts = { rowLevelSorts: [], columnLevelSorts: [] };
-    if (nextMode === "none") {
-      onChange({ sort: null });
-      return;
-    }
-    const direction = sort?.direction ?? "Ascending";
-    if (nextMode === "custom") {
-      onChange({ sort: { direction, byMeasureField: null, axis, customOrder: [] }, ...clearLevelSorts });
-      return;
-    }
-    onChange({
-      sort: nextMode === "label" ? { direction, byMeasureField: null, axis, customOrder: null } : { direction, byMeasureField: nextMode, axis, customOrder: null },
-      ...clearLevelSorts,
-    });
-  };
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <select className={nativeSelectClass} value={mode} onChange={(e) => handleModeChange(e.target.value)}>
-          <option value="none">No sorting</option>
-          <option value="label">By label (single field only)</option>
-          <option value="custom">Custom order (single field only)</option>
-          {values.filter((v) => v.field).map((v) => (
-            <option key={v.field} value={v.field}>
-              By value of {v.field}
-            </option>
-          ))}
-        </select>
-        {sort && (
-          <>
-            <select
-              className={nativeSelectClass}
-              value={axis}
-              onChange={(e) => onChange({ sort: { ...sort, axis: e.target.value } })}
-            >
-              <option value="Rows">Sort Rows</option>
-              <option value="Columns">Sort Columns</option>
-            </select>
-            {mode !== "custom" && (
-              <select
-                className={nativeSelectClass}
-                value={sort.direction}
-                onChange={(e) => onChange({ sort: { ...sort, direction: e.target.value } })}
-              >
-                <option value="Ascending">Ascending</option>
-                <option value="Descending">Descending</option>
-              </select>
-            )}
-          </>
-        )}
-      </div>
-      {sort && mode === "custom" && (
-        <CustomOrderEditor
-          field={targetField}
-          customOrder={sort.customOrder}
-          onChange={(customOrder) => onChange({ sort: { ...sort, customOrder } })}
-        />
-      )}
-      {!sort && (
-        <>
-          <LevelSortEditor
-            label="Or sort each Row level independently"
-            fields={rows}
-            levelSorts={rowLevelSorts}
-            values={values}
-            onChange={(next) => onChange({ rowLevelSorts: next })}
-          />
-          <LevelSortEditor
-            label="Or sort each Column level independently"
-            fields={columns}
-            levelSorts={columnLevelSorts}
-            values={values}
-            onChange={(next) => onChange({ columnLevelSorts: next })}
-          />
-        </>
-      )}
-    </div>
-  );
-}
-
 // Excel's real "Insert Calculated Field" dialog (2026-10-14, against a screenshot): Name (a combo of
 // the existing calculated fields — picking one loads its formula and turns Add into Modify), a free
 // Formula box ("= 0" for a new one), Add/Modify and Delete, the Fields list with Insert Field
@@ -1794,26 +1634,47 @@ export function CalculatedFieldDialog({ calculatedFields, measureOptions, onAppl
 // fields: a signed sum of the field's own EXISTING members, picked from a member list rather than
 // typed — see the backend's CalculatedItem for the full WHY and its v1 scope cuts (can't combine
 // with a Filter or grouping on the same field, or with any ShowValuesAs besides Normal).
-function CalculatedItemRow({ item, axisFieldOptions, onChange, onRemove }) {
-  const [memberOptions, setMemberOptions] = useState([]);
+// Excel's real "Insert Calculated Item in "<field>"" dialog (2026-10-14, against a screenshot): Name
+// (a combo of the field's existing calculated items — picking one loads its formula and turns Add
+// into Modify; a new one starts as "Formula1" with "= 0"), a free Formula box, Add/Modify, Delete,
+// the Fields list, the Items list of the chosen field with Insert Item (double-click works too), and
+// OK / Close. The backend parses the formula safely (names = items of this field, see
+// CalculatedFieldFormula.cs). In Excel the field comes from the selected cell; here the Fields list
+// picks it (this ribbon button has no cell). Excel's Insert Field (a reference to ANOTHER field's
+// items) isn't offered — the backend only combines items of the same field.
+export function CalculatedItemDialog({ calculatedItems, rows, columns, onApply, onClose }) {
+  // Σ Values isn't a real field — a calculated item (a new member of a field) can't go on it.
+  const axisFields = [...rows, ...columns].filter((f) => f !== MEASURES_PLACEHOLDER);
+  const [field, setField] = useState(axisFields[0] ?? "");
+  const itemsOf = (f) => calculatedItems.filter((i) => i.field === f);
+  const nextDefaultName = (f) => {
+    let n = 1;
+    while (itemsOf(f).some((i) => i.name === `Formula${n}`)) n += 1;
+    return `Formula${n}`;
+  };
+  const [name, setName] = useState(() => nextDefaultName(axisFields[0] ?? ""));
+  const [formula, setFormula] = useState("= 0");
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [members, setMembers] = useState([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
-  // See FilterRow's own membersFailed WHY comment — same silent-failure gap, same fix. Shared by
-  // both the Add(+) and Subtract(−) lists below since they both read from this one fetch.
   const [membersFailed, setMembersFailed] = useState(false);
   const [membersRetryToken, setMembersRetryToken] = useState(0);
+  const formulaRef = useRef(null);
+  const existing = itemsOf(field).find((i) => i.name === name.trim()) ?? null;
 
+  // The Items list — the chosen field's members, from the same endpoint the filters use.
   useEffect(() => {
-    if (!item.field) {
-      setMemberOptions([]);
-      return;
+    if (!field) {
+      setMembers([]);
+      return undefined;
     }
     let cancelled = false;
     const controller = new AbortController();
     setLoadingMembers(true);
     setMembersFailed(false);
-    getMembers(item.field, undefined, controller.signal)
-      .then((members) => {
-        if (!cancelled) setMemberOptions(members);
+    getMembers(field, undefined, controller.signal)
+      .then((list) => {
+        if (!cancelled) setMembers(list.filter((m) => m !== ""));
       })
       .catch((err) => {
         if (!cancelled && err.name !== "AbortError") setMembersFailed(true);
@@ -1825,110 +1686,145 @@ function CalculatedItemRow({ item, axisFieldOptions, onChange, onRemove }) {
       cancelled = true;
       controller.abort();
     };
-  }, [item.field, membersRetryToken]);
+  }, [field, membersRetryToken]);
 
-  return (
-    <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <select
-          className={nativeSelectClass}
-          value={item.field}
-          onChange={(e) => onChange({ field: e.target.value, positiveMembers: [], negativeMembers: [] })}
-        >
-          <option value="">Choose a Rows/Columns field…</option>
-          {axisFieldOptions.map((f) => (
-            <option key={f} value={f}>
-              {formatDimensionName(f)}
-            </option>
-          ))}
-        </select>
-        <input
-          type="text"
-          placeholder="New item name (e.g. East + West)…"
-          value={item.name}
-          onChange={(e) => onChange({ name: e.target.value })}
-          className="input-field min-w-[10rem] flex-1 py-2"
-        />
-        <button type="button" onClick={onRemove} className="text-muted hover:text-ink" aria-label="Remove calculated item">
-          <X className="h-5 w-5" />
-        </button>
-      </div>
-      {item.field && membersFailed && (
-        <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-          <span>Couldn't load members — the cube may be busy.</span>
-          <button
-            type="button"
-            onClick={() => setMembersRetryToken((t) => t + 1)}
-            className="shrink-0 rounded-lg border border-rose-300 px-2 py-1 text-xs font-medium hover:bg-rose-100"
-          >
-            Retry
-          </button>
-        </div>
-      )}
-      {item.field && !membersFailed && (
-        <div className="flex flex-col gap-2">
-          <div>
-            <span className="mb-1 block text-xs font-medium text-muted">Add (+):</span>
-            <MemberCheckboxList
-              options={memberOptions}
-              value={item.positiveMembers}
-              onChange={(positiveMembers) => onChange({ positiveMembers })}
-              placeholder={loadingMembers ? "Loading members…" : "Select member(s) to add…"}
-              isLoading={loadingMembers}
-            />
-          </div>
-          <div>
-            <span className="mb-1 block text-xs font-medium text-muted">Subtract (−):</span>
-            <MemberCheckboxList
-              options={memberOptions}
-              value={item.negativeMembers}
-              onChange={(negativeMembers) => onChange({ negativeMembers })}
-              placeholder={loadingMembers ? "Loading members…" : "Select member(s) to subtract…"}
-              isLoading={loadingMembers}
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function CalculatedItemsEditor({ calculatedItems, rows, columns, onChange }) {
-  // Σ Values isn't a real field — a Calculated Item (a new synthetic MEMBER of an existing
-  // field's hierarchy) has nothing to attach to on it, so it's excluded here even when present in
-  // Rows/Columns.
-  const axisFieldOptions = [...rows, ...columns].filter((f) => f !== MEASURES_PLACEHOLDER);
-
-  const update = (index, patch) => {
-    const copy = [...calculatedItems];
-    copy[index] = { ...copy[index], ...patch };
-    onChange(copy);
-  };
-
-  const remove = (index) => onChange(calculatedItems.filter((_, i) => i !== index));
-
-  const add = () =>
-    onChange([...calculatedItems, { field: axisFieldOptions[0] ?? "", name: "", positiveMembers: [], negativeMembers: [] }]);
-
-  if (axisFieldOptions.length === 0) {
-    return <p className="text-sm text-muted">Add at least one Row or Column field first.</p>;
+  if (axisFields.length === 0) {
+    return <p className="w-64 text-sm text-muted">Add at least one Row or Column field first.</p>;
   }
 
+  const pickField = (f) => {
+    setField(f);
+    setName(nextDefaultName(f));
+    setFormula("= 0");
+    setSelectedItem(null);
+  };
+
+  const pickName = (value) => {
+    setName(value);
+    const match = itemsOf(field).find((i) => i.name === value);
+    if (match) setFormula(calculatedItemFormula(match));
+  };
+
+  // Inserts the item at the cursor, the way Excel's Insert Item does.
+  const insertItem = (item) => {
+    if (!item) return;
+    const reference = formulaFieldReference(item);
+    const input = formulaRef.current;
+    const start = input?.selectionStart ?? formula.length;
+    const end = input?.selectionEnd ?? formula.length;
+    setFormula(`${formula.slice(0, start)}${reference}${formula.slice(end)}`);
+    requestAnimationFrame(() => {
+      input?.focus();
+      input?.setSelectionRange(start + reference.length, start + reference.length);
+    });
+  };
+
+  const upsert = () => {
+    const trimmed = name.trim();
+    if (!field || !trimmed || !formula.trim()) return;
+    const entry = { field, name: trimmed, formula: formula.trim() };
+    onApply(existing ? calculatedItems.map((i) => (i === existing ? entry : i)) : [...calculatedItems, entry]);
+  };
+
+  const remove = () => {
+    if (!existing) return;
+    onApply(calculatedItems.filter((i) => i !== existing));
+    setName(nextDefaultName(field));
+    setFormula("= 0");
+  };
+
   return (
-    <>
-      {calculatedItems.map((item, index) => (
-        <CalculatedItemRow
-          key={index}
-          item={item}
-          axisFieldOptions={axisFieldOptions}
-          onChange={(patch) => update(index, patch)}
-          onRemove={() => remove(index)}
-        />
-      ))}
-      <button type="button" onClick={add} className="btn-secondary">
-        + Add calculated item
-      </button>
-    </>
+    <div className="w-[28rem] space-y-3">
+      <p className="text-sm font-semibold text-ink">Insert Calculated Item in &quot;{formatDimensionName(field)}&quot;</p>
+      <div className="grid grid-cols-[4.5rem_1fr_5rem] items-center gap-2 text-xs">
+        <label htmlFor="calc-item-name" className="font-medium text-muted">Name:</label>
+        <input id="calc-item-name" list="calc-item-names" className="input-field py-1 text-sm" value={name} onChange={(e) => pickName(e.target.value)} />
+        <datalist id="calc-item-names">
+          {itemsOf(field).map((i) => (
+            <option key={i.name} value={i.name} />
+          ))}
+        </datalist>
+        <button type="button" onClick={upsert} disabled={!name.trim() || !formula.trim()} className="btn-secondary px-2 py-1 text-xs disabled:opacity-50">
+          {existing ? "Modify" : "Add"}
+        </button>
+        <label htmlFor="calc-item-formula" className="font-medium text-muted">Formula:</label>
+        <input id="calc-item-formula" ref={formulaRef} className="input-field py-1 font-mono text-sm" value={formula} onChange={(e) => setFormula(e.target.value)} />
+        <button type="button" onClick={remove} disabled={!existing} className="btn-secondary px-2 py-1 text-xs disabled:opacity-50">
+          Delete
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="min-w-0">
+          <p className="mb-1 text-xs font-medium text-muted">Fields:</p>
+          <ul className="h-36 overflow-y-auto rounded-md border border-slate-200 bg-white">
+            {axisFields.map((f) => (
+              <li key={f}>
+                <button
+                  type="button"
+                  onClick={() => pickField(f)}
+                  className={`block w-full truncate px-2 py-0.5 text-left text-xs ${field === f ? "bg-gold text-white" : "text-ink hover:bg-slate-100"}`}
+                >
+                  {formatDimensionName(f)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="min-w-0">
+          <p className="mb-1 text-xs font-medium text-muted">Items:</p>
+          {membersFailed ? (
+            <div className="flex h-36 flex-col items-start justify-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 text-xs text-rose-700">
+              <span>Couldn&apos;t load items — the cube may be busy.</span>
+              <button type="button" onClick={() => setMembersRetryToken((t) => t + 1)} className="rounded border border-rose-300 px-2 py-0.5 font-medium hover:bg-rose-100">
+                Retry
+              </button>
+            </div>
+          ) : (
+            <ul className="h-36 overflow-y-auto rounded-md border border-slate-200 bg-white">
+              {loadingMembers ? (
+                <li className="px-2 py-1 text-xs text-muted">Loading…</li>
+              ) : (
+                members.map((m) => (
+                  <li key={m}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedItem(m)}
+                      onDoubleClick={() => insertItem(m)}
+                      className={`block w-full truncate px-2 py-0.5 text-left text-xs ${selectedItem === m ? "bg-gold text-white" : "text-ink hover:bg-slate-100"}`}
+                    >
+                      {m}
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          )}
+          <div className="mt-1 flex justify-end">
+            <button type="button" onClick={() => insertItem(selectedItem)} disabled={!selectedItem} className="btn-secondary px-2 py-1 text-xs disabled:opacity-50">
+              Insert Item
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2 border-t border-slate-100 pt-2">
+        <button
+          type="button"
+          onClick={() => {
+            // OK stores what's in the boxes (unless unchanged) and closes.
+            if (!existing || calculatedItemFormula(existing) !== formula.trim()) upsert();
+            onClose();
+          }}
+          className="btn-primary px-3 py-1 text-xs"
+        >
+          OK
+        </button>
+        <button type="button" onClick={onClose} className="btn-secondary px-3 py-1 text-xs">
+          Close
+        </button>
+      </div>
+    </div>
   );
 }
 

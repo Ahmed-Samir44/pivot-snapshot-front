@@ -23,3 +23,21 @@ export function calculatedFieldFormula(field) {
 export function isCompleteCalculatedField(field) {
   return Boolean(field.name) && (Boolean(field.formula?.trim()) || (Boolean(field.leftField) && Boolean(field.rightField)));
 }
+
+// Calculated items (Excel's Insert Calculated Item) — the same formula style, where a name is an ITEM
+// of the item's own field. One saved before 2026-10-14 has positiveMembers/negativeMembers instead.
+export function calculatedItemFormula(item) {
+  if (item.formula) return item.formula;
+  const plus = (item.positiveMembers ?? []).map(formulaFieldReference);
+  const minus = (item.negativeMembers ?? []).map((m) => `- ${formulaFieldReference(m)}`);
+  if (plus.length + minus.length === 0) return "= 0";
+  return `= ${[plus.join(" + "), ...minus].filter(Boolean).join(" ")}`;
+}
+
+export function isCompleteCalculatedItem(item) {
+  return (
+    Boolean(item.field) &&
+    Boolean(item.name) &&
+    (Boolean(item.formula?.trim()) || (item.positiveMembers ?? []).length > 0 || (item.negativeMembers ?? []).length > 0)
+  );
+}
