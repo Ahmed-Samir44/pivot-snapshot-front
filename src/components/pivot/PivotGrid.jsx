@@ -792,6 +792,9 @@ export default function PivotGrid({
     repeatItemLabels,
     measuresLevel: rowsMeasuresIndex,
     drilldown: Boolean(rowsHierarchyDrilldown),
+    // Excel's Outline AND Compact layouts are both "outline form" (outer items on their own row);
+    // only Tabular puts an item on its first child's row.
+    outline: layout !== "Tabular",
   });
   const collapsible = collapsibleKeys(allDisplayRows);
   const displayRows = applyCollapse(allDisplayRows, new Set([...collapsed].filter((k) => collapsible.has(k))), rowHeaderGroups);
@@ -1150,8 +1153,9 @@ export default function PivotGrid({
                     // something else gets expanded.
                     if (group.start === group.end && !rowsHierarchyDrilldown) {
                       return (
-                        <td key={group.start} className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-center ${labelWeight}`}>
-                          <span className="inline-flex items-center justify-center gap-1.5">
+                        // Left-aligned like Excel's own row labels in every layout (was centered).
+                        <td key={group.start} className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-left ${labelWeight}`}>
+                          <span className="inline-flex items-center gap-1.5">
                             {groupIndex === 0 && collapseToggle}
                             {lines[0]?.text ?? ""}
                           </span>

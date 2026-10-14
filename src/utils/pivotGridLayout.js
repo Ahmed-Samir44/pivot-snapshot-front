@@ -52,7 +52,7 @@ export function totalCaptionInfo(row, measuresLevel = -1) {
   const idx = row.labels.findIndex((l, i) => i !== measuresLevel && typeof l === "string" && l.startsWith("Subtotal"));
   if (idx > 0) {
     const fn = row.labels[idx].match(/^Subtotal \((\w+)\)$/)?.[1];
-    return { level: idx - 1, caption: `${row.labels[idx - 1]} ${fn ?? "Total"}`.trim() };
+    return { level: idx - 1, caption: `${row.labels[idx - 1] || "(blank)"} ${fn ?? "Total"}` };
   }
   return { level: -1, caption: "Grand Total" };
 }
@@ -76,17 +76,30 @@ export function totalCaptionInfo(row, measuresLevel = -1) {
 //
 // drilldown: a PLAN 8 drilldown hierarchy keeps its own ragged, all-levels-in-one-column rendering —
 // no header rows (its levels aren't separate fields).
-export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts = [], repeatItemLabels = false, measuresLevel = -1, drilldown = false }) {
+//
+// outline (2026-10-14): Excel's OUTLINE form (the report's Outline or Compact layout — Compact is
+// outline form plus the merged column) gives EVERY outer level's items their own row, each in its
+// own column, with the children starting on the next row. Only Tabular form puts an item on its
+// first child's row. Not applied when Σ Values sits in Rows (that shape keeps the tabular rows).
+export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts = [], repeatItemLabels = false, measuresLevel = -1, drilldown = false, outline = false }) {
   const groupOfLevel = [];
   rowHeaderGroups.forEach((g, gi) => {
     for (let l = g.start; l <= g.end; l++) groupOfLevel[l] = gi;
   });
-  const isHeaderLevel = (level) => !drilldown && groupOfLevel[level] !== undefined && level < rowHeaderGroups[groupOfLevel[level]].end;
+  const depth = rowHeaders.reduce((max, r) => Math.max(max, r.labels.length), 0);
+  const isHeaderLevel = (level) =>
+    !drilldown &&
+    groupOfLevel[level] !== undefined &&
+    (level < rowHeaderGroups[groupOfLevel[level]].end || (outline && measuresLevel < 0 && level < depth - 1));
   const isMerged = (g) => g.start < g.end;
   const repeatFor = (level) => {
     const g = rowHeaderGroups[groupOfLevel[level]];
     return rowFieldLayouts[level]?.repeatItemLabels ?? (g && !isMerged(g) ? repeatItemLabels : false);
   };
+  // Excel shows a member with an empty caption as "(blank)". The no-data placeholder (CubeQueryService
+  // gives it an empty unique name too) stays truly blank. Display-only: the label itself stays "",
+  // since filters turn captions back into MDX member references.
+  const display = (text, uniqueName) => (text === "" && uniqueName !== "" ? "(blank)" : text);
   const pathOf = (labels, level) => labels.slice(0, level + 1);
   const belongs = (labels, path) => path.every((p, i) => labels[i] === p);
   const isGrand = (row) => row.isTotal && totalCaptionInfo(row, measuresLevel).level === -1;
@@ -114,15 +127,17 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
     out.push({ kind: "subtotal", sourceIndex: index, level, path: pathOf(row.labels, level), groupCells: totalCells(row, level, caption) });
   };
 
-  const pushHeader = (level, path, sourceIndex) => {
+  // An outer label in its OWN column (outline form) still repeats on inner rows when its field has
+  // Repeat Item Labels — like Excel; a label merged into a shared compact column never does.
+  const showsOuterLabel = (g, l, visible) => (!isHeaderLevel(l) || (!isMerged(g) && repeatFor(l))) && (repeatFor(l) || visible[l]);
+
+  const pushHeader = (level, path, sourceIndex, uniqueNames) => {
     const visible = computeVisibleLevels(path, prevPath);
     const groupCells = rowHeaderGroups.map((g) => {
       const lines = [];
       for (let l = g.start; l <= Math.min(g.end, level); l++) {
-        if (l === level) {
-          lines.push({ text: path[l], indent: isMerged(g) ? l - g.start : 0, level: l });
-        } else if (!isHeaderLevel(l) && (repeatFor(l) || visible[l])) {
-          lines.push({ text: path[l], indent: isMerged(g) ? l - g.start : 0, level: l });
+        if (l === level || showsOuterLabel(g, l, visible)) {
+          lines.push({ text: display(path[l], uniqueNames?.[l]), indent: isMerged(g) ? l - g.start : 0, level: l });
         }
       }
       return { lines };
@@ -168,9 +183,9 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
       if (!isTop) {
         indexes.forEach((index) => pushSubtotal(index, level));
       } else if (isHeaderLevel(level) && indexes.length === 1) {
-        pushHeader(level, path, i);
+        pushHeader(level, path, i, row.uniqueNames);
       } else {
-        if (isHeaderLevel(level)) pushHeader(level, path, null);
+        if (isHeaderLevel(level)) pushHeader(level, path, null, row.uniqueNames);
         deferred.push({ path, level, indexes });
       }
       i = j - 1;
@@ -180,17 +195,26 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
     // Detail row: first the item rows for any header level not shown yet.
     for (let level = 0; level < row.labels.length; level++) {
       if (isHeaderLevel(level) && !emittedHeaders.has(`${level}\u0001${pathOf(row.labels, level).join("\u0001")}`)) {
-        pushHeader(level, pathOf(row.labels, level), null);
+        pushHeader(level, pathOf(row.labels, level), null, row.uniqueNames);
       }
+    }
+
+    // A no-data item (Show Items With No Data) whose only "child" is the empty placeholder: Excel
+    // shows just the item row, so the item row takes this row's place instead of drawing a blank
+    // child row under it.
+    const last = out[out.length - 1];
+    const innerIsPlaceholder = row.uniqueNames?.[row.labels.length - 1] === "";
+    if (innerIsPlaceholder && last?.kind === "header" && last.sourceIndex === null && belongs(row.labels, last.path)) {
+      last.sourceIndex = i;
+      continue;
     }
 
     const visible = computeVisibleLevels(row.labels, prevPath);
     const groupCells = rowHeaderGroups.map((g) => {
       const lines = [];
       for (let l = g.start; l <= g.end && l < row.labels.length; l++) {
-        if (isHeaderLevel(l)) continue;
-        if (repeatFor(l) || visible[l]) {
-          lines.push({ text: row.labels[l], indent: isMerged(g) ? l - g.start : 0, level: l });
+        if (showsOuterLabel(g, l, visible)) {
+          lines.push({ text: display(row.labels[l], row.uniqueNames?.[l]), indent: isMerged(g) ? l - g.start : 0, level: l });
         }
       }
       return { lines };
@@ -245,7 +269,7 @@ export function applyCollapse(displayRows, collapsedKeys, rowHeaderGroups) {
       sourceIndex: totalRow?.sourceIndex ?? null,
       level: 0,
       path: [key],
-      groupCells: rowHeaderGroups.map((g) => ({ lines: g.start === 0 ? [{ text: key, indent: 0, level: 0 }] : [] })),
+      groupCells: rowHeaderGroups.map((g) => ({ lines: g.start === 0 ? [{ text: key === "" ? "(blank)" : key, indent: 0, level: 0 }] : [] })),
       blankLineAfter: displayRows[j - 1].blankLineAfter,
     });
     i = j - 1;

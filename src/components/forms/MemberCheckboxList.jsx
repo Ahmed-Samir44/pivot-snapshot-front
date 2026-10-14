@@ -97,7 +97,8 @@ export default function MemberCheckboxList({ options, value, onChange, placehold
                   checked={selected.has(option)}
                   onChange={() => toggleOne(option)}
                 />
-                <span className="truncate">{option}</span>
+                {/* Excel lists a member with an empty caption as "(blank)" (display only — the value stays ""). */}
+                <span className="truncate">{option === "" ? "(blank)" : option}</span>
               </label>
             ))}
           </>

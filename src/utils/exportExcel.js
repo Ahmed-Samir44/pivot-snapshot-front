@@ -241,7 +241,7 @@ export async function exportPivotToExcel({
   // Row headers + values, one sheet row per DISPLAY row (see buildDisplayRows) — the same rows the
   // live grid draws: compact-form item rows (indented with Excel's own cell indent), "ER Total"/
   // "Grand Total" captions, each label shown once (Excel doesn't merge label cells by default).
-  const displayRows = buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts, repeatItemLabels, measuresLevel: rowsMeasuresIndex });
+  const displayRows = buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts, repeatItemLabels, measuresLevel: rowsMeasuresIndex, outline: layout !== "Tabular" });
   const firstDataRow = currentRow;
   // Sheet row of every display row that shows a result row's values: [excelRow, rowIndex, kind].
   const placedRows = [];
