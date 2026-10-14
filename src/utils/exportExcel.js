@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { formatForColumn } from "./numberFormat";
-import { computeVisibleLevels } from "./pivotGridLayout";
+import { buildRowHeaderGroups, buildDisplayRows } from "./pivotGridLayout";
 import { measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "./measuresPlacement";
 import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "./conditionalFormat";
 
@@ -160,9 +160,19 @@ export async function exportPivotToExcel({
   columnFieldLabels = [],
   valueFields = [],
   filename = "Pivot",
+  // Same layout inputs as PivotGrid (2026-10-14) so the export draws the SAME rows: compact-form
+  // item rows, "ER Total"/"Grand Total" captions, per-field Compact/Repeat/Blank Line. Omitted
+  // (an older caller) = Tabular with no per-field overrides.
+  layout = "Tabular",
+  fieldLayouts = [],
+  repeatItemLabels = false,
 }) {
   const { rowHeaders, columnHeaders, cells } = result;
-  const rowDepth = rowHeaders[0]?.labels.length ?? 0;
+  const labelDepth = rowHeaders[0]?.labels.length ?? 0;
+  const rowFieldLayouts = Array.from({ length: labelDepth }, (_, level) => fieldLayouts.find((f) => f.field === rows[level]) ?? null);
+  const rowHeaderGroups = buildRowHeaderGroups(labelDepth, rowFieldLayouts.map((fl) => fl?.compact ?? layout === "Compact"));
+  // One sheet column per row-header GROUP (a compact-merged group shares one column), not per level.
+  const rowDepth = rowHeaderGroups.length;
   // Same floor-of-1 fallback PivotGrid.jsx uses for its own on-screen rendering (see that file's own
   // WHY comment) — with no Value fields at all, Columns can legitimately come back with ZERO
   // headers, but the row-field title row below still needs ONE pass of the
@@ -204,15 +214,17 @@ export async function exportPivotToExcel({
   for (let level = 0; level < columnDepth; level++) {
     const row = sheet.getRow(currentRow);
     if (level === 0) {
-      for (let rl = 0; rl < rowDepth; rl++) {
-        const cell = row.getCell(rl + 1);
-        cell.value = rowFieldLabels[rl] ?? "";
+      rowHeaderGroups.forEach((group, gi) => {
+        const cell = row.getCell(gi + 1);
+        // A compact-merged column is Excel's literal "Row Labels"; a standalone one is its field.
+        cell.value = group.start < group.end ? "Row Labels" : rowFieldLayouts[group.start]?.customName || rowFieldLabels[group.start] || "";
         cell.font = { bold: true };
         cell.fill = HEADER_FILL;
-        if (columnDepth > 1) sheet.mergeCells(columnHeaderStartRow, rl + 1, columnHeaderStartRow + columnDepth - 1, rl + 1);
-      }
+        if (columnDepth > 1) sheet.mergeCells(columnHeaderStartRow, gi + 1, columnHeaderStartRow + columnDepth - 1, gi + 1);
+      });
     }
-    const levelLabels = columnHeaders.map((c) => c.labels[level]);
+    // A Grand Total column shows its caption once, in the top header row, like Excel.
+    const levelLabels = columnHeaders.map((c) => (c.captionLevel === -1 && c.caption ? (level === 0 ? c.caption : "") : c.labels[level]));
     for (const run of mergeRuns(levelLabels)) {
       const startCol = rowDepth + run.start + 1;
       const endCol = rowDepth + run.end;
@@ -226,44 +238,33 @@ export async function exportPivotToExcel({
     currentRow += 1;
   }
 
-  // Row headers: each level vertically merges across consecutive rows sharing the same label —
-  // same "Tabular Form" suppression as computeVisibleLevels, expressed as real merged cells
-  // instead of blank ones (there's no live layout toggle here, so this always uses that shape
-  // regardless of the on-screen Tabular/Compact choice — Compact's single indented column is a
-  // screen/print concession a spreadsheet doesn't need).
+  // Row headers + values, one sheet row per DISPLAY row (see buildDisplayRows) — the same rows the
+  // live grid draws: compact-form item rows (indented with Excel's own cell indent), "ER Total"/
+  // "Grand Total" captions, each label shown once (Excel doesn't merge label cells by default).
+  const displayRows = buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts, repeatItemLabels, measuresLevel: rowsMeasuresIndex });
   const firstDataRow = currentRow;
-  let previousLabels = null;
-  const pendingMergeStart = new Array(rowDepth).fill(null);
-  rowHeaders.forEach((rowHeader, rowIndex) => {
-    const excelRow = firstDataRow + rowIndex;
-    const visible = computeVisibleLevels(rowHeader.labels, rowHeader.isTotal ? null : previousLabels);
-    for (let level = 0; level < rowDepth; level++) {
-      const cell = sheet.getRow(excelRow).getCell(level + 1);
-      if (visible[level]) {
-        if (pendingMergeStart[level] !== null && excelRow - 1 > pendingMergeStart[level]) {
-          sheet.mergeCells(pendingMergeStart[level], level + 1, excelRow - 1, level + 1);
-        }
-        cell.value = rowHeader.labels[level] ?? "";
-        pendingMergeStart[level] = excelRow;
-      }
-      cell.font = { bold: rowHeader.isTotal };
-      if (rowHeader.isTotal) cell.fill = SUBTOTAL_FILL;
-    }
-    previousLabels = rowHeader.isTotal ? null : rowHeader.labels;
+  // Sheet row of every display row that shows a result row's values: [excelRow, rowIndex, kind].
+  const placedRows = [];
+  displayRows.forEach((displayRow) => {
+    const excelRow = currentRow;
+    const isTotalRow = displayRow.kind === "subtotal" || displayRow.kind === "grand" || (displayRow.kind === "header" && displayRow.sourceIndex !== null);
+    rowHeaderGroups.forEach((_, gi) => {
+      const cell = sheet.getRow(excelRow).getCell(gi + 1);
+      const lines = displayRow.groupCells[gi]?.lines ?? [];
+      cell.value = lines.map((l) => l.text).join(" › ");
+      if (lines[0]?.indent) cell.alignment = { indent: lines[0].indent };
+      cell.font = { bold: isTotalRow || displayRow.kind === "header" };
+      if (isTotalRow) cell.fill = SUBTOTAL_FILL;
+    });
+    if (displayRow.sourceIndex !== null) placedRows.push([excelRow, displayRow.sourceIndex, displayRow.kind]);
+    currentRow += displayRow.blankLineAfter ? 2 : 1;
   });
-  // Close out any merge run still open after the last row.
-  for (let level = 0; level < rowDepth; level++) {
-    const lastRow = firstDataRow + rowHeaders.length - 1;
-    if (pendingMergeStart[level] !== null && lastRow > pendingMergeStart[level]) {
-      sheet.mergeCells(pendingMergeStart[level], level + 1, lastRow, level + 1);
-    }
-  }
 
   // Data cells — same measure-lookup rule as PivotGrid: whichever axis actually carries Σ Values
   // determines which PivotValueField a given cell belongs to, read directly off that header's own
   // caption at the sentinel's position (not a fixed stride — see utils/measuresPlacement.js).
-  rowHeaders.forEach((rowHeader, rowIndex) => {
-    const excelRow = firstDataRow + rowIndex;
+  placedRows.forEach(([excelRow, rowIndex]) => {
+    const rowHeader = rowHeaders[rowIndex];
     columnHeaders.forEach((colHeader, colIndex) => {
       const measureIndex = measuresInRows
         ? measureIndexOf(rowHeader, rowsMeasuresIndex, captionToIndex)
@@ -284,13 +285,13 @@ export async function exportPivotToExcel({
   // for the live grid's min/max, done here as actual excluded RANGES instead, so Excel computes
   // min/max live over just the real data rather than a snapshot of it).
   if (measuresInRows) {
-    rowHeaders.forEach((rowHeader, rowIndex) => {
+    placedRows.forEach(([excelRow, rowIndex]) => {
+      const rowHeader = rowHeaders[rowIndex];
       if (rowHeader.isTotal) return;
       const measureIndex = measureIndexOf(rowHeader, rowsMeasuresIndex, captionToIndex);
       const valueField = measureIndex !== null ? valueFields[measureIndex] : null;
       const rule = excelConditionalFormatRule(valueField?.conditionalFormat);
       if (!rule) return;
-      const excelRow = firstDataRow + rowIndex;
       const totalColIndexes = new Set(columnHeaders.map((c, i) => (c.isTotal ? i : null)).filter((i) => i !== null));
       const ref = detailRuns(columnHeaders.length, totalColIndexes)
         .map((run) => `${sheet.getColumn(rowDepth + run.start + 1).letter}${excelRow}:${sheet.getColumn(rowDepth + run.end).letter}${excelRow}`)
@@ -305,8 +306,11 @@ export async function exportPivotToExcel({
       const rule = excelConditionalFormatRule(valueField?.conditionalFormat);
       if (!rule) return;
       const excelCol = sheet.getColumn(rowDepth + colIndex + 1).letter;
-      const totalRowIndexes = new Set(rowHeaders.map((r, i) => (r.isTotal ? i : null)).filter((i) => i !== null));
-      const ref = detailRuns(rowHeaders.length, totalRowIndexes)
+      // Sheet rows that hold DETAIL values (totals, blank-valued item rows and blank lines excluded).
+      const sheetRowCount = currentRow - firstDataRow;
+      const detailOffsets = new Set(placedRows.filter(([, rowIndex]) => !rowHeaders[rowIndex].isTotal).map(([excelRow]) => excelRow - firstDataRow));
+      const excluded = new Set(Array.from({ length: sheetRowCount }, (_, i) => i).filter((i) => !detailOffsets.has(i)));
+      const ref = detailRuns(sheetRowCount, excluded)
         .map((run) => `${excelCol}${firstDataRow + run.start}:${excelCol}${firstDataRow + run.end - 1}`)
         .join(" ");
       if (ref) sheet.addConditionalFormatting({ ref, rules: [rule] });

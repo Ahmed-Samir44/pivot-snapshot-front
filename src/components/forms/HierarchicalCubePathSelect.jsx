@@ -127,7 +127,8 @@ function PlacedFieldPill({
             }}
             className="flex w-full items-center justify-between gap-1 rounded border border-slate-300 bg-white px-2 py-1.5 text-left text-xs font-medium text-ink shadow-sm hover:bg-slate-50"
           >
-            <span className="min-w-0 truncate">{formatDimensionName(fullPath)}</span>
+            {/* A field's Custom Name replaces its name in the Rows area too, like Excel's field list. */}
+            <span className="min-w-0 truncate">{currentLayout.customName || formatDimensionName(fullPath)}</span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted" />
           </button>
         )}
@@ -223,17 +224,28 @@ function PlacedFieldPill({
               {fieldLayout && (
                 <div className="px-2 pb-2">
                   <p className="pb-1 text-xs font-bold uppercase tracking-wide text-muted">Layout</p>
-                  {[
-                    { key: "compact", label: "Compact form (merge with next field)", value: currentLayout.compact ?? false },
-                    { key: "repeatItemLabels", label: "Repeat item labels", value: currentLayout.repeatItemLabels ?? false },
-                    { key: "insertBlankLine", label: "Insert blank line after each item", value: currentLayout.insertBlankLine ?? false },
-                  ].map((opt) => (
+                  {(() => {
+                    // Excel shows a field's EFFECTIVE state — what it inherits from the report-wide
+                    // layout when it has no override of its own (2026-10-14: an inherited Compact
+                    // used to show unchecked). Setting a value equal to the inherited one stores no
+                    // override, so the field keeps following the report-wide setting afterward.
+                    const inheritedCompact = fieldLayout.reportLayout === "Compact";
+                    const effectiveCompact = currentLayout.compact ?? inheritedCompact;
+                    // A compact-merged field ignores the report-wide Repeat All Item Labels (same as
+                    // the renderers — Excel greys it out in Compact Form).
+                    const inheritedRepeat = effectiveCompact ? false : Boolean(fieldLayout.reportRepeatItemLabels);
+                    return [
+                      { key: "compact", label: "Compact form (merge with next field)", value: effectiveCompact, inherited: inheritedCompact },
+                      { key: "repeatItemLabels", label: "Repeat item labels", value: currentLayout.repeatItemLabels ?? inheritedRepeat, inherited: inheritedRepeat },
+                      { key: "insertBlankLine", label: "Insert blank line after each item", value: currentLayout.insertBlankLine ?? false, inherited: false },
+                    ];
+                  })().map((opt) => (
                     <label key={opt.key} className="flex cursor-pointer items-center gap-2 py-1 text-left">
                       <input
                         type="checkbox"
                         className="h-3.5 w-3.5 accent-gold"
                         checked={opt.value}
-                        onChange={(e) => fieldLayout.onChange(fullPath, { [opt.key]: e.target.checked })}
+                        onChange={(e) => fieldLayout.onChange(fullPath, { [opt.key]: e.target.checked === opt.inherited ? null : e.target.checked })}
                       />
                       {opt.label}
                     </label>

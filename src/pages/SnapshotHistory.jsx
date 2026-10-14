@@ -313,6 +313,10 @@ export default function SnapshotHistory() {
         columnFieldLabels: hideMeasuresLabelIfSingleValue(previewVersion.columns, previewVersion.values.length).map(formatDimensionName),
         valueFields: previewVersion.values,
         filename: `${pivotName}_v${previewVersion.versionNumber}`,
+        // Same layout as the preview grid above, so the export matches what's on screen.
+        layout: parseBuilderState(previewVersion.builderStateJson)?.reportLayout ?? "Tabular",
+        repeatItemLabels: parseBuilderState(previewVersion.builderStateJson)?.repeatItemLabels ?? false,
+        fieldLayouts: parseBuilderState(previewVersion.builderStateJson)?.fieldLayouts ?? [],
       });
     } catch (err) {
       setExportError(err.message);
@@ -654,6 +658,7 @@ export default function SnapshotHistory() {
               valueFields={previewVersion.values}
               layout={builderState?.reportLayout ?? "Tabular"}
               repeatItemLabels={builderState?.repeatItemLabels ?? false}
+              fieldLayouts={builderState?.fieldLayouts ?? []}
               boundedHeight={false}
             />
           </Modal>

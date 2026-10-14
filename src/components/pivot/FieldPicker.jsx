@@ -689,6 +689,13 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
   const [memberSearch, setMemberSearch] = useState("");
   const mode = draft.mode ?? "Members";
   const isMoreFilterMode = MORE_FILTER_MODES.has(mode);
+  // Real Excel's Row/Column field dropdown (2026-10-14): an UNFILTERED field opens with every item
+  // checked, and OK with everything checked means "no filter". Here that's an empty Members list,
+  // shown as all-checked. noneChecked distinguishes "the user unchecked (Select All)" (nothing
+  // checked — OK disabled, like Excel) from that unfiltered state, since both are an empty list.
+  const [noneChecked, setNoneChecked] = useState(false);
+  const emptyMeansAll = showAdvancedFilters && mode === "Members";
+  const showsAllChecked = emptyMeansAll && draft.includedMembers.length === 0 && !noneChecked;
 
   // A search typed for the PREVIOUS field shouldn't silently carry over and narrow the new
   // field's member list before the user has typed anything for it.
@@ -740,6 +747,13 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
   };
 
   const handleOk = () => {
+    if (emptyMeansAll && draft.includedMembers.length === 0) {
+      // Everything checked = no filter: drop an existing filter rather than save an empty one.
+      const hadFilter = (filter.mode ?? "Members") !== "Members" || (filter.includedMembers?.length ?? 0) > 0;
+      if (hadFilter) onRemove?.();
+      onClose?.();
+      return;
+    }
     onChange(draft);
     onClose?.();
   };
@@ -833,15 +847,24 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
               // Caught live 2026-10-14: the list showed excluded members as checked, so unchecking
               // one excluded the OTHER member instead. On the way out, exclusions hidden by the
               // current (server-filtered) search are kept, so searching can't silently drop them.
-              value={mode === "Exclude" ? memberOptions.filter((m) => !draft.includedMembers.includes(m)) : draft.includedMembers}
-              onChange={(checked) =>
+              value={
+                mode === "Exclude" ? memberOptions.filter((m) => !draft.includedMembers.includes(m)) : showsAllChecked ? memberOptions : draft.includedMembers
+              }
+              onChange={(checked) => {
+                if (emptyMeansAll) {
+                  // Every member checked again (no search narrowing the list) = back to unfiltered.
+                  const allChecked = !memberSearch && memberOptions.length > 0 && memberOptions.every((m) => checked.includes(m));
+                  setNoneChecked(checked.length === 0);
+                  setDraft((prev) => ({ ...prev, includedMembers: allChecked ? [] : checked }));
+                  return;
+                }
                 setDraft((prev) => {
                   if (mode !== "Exclude") return { ...prev, includedMembers: checked };
                   const visible = new Set(memberOptions);
                   const hiddenExclusions = prev.includedMembers.filter((m) => !visible.has(m));
                   return { ...prev, includedMembers: [...hiddenExclusions, ...memberOptions.filter((m) => !checked.includes(m))] };
-                })
-              }
+                });
+              }}
               placeholder={loadingMembers ? "Loading members…" : "Type to search members…"}
               isLoading={loadingMembers}
               showSelectMultiple={!showAdvancedFilters}
@@ -988,7 +1011,13 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
           <button type="button" onClick={handleCancel} className="btn-secondary px-3 py-1.5 text-xs">
             Cancel
           </button>
-          <button type="button" onClick={handleOk} className="btn-primary px-3 py-1.5 text-xs">
+          {/* Disabled with nothing checked, like Excel's own filter dropdown. */}
+          <button
+            type="button"
+            onClick={handleOk}
+            disabled={emptyMeansAll && noneChecked}
+            className="btn-primary px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+          >
             OK
           </button>
         </div>
@@ -2287,6 +2316,10 @@ export default function FieldPicker({
   // not part of value/onChange.
   fieldLayouts,
   onFieldLayoutsChange,
+  // Report-wide layout + Repeat All Item Labels, so Field Settings can show a field's EFFECTIVE
+  // Compact/Repeat state (what it inherits when it has no override of its own), like Excel does.
+  reportLayout = "Compact",
+  repeatItemLabels = false,
 }) {
   // Measures the Rows/Columns/Values/Filters zones column's OWN rendered height, so the Fields tree
   // card next to it can match it exactly in EITHER direction (requested live 2026-10-12, "خلي الـ
@@ -2919,6 +2952,8 @@ export default function FieldPicker({
               // they're kept out of PivotRequest/structuralSignature on purpose).
               fieldLayout={{
                 overrides: fieldLayouts,
+                reportLayout,
+                reportRepeatItemLabels: repeatItemLabels,
                 onChange: (field, patch) => {
                   const existing = fieldLayouts.find((f) => f.field === field) ?? {};
                   const next = { ...existing, ...patch };

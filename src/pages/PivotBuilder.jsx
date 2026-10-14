@@ -471,7 +471,12 @@ export default function PivotBuilder() {
         // Defensive, same reasoning as every other per-field array cleaned here — a field's own
         // override is meaningless (and the backend's own FieldSubtotals model doesn't expect it)
         // once that field has actually left Rows.
-        fieldSubtotals: request.fieldSubtotals.filter((f) => request.rows.includes(f.field)),
+        // A null position means "follow the report-wide Subtotals position" (a Custom field keeps
+        // its functions but not its own position) — resolved here because the backend's
+        // FieldSubtotals.Position is required (null was a 400, caught live 2026-10-14).
+        fieldSubtotals: request.fieldSubtotals
+          .filter((f) => request.rows.includes(f.field))
+          .map((f) => ({ ...f, position: f.position ?? request.subtotals })),
         calculatedFields: request.calculatedFields.filter((f) => f.name && f.leftField && f.rightField),
         // A CalculatedItem needs a field, a name, and at least one member on either side (see
         // MdxPivotQueryBuilder.ValidateCalculatedItems) — mirrors the calculatedFields cleaning
@@ -710,6 +715,10 @@ export default function PivotBuilder() {
         columnFieldLabels: fieldLabels(hideMeasuresLabelIfSingleValue(lastQuery.columns, lastQuery.values.length), dimensions),
         valueFields: displayValues,
         filename: snapshotName.trim() || "Pivot",
+        // Same layout as the live grid, so the export draws the same rows.
+        layout: reportLayout,
+        repeatItemLabels,
+        fieldLayouts,
       });
     } catch (err) {
       setExportError(err.message);
@@ -855,6 +864,8 @@ export default function PivotBuilder() {
               fieldsLoading={fieldsLoading}
               onReset={handleReset}
               fieldLayouts={fieldLayouts}
+              reportLayout={reportLayout}
+              repeatItemLabels={repeatItemLabels}
               onFieldLayoutsChange={setFieldLayouts}
             />
             {/* Moved here from the main column (2026-10-12, "تحت الفلاتر و الحته بتاعت اختيار ال

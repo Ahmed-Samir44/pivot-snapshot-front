@@ -9,7 +9,7 @@ import { SortEditor, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, Con
 import { formatNumber, formatForColumn } from "../../utils/numberFormat";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
-import { computeGroups, computeCompactVisibility, buildRowHeaderGroups } from "../../utils/pivotGridLayout";
+import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys } from "../../utils/pivotGridLayout";
 import { MEASURES_PLACEHOLDER, measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "../../utils/measuresPlacement";
 import { applyReportSubtotals } from "../../utils/subtotals";
 import { drillthroughPivot } from "../../services/pivotApi";
@@ -214,13 +214,16 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
           // (HeaderCell, just above) already uses white-at-75%-opacity instead; this interactive
           // button's trigger never matched that, just not noticed until a long raw field identifier
           // made it obvious (caught live, 2026-10-13, "الheader لونه مش باين").
-          className={`flex w-full items-center justify-center gap-1 text-sm font-semibold hover:text-gold ${
+          // hover:text-white, not hover:text-gold: gold text on this gold band made the label vanish
+          // whenever the pointer was over it — i.e. the whole time its dropdown was open (caught
+          // live 2026-10-14). Same for the filter icon below.
+          className={`flex w-full items-center justify-center gap-1 text-sm font-semibold hover:text-white ${
             muted ? "text-white/75" : isTotal ? "text-gold-strong" : "text-ink"
           }`}
           title={`Sort or filter ${label}`}
         >
           {label}
-          {hasFilter && <FilterIcon className="h-3 w-3 shrink-0 text-gold" />}
+          {hasFilter && <FilterIcon className="h-3 w-3 shrink-0 text-white" />}
           <ChevronDown className="h-3.5 w-3.5 shrink-0" />
         </button>
       )}
@@ -681,7 +684,6 @@ export default function PivotGrid({
   const dimensionOptions = dimensions.map((d) => ({ value: d.field, label: d.displayName }));
   const selectedValueOptions = valueFields.filter((v) => v.field).map((v) => ({ value: v.field, label: v.field }));
 
-  const groups = useMemo(() => (result ? computeGroups(result.rowHeaders) : []), [result]);
   // Where (if either) Σ Values sits within rows/columns — rows/columns already contain it as a
   // plain element wherever it was placed (see utils/measuresPlacement.js), and rowFieldLabels/
   // columnFieldLabels already carry "Σ Values" at that same position too (PivotBuilder.jsx's own
@@ -702,19 +704,6 @@ export default function PivotGrid({
       ? result.rowHeaders.map((_, r) => detailRangeForRow(result, r))
       : result.columnHeaders.map((_, c) => detailRangeForColumn(result, c));
   }, [result, measuresInRows]);
-  // Outline AND Tabular reuse the exact same visibility computation as Compact (see
-  // computeCompactVisibility's own comment) — they just render the result into separate <td> cells
-  // per level instead of one merged, indented cell. Real Excel's own default for Outline/Tabular is
-  // to suppress a repeated outer-level label (same as Compact) — "Repeat All Item Labels" is a
-  // separate, explicit opt-in that forces every level to show on every row instead (confirmed live,
-  // 2026-10-07, against a real Excel screenshot). Compact never responds to this toggle — real
-  // Excel grays the option out entirely for Compact Form, since there's no separate per-level
-  // column to repeat a label into.
-  // Always computed now (PLAN 6 Phase 2) rather than conditionally null — a field's own
-  // RepeatItemLabels override (or lack of one) is resolved per-level at render time instead of
-  // being baked into a single report-wide "show everything vs. suppress" decision up front, same
-  // reasoning as the backend's HtmlSnapshotRenderer unification.
-  const suppressedLevelVisibility = useMemo(() => (result ? computeCompactVisibility(result.rowHeaders) : null), [result]);
 
   // Excel's "Show Details" — the clicked cell's row/column uniqueNames already include an entry at
   // the Σ Values level (a non-member placeholder caption, not a real dimension member — see
@@ -792,31 +781,23 @@ export default function PivotGrid({
     });
   };
 
-  const groupForRow = new Map();
-  groups.forEach((g) => {
-    for (let r = g.start; r < g.end; r++) groupForRow.set(r, g);
+  // The rows real Excel actually draws (item rows for compact-form levels, "ER Total"/"Grand Total"
+  // captions, Top subtotals absorbed or moved) — see buildDisplayRows' own WHY comment. Shared with
+  // exportExcel.js and mirrored by the backend's HtmlSnapshotRenderer, so the live grid, a saved
+  // snapshot and an export all draw the same table. Collapsing an outermost item (Excel's +/-)
+  // then replaces that item's rows with one row carrying its subtotal.
+  const allDisplayRows = buildDisplayRows(rowHeaders, {
+    rowHeaderGroups,
+    rowFieldLayouts,
+    repeatItemLabels,
+    measuresLevel: rowsMeasuresIndex,
+    drilldown: Boolean(rowsHierarchyDrilldown),
   });
-
-  const isRowVisible = (row, rowIndex) => {
-    const group = groupForRow.get(rowIndex);
-    const isGroupSubtotalRow = group?.hasSubtotal && rowIndex === group.end - 1;
-    const isCollapsedDetail = group?.hasSubtotal && collapsed.has(group.key) && !isGroupSubtotalRow;
-    return !isCollapsedDetail;
-  };
-
-  // Precomputed rather than mutated inline during the render map below, so the zebra-striping
-  // position stays a pure function of the current collapse state instead of a running counter touched
-  // mid-render.
-  const visibleRowPosition = new Map();
-  {
-    let counter = 0;
-    rowHeaders.forEach((row, rowIndex) => {
-      if (isRowVisible(row, rowIndex)) {
-        counter += 1;
-        visibleRowPosition.set(rowIndex, counter);
-      }
-    });
-  }
+  const collapsible = collapsibleKeys(allDisplayRows);
+  const displayRows = applyCollapse(allDisplayRows, new Set([...collapsed].filter((k) => collapsible.has(k))), rowHeaderGroups);
+  // Value-carrying rows in display order — what arrow-key navigation steps through (an item row
+  // with no subtotal has no value cells to select).
+  const navigableRows = displayRows.filter((d) => d.sourceIndex !== null).map((d) => d.sourceIndex);
 
   // Grid lines on every header/body cell (border on all four sides, not just a per-row bottom
   // border) — the single biggest visual gap vs a real spreadsheet grid (flagged live, 2026-09-28).
@@ -866,8 +847,7 @@ export default function PivotGrid({
       return;
     }
     if (!selectedCell) {
-      const firstVisibleRow = rowHeaders.findIndex((row, i) => isRowVisible(row, i));
-      if (firstVisibleRow >= 0 && columnHeaders.length > 0) setSelectedCell({ row: firstVisibleRow, col: 0 });
+      if (navigableRows.length > 0 && columnHeaders.length > 0) setSelectedCell({ row: navigableRows[0], col: 0 });
       return;
     }
     const { row, col } = selectedCell;
@@ -875,20 +855,12 @@ export default function PivotGrid({
       setSelectedCell({ row, col: Math.max(0, col - 1) });
     } else if (e.key === "ArrowRight") {
       setSelectedCell({ row, col: Math.min(columnHeaders.length - 1, col + 1) });
-    } else if (e.key === "ArrowUp") {
-      for (let r = row - 1; r >= 0; r--) {
-        if (isRowVisible(rowHeaders[r], r)) {
-          setSelectedCell({ row: r, col });
-          return;
-        }
-      }
-    } else if (e.key === "ArrowDown" || e.key === "Enter") {
-      for (let r = row + 1; r < rowHeaders.length; r++) {
-        if (isRowVisible(rowHeaders[r], r)) {
-          setSelectedCell({ row: r, col });
-          return;
-        }
-      }
+    } else if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Enter") {
+      // Steps in DISPLAY order (a Top subtotal can be drawn after its item's rows in Tabular, so
+      // source order isn't screen order).
+      const position = navigableRows.indexOf(row);
+      const next = navigableRows[position + (e.key === "ArrowUp" ? -1 : 1)];
+      if (position >= 0 && next !== undefined) setSelectedCell({ row: next, col });
     }
   };
 
@@ -1125,92 +1097,78 @@ export default function PivotGrid({
                 )}
                 {columnHeaders.map((col, colIndex) => (
                   <th key={colIndex} className={`${headerCellBorder} ${headerBg} px-2 py-2`}>
-                    <HeaderCell isTotal={col.isTotal}>{col.labels[level]}</HeaderCell>
+                    {/* A Grand Total column shows its caption once, in the top header row, like Excel. */}
+                    <HeaderCell isTotal={col.isTotal}>{col.captionLevel === -1 && col.caption ? (level === 0 ? col.caption : "") : col.labels[level]}</HeaderCell>
                   </th>
                 ))}
               </tr>
             ))}
           </thead>
           <tbody>
-            {rowHeaders.map((row, rowIndex) => {
-              if (!isRowVisible(row, rowIndex)) {
-                return null;
-              }
-
-              const group = groupForRow.get(rowIndex);
-              const isGroupSubtotalRow = group?.hasSubtotal && rowIndex === group.end - 1;
+            {displayRows.map((displayRow, displayIndex) => {
+              // The result row whose VALUES this display row shows — null for an item row with no
+              // subtotal of its own (blank value cells, like Excel).
+              const rowIndex = displayRow.sourceIndex;
+              const row = rowIndex !== null ? rowHeaders[rowIndex] : null;
+              const isTotalRow = displayRow.kind === "subtotal" || displayRow.kind === "grand" || (displayRow.kind === "header" && row !== null);
+              // Outer-item rows (compact form) and collapsed items get a bold label like Excel's,
+              // even when they carry no values.
+              const labelWeight = isTotalRow || displayRow.kind === "header" || displayRow.kind === "collapsed" ? "font-bold text-ink" : "font-medium text-ink";
               // Softer zebra tint + a hover state (2026-10-12, "شكله قذر") — a plain alternating
               // gray with no hover feedback read as flat/dead; the hover highlight is purely
               // cosmetic (selectedCell's own ring is still the real "this is the active cell"
               // signal) but makes the grid feel alive under the mouse the way a real spreadsheet does.
-              const rowTint = row.isTotal
+              const rowTint = isTotalRow
                 ? "bg-gold/10 hover:bg-gold/15 border-t-2 border-gold/40"
-                : `${visibleRowPosition.get(rowIndex) % 2 === 0 ? "bg-slate-50/50" : "bg-white"} hover:bg-gold-soft/60`;
+                : `${displayIndex % 2 === 1 ? "bg-slate-50/50" : "bg-white"} hover:bg-gold-soft/60`;
 
-              const collapseToggle = isGroupSubtotalRow && (
+              // Excel's +/- sits right next to an OUTERMOST item's own label — on its item row in
+              // compact form, on its first row in tabular form, and on the collapsed row itself.
+              const itemKey = displayRow.path[0];
+              const showsItemLabel =
+                displayRow.kind !== "subtotal" && displayRow.kind !== "grand" && (displayRow.groupCells[0]?.lines ?? []).some((l) => l.level === 0);
+              const collapseToggle = showsItemLabel && collapsible.has(itemKey) && (
                 <button
                   type="button"
-                  onClick={() => toggleGroup(group.key)}
+                  onClick={() => toggleGroup(itemKey)}
                   className="text-muted hover:text-ink"
-                  aria-label={collapsed.has(group.key) ? "Expand group" : "Collapse group"}
+                  aria-label={collapsed.has(itemKey) ? "Expand group" : "Collapse group"}
                 >
-                  {collapsed.has(group.key) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  {collapsed.has(itemKey) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                 </button>
               );
 
-              // Real Excel's per-field "Insert blank line after each item" (PLAN 6 Phase 2) — a pure
-              // rendering decision, mirroring the backend's HtmlSnapshotRenderer exactly: whenever a
-              // configured level's label is about to change going into the NEXT VISIBLE row, draw
-              // one empty separator <tr> after this one. Uses visibleRowPosition's own next-visible
-              // row (not simply rowIndex + 1) so a collapsed group doesn't leave a stray blank line
-              // sitting in front of a row that's currently hidden.
-              const nextVisibleIndex = rowHeaders.findIndex((r, i) => i > rowIndex && isRowVisible(r, i));
-              const needsBlankLine =
-                nextVisibleIndex >= 0 &&
-                rowFieldLayouts.some((fl, level) => fl?.insertBlankLine && row.labels[level] !== rowHeaders[nextVisibleIndex].labels[level]);
-
               return (
-                <Fragment key={rowIndex}>
+                <Fragment key={displayIndex}>
                 <tr className={`${rowTint} transition-colors`}>
-                  <td className={rowNumberBodyClass}>{headerRowCount + visibleRowPosition.get(rowIndex)}</td>
-                  {rowHeaderGroups.map((group) => {
+                  <td className={rowNumberBodyClass}>{headerRowCount + displayIndex + 1}</td>
+                  {rowHeaderGroups.map((group, groupIndex) => {
+                    const lines = displayRow.groupCells[groupIndex]?.lines ?? [];
                     // Same degenerate-depth-1 fix as the title row above — a drilldown hierarchy
                     // always goes through the merged branch below (where the +/- toggle lives), even
                     // with only 1 level today, since a SIBLING row could still be deeper once
                     // something else gets expanded.
                     if (group.start === group.end && !rowsHierarchyDrilldown) {
-                      const level = group.start;
-                      const effectiveRepeat = rowFieldLayouts[level]?.repeatItemLabels ?? repeatItemLabels;
-                      const text = effectiveRepeat || suppressedLevelVisibility[rowIndex][level] ? row.labels[level] : "";
                       return (
-                        <td
-                          key={level}
-                          className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-center ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}
-                        >
+                        <td key={group.start} className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-center ${labelWeight}`}>
                           <span className="inline-flex items-center justify-center gap-1.5">
-                            {level === 0 && collapseToggle}
-                            {text}
+                            {groupIndex === 0 && collapseToggle}
+                            {lines[0]?.text ?? ""}
                           </span>
                         </td>
                       );
                     }
 
-                    // A merged (compact-style) column spanning 2+ fields — same per-level
-                    // RepeatItemLabels resolution as the standalone branch above, except a merged
-                    // column keeps suppressing by default when no field in it has an explicit
-                    // override (matches the backend's own HtmlSnapshotRenderer — an existing test
-                    // there locks this in: Compact never responds to the report-wide flag alone).
+                    // A merged (compact-style) column spanning 2+ fields — one indented line per
+                    // label buildDisplayRows decided to show here.
                     return (
-                      <td key={group.start} className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-left ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}>
+                      <td key={group.start} className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-left ${labelWeight}`}>
                         <span className="inline-flex items-center gap-1.5">
-                          {group.start === 0 && collapseToggle}
+                          {groupIndex === 0 && collapseToggle}
                           <span>
-                            {row.labels.slice(group.start, group.end + 1).map((label, offset) => {
-                              const level = group.start + offset;
-                              const effectiveRepeat = rowFieldLayouts[level]?.repeatItemLabels ?? false;
-                              if (!(effectiveRepeat || suppressedLevelVisibility[rowIndex][level])) {
-                                return null;
-                              }
+                            {lines.map((line) => {
+                              const level = line.level;
+                              const label = line.text;
                               // Real Excel's per-member OLAP drilldown (PLAN 8, EXPERIMENTAL) — the
                               // +/- toggle sits on the row's own DEEPEST label (its actual current
                               // member, whatever level that happens to be for this particular row —
@@ -1219,7 +1177,7 @@ export default function PivotGrid({
                               // column. uniqueNames walks the same ancestry as labels (see
                               // CubeQueryService.BuildDrilldownHeaders), so the last entry is always
                               // this row's own member.
-                              const isOwnMember = rowsHierarchyDrilldown && !row.isTotal && level === row.labels.length - 1;
+                              const isOwnMember = rowsHierarchyDrilldown && row && !row.isTotal && level === row.labels.length - 1;
                               const rawUniqueName = isOwnMember ? row.uniqueNames?.[row.uniqueNames.length - 1] : null;
                               // Real data-quality issue caught live, 2026-10-13: some members on this
                               // cube have an incomplete UniqueName (e.g. ending in a bare "&" with no
@@ -1231,7 +1189,7 @@ export default function PivotGrid({
                               // this one member's own toggle.
                               const uniqueName = rawUniqueName && rawUniqueName.endsWith("]") ? rawUniqueName : null;
                               return (
-                                <div key={level} style={{ paddingLeft: offset * 16 }} className="flex items-center gap-1">
+                                <div key={level} style={{ paddingLeft: line.indent * 16 }} className="flex items-center gap-1">
                                   {uniqueName && onToggleDrilldownMember && (
                                     <button
                                       type="button"
@@ -1255,7 +1213,8 @@ export default function PivotGrid({
                       </td>
                     );
                   })}
-                  {cells[rowIndex].map((cell, colIndex) => {
+                  {rowIndex === null && columnHeaders.map((_, colIndex) => <td key={colIndex} className={`${cellBorder} px-3 py-1.5`} />)}
+                  {rowIndex !== null && cells[rowIndex].map((cell, colIndex) => {
                     const isTotalCell = row.isTotal || columnHeaders[colIndex].isTotal;
                     // Which PivotValueField a cell belongs to is read directly off whichever axis
                     // actually carries Σ Values, via that header's own caption at its position —
@@ -1313,7 +1272,9 @@ export default function PivotGrid({
                     );
                   })}
                 </tr>
-                {needsBlankLine && (
+                {/* Real Excel's per-field "Insert blank line after each item" — placed by
+                    buildDisplayRows after the LAST row of a flagged item (its subtotal included). */}
+                {displayRow.blankLineAfter && (
                   <tr>
                     <td colSpan={1 + rowHeaderColumnCount + Math.max(1, columnHeaders.length)} className="h-2 border-0 p-0" />
                   </tr>
