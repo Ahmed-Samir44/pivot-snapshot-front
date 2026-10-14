@@ -1558,9 +1558,9 @@ export function CalculatedFieldDialog({ calculatedFields, measureOptions, onAppl
   };
 
   return (
-    <div className="w-[26rem] space-y-3">
+    <div className="w-[30rem] max-w-full space-y-3">
       <p className="text-sm font-semibold text-ink">Insert Calculated Field</p>
-      <div className="grid grid-cols-[4.5rem_1fr_5rem] items-center gap-2 text-xs">
+      <div className="grid grid-cols-[4.5rem_minmax(0,1fr)_5.5rem] items-center gap-2 text-xs">
         <label htmlFor="calc-field-name" className="font-medium text-muted">Name:</label>
         <input
           id="calc-field-name"
@@ -1574,12 +1574,12 @@ export function CalculatedFieldDialog({ calculatedFields, measureOptions, onAppl
             <option key={f.name} value={f.name} />
           ))}
         </datalist>
-        <button type="button" onClick={upsert} disabled={!name.trim() || !formula.trim()} className="btn-secondary px-2 py-1 text-xs disabled:opacity-50">
+        <button type="button" onClick={upsert} disabled={!name.trim() || !formula.trim()} className="btn-secondary w-full px-2 py-1 text-xs hover:scale-100 disabled:opacity-50">
           {existing ? "Modify" : "Add"}
         </button>
         <label htmlFor="calc-field-formula" className="font-medium text-muted">Formula:</label>
         <input id="calc-field-formula" ref={formulaRef} className="input-field py-1 font-mono text-sm" value={formula} onChange={(e) => setFormula(e.target.value)} />
-        <button type="button" onClick={remove} disabled={!existing} className="btn-secondary px-2 py-1 text-xs disabled:opacity-50">
+        <button type="button" onClick={remove} disabled={!existing} className="btn-secondary w-full px-2 py-1 text-xs hover:scale-100 disabled:opacity-50">
           Delete
         </button>
       </div>
@@ -1734,9 +1734,13 @@ export function CalculatedItemDialog({ calculatedItems, rows, columns, onApply, 
   };
 
   return (
-    <div className="w-[28rem] space-y-3">
-      <p className="text-sm font-semibold text-ink">Insert Calculated Item in &quot;{formatDimensionName(field)}&quot;</p>
-      <div className="grid grid-cols-[4.5rem_1fr_5rem] items-center gap-2 text-xs">
+    <div className="w-[30rem] max-w-full space-y-3">
+      {/* A long field name is truncated (full name on hover) so the title stays on one line. */}
+      <p className="flex min-w-0 text-sm font-semibold text-ink" title={`Insert Calculated Item in "${formatDimensionName(field)}"`}>
+        <span className="shrink-0">Insert Calculated Item in&nbsp;</span>
+        <span className="truncate">&quot;{formatDimensionName(field)}&quot;</span>
+      </p>
+      <div className="grid grid-cols-[4.5rem_minmax(0,1fr)_5.5rem] items-center gap-2 text-xs">
         <label htmlFor="calc-item-name" className="font-medium text-muted">Name:</label>
         <input id="calc-item-name" list="calc-item-names" className="input-field py-1 text-sm" value={name} onChange={(e) => pickName(e.target.value)} />
         <datalist id="calc-item-names">
@@ -1744,12 +1748,12 @@ export function CalculatedItemDialog({ calculatedItems, rows, columns, onApply, 
             <option key={i.name} value={i.name} />
           ))}
         </datalist>
-        <button type="button" onClick={upsert} disabled={!name.trim() || !formula.trim()} className="btn-secondary px-2 py-1 text-xs disabled:opacity-50">
+        <button type="button" onClick={upsert} disabled={!name.trim() || !formula.trim()} className="btn-secondary w-full px-2 py-1 text-xs hover:scale-100 disabled:opacity-50">
           {existing ? "Modify" : "Add"}
         </button>
         <label htmlFor="calc-item-formula" className="font-medium text-muted">Formula:</label>
         <input id="calc-item-formula" ref={formulaRef} className="input-field py-1 font-mono text-sm" value={formula} onChange={(e) => setFormula(e.target.value)} />
-        <button type="button" onClick={remove} disabled={!existing} className="btn-secondary px-2 py-1 text-xs disabled:opacity-50">
+        <button type="button" onClick={remove} disabled={!existing} className="btn-secondary w-full px-2 py-1 text-xs hover:scale-100 disabled:opacity-50">
           Delete
         </button>
       </div>

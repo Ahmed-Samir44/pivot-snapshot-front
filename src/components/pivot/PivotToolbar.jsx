@@ -62,9 +62,14 @@ const TABS = [
 // rounded pill. `badge` mirrors Excel's own subtle "this is currently set" affordance (Excel uses
 // a pressed/highlighted button state for an active toggle; a small count badge reads the same way
 // at a glance without needing real toggle-button semantics for a Popover trigger).
-function RibbonButton({ icon: Icon, label, badge, children }) {
+//
+// panelClassName widens the panel for a bigger dialog (Popover's default caps it at 26rem, and a
+// dialog wider than that spilled its buttons out of the card — caught live 2026-10-14). Every ribbon
+// panel also opens a little lower (!mt-6), clear of the group caption under the button ("Calculations").
+function RibbonButton({ icon: Icon, label, badge, panelClassName = "", children }) {
   return (
     <Popover
+      panelClassName={`!mt-6 ${panelClassName}`}
       trigger={(toggle) => (
         <button
           type="button"
@@ -266,7 +271,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
 
         {tab === "analyze" && (
           <RibbonGroup label="Calculations">
-            <RibbonButton icon={Calculator} label="Calculated Field" badge={request.calculatedFields.length}>
+            <RibbonButton icon={Calculator} label="Calculated Field" badge={request.calculatedFields.length} panelClassName="!max-w-[34rem]">
               {(close) => (
                 <CalculatedFieldDialog
                   calculatedFields={request.calculatedFields}
@@ -283,7 +288,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                 />
               )}
             </RibbonButton>
-            <RibbonButton icon={ListPlus} label="Calculated Item" badge={request.calculatedItems.length}>
+            <RibbonButton icon={ListPlus} label="Calculated Item" badge={request.calculatedItems.length} panelClassName="!max-w-[34rem]">
               {(close) => (
                 <CalculatedItemDialog
                   calculatedItems={request.calculatedItems}
