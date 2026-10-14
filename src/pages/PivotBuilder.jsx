@@ -806,8 +806,22 @@ export default function PivotBuilder() {
               onToggleDrilldownMember={(uniqueName) => {
                 const current = request.rowsHierarchyDrilldown;
                 if (!current) return;
-                const expanded = current.expandedMemberUniqueNames.includes(uniqueName)
-                  ? current.expandedMemberUniqueNames.filter((u) => u !== uniqueName)
+                // Collapsing a member also collapses every expanded member UNDER it — otherwise their
+                // children stayed in the query and showed up orphaned under the collapsed parent
+                // (caught live 2026-10-14). Each drilldown row's uniqueNames is its full ancestry
+                // (see CubeQueryService.BuildDrilldownHeaders), so the current result tells us which
+                // expanded members sit below this one.
+                const collapsing = current.expandedMemberUniqueNames.includes(uniqueName);
+                const descendants = new Set();
+                if (collapsing) {
+                  (result?.rowHeaders ?? []).forEach((h) => {
+                    const names = h.uniqueNames ?? [];
+                    const at = names.indexOf(uniqueName);
+                    if (at >= 0) names.slice(at + 1).forEach((n) => descendants.add(n));
+                  });
+                }
+                const expanded = collapsing
+                  ? current.expandedMemberUniqueNames.filter((u) => u !== uniqueName && !descendants.has(u))
                   : [...current.expandedMemberUniqueNames, uniqueName];
                 setRequest({ ...request, rowsHierarchyDrilldown: { ...current, expandedMemberUniqueNames: expanded } });
               }}
