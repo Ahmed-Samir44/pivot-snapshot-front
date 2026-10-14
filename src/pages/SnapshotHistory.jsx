@@ -40,6 +40,19 @@ function isDrilldownVersion(version) {
   return version.rows.length === 0 && version.result.rowHeaders.some((h) => h.labels.length > 0);
 }
 
+// A saved drilldown COMBINED with other Rows fields (Drilldown v3): its rows carry `drill` info,
+// whose level is the slot's position in Rows. -1 = not one.
+function combinedDrillSlot(version) {
+  return version.result.rowHeaders.find((h) => h.drill)?.drill.level ?? -1;
+}
+
+// What the preview grid needs to lay a saved drilldown out (read-only — no expansions to toggle).
+function previewDrilldown(version) {
+  if (isDrilldownVersion(version)) return { expandedMemberUniqueNames: [] };
+  const slot = combinedDrillSlot(version);
+  return slot >= 0 ? { topLevelField: version.rows[slot], expandedMemberUniqueNames: [] } : null;
+}
+
 function parseBuilderState(builderStateJson) {
   if (!builderStateJson) return null;
   try {
@@ -325,6 +338,7 @@ export default function SnapshotHistory() {
         repeatItemLabels: parseBuilderState(previewVersion.builderStateJson)?.repeatItemLabels ?? false,
         fieldLayouts: parseBuilderState(previewVersion.builderStateJson)?.fieldLayouts ?? [],
         drilldown: isDrilldownVersion(previewVersion),
+        drillSlot: combinedDrillSlot(previewVersion),
         drilldownSubtotals: parseBuilderState(previewVersion.builderStateJson)?.request?.subtotals ?? "Top",
       });
     } catch (err) {
@@ -669,7 +683,7 @@ export default function SnapshotHistory() {
               repeatItemLabels={builderState?.repeatItemLabels ?? false}
               fieldLayouts={builderState?.fieldLayouts ?? []}
               // Read-only here: no onToggleDrilldownMember, so no +/- toggles — just the frozen rows.
-              rowsHierarchyDrilldown={isDrilldownVersion(previewVersion) ? { expandedMemberUniqueNames: [] } : null}
+              rowsHierarchyDrilldown={previewDrilldown(previewVersion)}
               // Older versions (no builder state) predate drilldown subtotals — Top = how they looked.
               drilldownSubtotals={builderState?.request?.subtotals ?? "Top"}
               boundedHeight={false}
