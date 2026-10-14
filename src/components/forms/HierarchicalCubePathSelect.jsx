@@ -8,6 +8,7 @@ import Popover from "./Popover";
 import { parseCubeBracketSegments, formatCubeBracketLabel, formatDimensionName } from "../../utils/cubeMeta";
 import { setFieldDragPayload, readFieldDragPayload } from "../../utils/dragDrop";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
+import { effectiveSubtotalPosition } from "../../utils/subtotals";
 
 // One placed field pill (Rows or Columns) — its own component, not inlined in the .map() below,
 // for the same reason it always was (hooks can't live inside a loop whose length changes).
@@ -88,6 +89,7 @@ function PlacedFieldPill({
   const currentSubtotal = fieldSettings?.overrides?.find((f) => f.field === fullPath);
   const currentOverride = currentSubtotal?.position ?? null;
   const currentFunctions = currentSubtotal?.functions ?? null;
+  const effectivePosition = effectiveSubtotalPosition(currentOverride, fieldSettings?.reportDefault ?? "Off");
   const currentLayout = fieldLayout?.overrides?.find((f) => f.field === fullPath) ?? {};
   const SUBTOTAL_FUNCTIONS = ["Sum", "Count", "Average", "Max", "Min"];
 
@@ -168,9 +170,9 @@ function PlacedFieldPill({
                 <div className="px-2 pb-2">
                   <p className="pb-1 text-xs font-bold uppercase tracking-wide text-muted">Subtotals</p>
                   {[
-                    { key: "automatic", label: "Automatic", active: currentOverride !== "Off" && !currentFunctions },
-                    { key: "none", label: "None", active: currentOverride === "Off" },
-                    { key: "custom", label: "Custom", active: Boolean(currentFunctions) },
+                    { key: "automatic", label: "Automatic", active: effectivePosition !== "Off" && !currentFunctions },
+                    { key: "none", label: "None", active: effectivePosition === "Off" },
+                    { key: "custom", label: "Custom", active: effectivePosition !== "Off" && Boolean(currentFunctions) },
                   ].map((opt) => (
                     <label key={opt.key} className="flex cursor-pointer items-center gap-2 rounded-lg py-1.5 text-left hover:bg-gold/10">
                       <input
@@ -178,19 +180,26 @@ function PlacedFieldPill({
                         className="h-3.5 w-3.5 accent-gold"
                         checked={opt.active}
                         onChange={() => {
+                          // Real Excel: Automatic/Custom always turn THIS field's subtotal on, None
+                          // always turns it off — whatever the report-wide Design > Subtotals choice
+                          // was. So an override is only stored when the field differs from the report
+                          // default; when the default is Off, turning a field on needs an explicit
+                          // position (Bottom, same as Custom has always used here).
+                          const reportOff = fieldSettings.reportDefault === "Off";
+                          const onPosition = reportOff ? (currentOverride && currentOverride !== "Off" ? currentOverride : "Bottom") : currentOverride === "Off" ? null : currentOverride;
                           if (opt.key === "automatic") {
-                            fieldSettings.onChange(fullPath, { position: null, functions: null });
+                            fieldSettings.onChange(fullPath, { position: onPosition, functions: null });
                           } else if (opt.key === "none") {
-                            fieldSettings.onChange(fullPath, { position: "Off", functions: null });
+                            fieldSettings.onChange(fullPath, { position: reportOff ? null : "Off", functions: null });
                           } else {
-                            fieldSettings.onChange(fullPath, { position: currentOverride === "Off" || !currentOverride ? "Bottom" : currentOverride, functions: currentFunctions ?? ["Sum"] });
+                            fieldSettings.onChange(fullPath, { position: onPosition, functions: currentFunctions ?? ["Sum"] });
                           }
                         }}
                       />
                       {opt.label}
                     </label>
                   ))}
-                  {currentFunctions && (
+                  {currentFunctions && effectivePosition !== "Off" && (
                     <div className="ml-5 flex flex-col gap-0.5 border-l border-slate-100 pl-2">
                       {SUBTOTAL_FUNCTIONS.map((fn) => (
                         <label key={fn} className="flex cursor-pointer items-center gap-2 py-0.5 text-left text-xs">

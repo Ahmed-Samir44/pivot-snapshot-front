@@ -11,6 +11,7 @@ import { formatDimensionName } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
 import { computeGroups, computeCompactVisibility, buildRowHeaderGroups } from "../../utils/pivotGridLayout";
 import { MEASURES_PLACEHOLDER, measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "../../utils/measuresPlacement";
+import { applyReportSubtotals } from "../../utils/subtotals";
 import { drillthroughPivot } from "../../services/pivotApi";
 
 // Excel's own Report Filter area: every field in Filters gets its own row ABOVE the PivotTable
@@ -565,7 +566,7 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
               // Same Σ Values-isn't-a-real-field exclusion as PivotToolbar.jsx's own Subtotals
               // dropdown (caught 2026-10-06, full codebase review).
               disabled={request.rows.filter((f) => f !== MEASURES_PLACEHOLDER).length < 2}
-              onChange={(e) => onChange({ ...request, subtotals: e.target.value })}
+              onChange={(e) => onChange(applyReportSubtotals(request, e.target.value))}
             >
               <option value="Off">Do Not Show Subtotals</option>
               <option value="Bottom">Show all Subtotals at Bottom of Group</option>

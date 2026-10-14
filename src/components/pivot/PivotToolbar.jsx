@@ -3,6 +3,7 @@ import { Sigma, Rows3, Calculator, ListPlus, LayoutGrid, CalendarRange } from "l
 import Popover from "../forms/Popover";
 import { CalculatedFieldsEditor, CalculatedItemsEditor } from "./FieldPicker";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
+import { applyReportSubtotals } from "../../utils/subtotals";
 
 // A real Excel RIBBON, not just a toolbar in the ribbon's general spot — a plain restyled button
 // row was tried first and rejected live, 2026-10-04 ("مشكلتي انه مش زي الـ excel"), after an
@@ -187,7 +188,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                         type="button"
                         disabled={opt.value !== "Off" && needsMoreRowFields}
                         onClick={() => {
-                          onChange({ ...request, subtotals: opt.value });
+                          onChange(applyReportSubtotals(request, opt.value));
                           close();
                         }}
                         className={`rounded-lg px-2 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-40 ${
