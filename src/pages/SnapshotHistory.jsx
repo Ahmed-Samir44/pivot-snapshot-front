@@ -325,6 +325,7 @@ export default function SnapshotHistory() {
         repeatItemLabels: parseBuilderState(previewVersion.builderStateJson)?.repeatItemLabels ?? false,
         fieldLayouts: parseBuilderState(previewVersion.builderStateJson)?.fieldLayouts ?? [],
         drilldown: isDrilldownVersion(previewVersion),
+        drilldownSubtotals: parseBuilderState(previewVersion.builderStateJson)?.request?.subtotals ?? "Top",
       });
     } catch (err) {
       setExportError(err.message);
@@ -669,6 +670,8 @@ export default function SnapshotHistory() {
               fieldLayouts={builderState?.fieldLayouts ?? []}
               // Read-only here: no onToggleDrilldownMember, so no +/- toggles — just the frozen rows.
               rowsHierarchyDrilldown={isDrilldownVersion(previewVersion) ? { expandedMemberUniqueNames: [] } : null}
+              // Older versions (no builder state) predate drilldown subtotals — Top = how they looked.
+              drilldownSubtotals={builderState?.request?.subtotals ?? "Top"}
               boundedHeight={false}
             />
           </Modal>

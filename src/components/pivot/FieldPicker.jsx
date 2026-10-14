@@ -2664,6 +2664,14 @@ export default function FieldPicker({
       rowLevelSorts: [],
       fieldSubtotals: [],
       fieldsShowingItemsWithNoData: [],
+      // Drilldown v2 (2026-10-14): Subtotals now applies to the hierarchy, and Excel's own default
+      // for a new hierarchy is subtotals at Top (each expanded member's row shows its total). This
+      // app's report default is Off, which would blank every expanded member — so a fresh
+      // drilldown starts at Top; any explicit choice made afterward is kept.
+      subtotals: value.subtotals === "Off" ? "Top" : value.subtotals,
+      // A per-level sort can't apply to a ragged drilldown axis (MdxPivotQueryBuilder rejects it),
+      // and a Rows `sort` aimed at the old flat fields would now sort the hierarchy instead.
+      sort: value.sort?.axis === "Rows" ? null : value.sort,
     });
   };
 

@@ -81,7 +81,13 @@ export function totalCaptionInfo(row, measuresLevel = -1) {
 // outline form plus the merged column) gives EVERY outer level's items their own row, each in its
 // own column, with the children starting on the next row. Only Tabular form puts an item on its
 // first child's row. Not applied when Σ Values sits in Rows (that shape keeps the tabular rows).
-export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts = [], repeatItemLabels = false, measuresLevel = -1, drilldown = false, outline = false }) {
+//
+// drilldownSubtotals (Drilldown v2, 2026-10-14): Excel's report Subtotals setting for an OLAP
+// hierarchy. An expanded member's own row already carries its cube total — that's "Top". "Bottom"
+// blanks that row's values and adds a "<member> Total" row (the SAME cube values, not a re-sum, so
+// it's exact even for non-additive measures) after its descendants; "Off" just blanks it. A blanked
+// parent keeps labelSourceIndex so its +/- toggle still knows which member it is.
+export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts = [], repeatItemLabels = false, measuresLevel = -1, drilldown = false, outline = false, drilldownSubtotals = "Top" }) {
   const groupOfLevel = [];
   rowHeaderGroups.forEach((g, gi) => {
     for (let l = g.start; l <= g.end; l++) groupOfLevel[l] = gi;
@@ -154,10 +160,29 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
     }
   };
 
+  // Drilldown "Bottom" subtotals: expanded parents whose "<member> Total" row is still pending,
+  // innermost last — emitted once a row no longer belongs under them.
+  const openDrillParents = [];
+  const flushDrillParents = (labels) => {
+    while (openDrillParents.length > 0 && (labels === null || !belongs(labels, openDrillParents[openDrillParents.length - 1].path))) {
+      const p = openDrillParents.pop();
+      const row = rowHeaders[p.index];
+      const caption = `${display(row.labels[p.level], row.uniqueNames?.[p.level])} Total`;
+      out.push({
+        kind: "subtotal",
+        sourceIndex: p.index,
+        level: p.level,
+        path: row.labels,
+        groupCells: rowHeaderGroups.map((g) => ({ lines: [{ text: caption, indent: p.level - g.start, level: p.level }] })),
+      });
+    }
+  };
+
   for (let i = 0; i < rowHeaders.length; i++) {
     const row = rowHeaders[i];
 
     if (isGrand(row)) {
+      flushDrillParents(null);
       flushDeferred(null);
       const { caption } = totalCaptionInfo(row, measuresLevel);
       out.push({ kind: "grand", sourceIndex: i, level: -1, path: [], groupCells: totalCells(row, -1, caption) });
@@ -165,6 +190,7 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
       continue;
     }
 
+    flushDrillParents(row.labels);
     flushDeferred(row.labels);
 
     if (row.isTotal) {
@@ -219,9 +245,19 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
       }
       return { lines };
     });
-    out.push({ kind: "detail", sourceIndex: i, level: row.labels.length - 1, path: row.labels, groupCells });
+    // An expanded drilldown member: its child comes right after it.
+    const next = rowHeaders[i + 1];
+    const isExpandedDrillParent =
+      drilldown && next !== undefined && !next.isTotal && next.labels.length > row.labels.length && belongs(next.labels, row.labels);
+    if (isExpandedDrillParent && drilldownSubtotals !== "Top") {
+      out.push({ kind: "detail", sourceIndex: null, labelSourceIndex: i, level: row.labels.length - 1, path: row.labels, groupCells });
+      if (drilldownSubtotals === "Bottom") openDrillParents.push({ index: i, level: row.labels.length - 1, path: row.labels });
+    } else {
+      out.push({ kind: "detail", sourceIndex: i, level: row.labels.length - 1, path: row.labels, groupCells });
+    }
     prevPath = row.labels;
   }
+  flushDrillParents(null);
   flushDeferred(null);
 
   // Insert Blank Line after each item (per field): after the LAST display row belonging to an item

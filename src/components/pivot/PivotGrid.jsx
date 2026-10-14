@@ -127,7 +127,12 @@ function HeaderCell({ children, muted = false, isTotal = false }) {
 // passes its own real rowLevel). Needed so "Clear sort"/its own sorted-indicator can see a
 // PivotBuilder-defaulted (or LevelSortEditor-set) per-level Ascending rule, not just the single
 // shared `sort` field — see setSort's own WHY comment for why both mechanisms can be active.
-function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false, isTotal = false, level = 0 }) {
+// sortOnly (Drilldown v2, 2026-10-14): a drilldown hierarchy's "Row Labels" header offers just Sort
+// A→Z / Z→A (sorted within each parent, see MdxPivotQueryBuilder.BuildHierarchyDrilldownSet). No
+// Filter — filtering the same hierarchy that's on the axis would put it in WHERE too, which SSAS
+// rejects — and no More Sort Options (its per-level editor needs real Rows fields); sorting by a
+// value works from a value cell's right-click menu.
+function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false, isTotal = false, level = 0, sortOnly = false }) {
   // "More Sort Options…"/"Field Settings…" open the SAME panel in place of the plain shortcut
   // list, same back-and-forth pattern as Excel's own header dropdown (its "More Sort Options..."
   // item opens a bigger dialog from the same arrow) — relocated here from FieldPicker's toolbar
@@ -306,6 +311,8 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
                 Clear sort
               </button>
             )}
+            {!sortOnly && (
+              <>
             <button type="button" onClick={() => setPanel("sort")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
               More Sort Options…
             </button>
@@ -335,6 +342,8 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
               />
               Show items with no data
             </label>
+              </>
+            )}
           </div>
         )
       }
@@ -567,8 +576,9 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
               className="w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent disabled:cursor-not-allowed disabled:opacity-40"
               value={request.subtotals}
               // Same Σ Values-isn't-a-real-field exclusion as PivotToolbar.jsx's own Subtotals
-              // dropdown (caught 2026-10-06, full codebase review).
-              disabled={request.rows.filter((f) => f !== MEASURES_PLACEHOLDER).length < 2}
+              // dropdown (caught 2026-10-06, full codebase review). A drilldown hierarchy has
+              // subtotals of its own levels (Drilldown v2), so it enables this too.
+              disabled={request.rows.filter((f) => f !== MEASURES_PLACEHOLDER).length < 2 && !request.rowsHierarchyDrilldown}
               onChange={(e) => onChange(applyReportSubtotals(request, e.target.value))}
             >
               <option value="Off">Do Not Show Subtotals</option>
@@ -642,6 +652,10 @@ export default function PivotGrid({
   // expandedMemberUniqueNames } or null/undefined when not active.
   rowsHierarchyDrilldown = null,
   onToggleDrilldownMember = null,
+  // The report Subtotals setting as applied to a drilldown hierarchy (see buildDisplayRows'
+  // drilldownSubtotals). Passed explicitly rather than read off `request`, since a read-only
+  // snapshot preview has no live request.
+  drilldownSubtotals = "Top",
   request = null,
   onChange = null,
   onRefresh = null,
@@ -795,8 +809,11 @@ export default function PivotGrid({
     // Excel's Outline AND Compact layouts are both "outline form" (outer items on their own row);
     // only Tabular puts an item on its first child's row.
     outline: layout !== "Tabular",
+    drilldownSubtotals,
   });
-  const collapsible = collapsibleKeys(allDisplayRows);
+  // A drilldown hierarchy has its OWN per-member +/- (onToggleDrilldownMember) — the outer-item
+  // collapse would be a second, conflicting toggle on the same rows.
+  const collapsible = rowsHierarchyDrilldown ? new Set() : collapsibleKeys(allDisplayRows);
   const displayRows = applyCollapse(allDisplayRows, new Set([...collapsed].filter((k) => collapsible.has(k))), rowHeaderGroups);
   // Value-carrying rows in display order — what arrow-key navigation steps through (an item row
   // with no subtotal has no value cells to select).
@@ -1092,7 +1109,21 @@ export default function PivotGrid({
                         // what a partial merge's own header shows, so this reuses the one convention
                         // already verified for the full-merge case rather than guessing a new one.
                         <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-white/40 ${headerBg} px-2 py-2`}>
-                          <HeaderCell muted>Row Labels</HeaderCell>
+                          {rowsHierarchyDrilldown ? (
+                            // A drilldown hierarchy sorts from here (Drilldown v2) — sort only, see
+                            // FieldHeaderMenu's sortOnly WHY comment.
+                            <FieldHeaderMenu
+                              label="Row Labels"
+                              field={rowsHierarchyDrilldown.topLevelField ?? null}
+                              axis="Rows"
+                              request={request}
+                              onChange={onChange}
+                              muted
+                              sortOnly
+                            />
+                          ) : (
+                            <HeaderCell muted>Row Labels</HeaderCell>
+                          )}
                         </th>
                       ),
                     )}
@@ -1113,6 +1144,9 @@ export default function PivotGrid({
               // subtotal of its own (blank value cells, like Excel).
               const rowIndex = displayRow.sourceIndex;
               const row = rowIndex !== null ? rowHeaders[rowIndex] : null;
+              // The member this row LABELS — differs from `row` only for a drilldown parent whose
+              // values were blanked by its Subtotals setting; its +/- toggle still needs its identity.
+              const labelRow = displayRow.labelSourceIndex !== undefined ? rowHeaders[displayRow.labelSourceIndex] : row;
               const isTotalRow = displayRow.kind === "subtotal" || displayRow.kind === "grand" || (displayRow.kind === "header" && row !== null);
               // Outer-item rows (compact form) and collapsed items get a bold label like Excel's,
               // even when they carry no values.
@@ -1181,8 +1215,9 @@ export default function PivotGrid({
                               // column. uniqueNames walks the same ancestry as labels (see
                               // CubeQueryService.BuildDrilldownHeaders), so the last entry is always
                               // this row's own member.
-                              const isOwnMember = rowsHierarchyDrilldown && row && !row.isTotal && level === row.labels.length - 1;
-                              const rawUniqueName = isOwnMember ? row.uniqueNames?.[row.uniqueNames.length - 1] : null;
+                              const isOwnMember =
+                                rowsHierarchyDrilldown && labelRow && !labelRow.isTotal && displayRow.kind !== "subtotal" && level === labelRow.labels.length - 1;
+                              const rawUniqueName = isOwnMember ? labelRow.uniqueNames?.[labelRow.uniqueNames.length - 1] : null;
                               // Real data-quality issue caught live, 2026-10-13: some members on this
                               // cube have an incomplete UniqueName (e.g. ending in a bare "&" with no
                               // key after it — a malformed/empty key on the cube side, not a bug in

@@ -228,7 +228,11 @@ export default function PivotBuilder() {
       // outright on any add/remove/reorder, never tries to migrate them forward.
       if (withDefaultSort.sort && withDefaultSort.sort.byMeasureField == null && withDefaultSort.sort.customOrder == null) {
         const axisFields = withDefaultSort.sort.axis === "Rows" ? withDefaultSort.rows : withDefaultSort.columns;
-        const realFieldCount = axisFields.filter((f) => f !== MEASURES_PLACEHOLDER).length;
+        // A drilldown hierarchy counts as the ONE Rows field a label sort needs (Drilldown v2,
+        // mirrors MdxPivotQueryBuilder.ValidateSort) — without this, sorting "Row Labels" A→Z/Z→A
+        // was silently cleared right here (caught live 2026-10-14).
+        const drilldownCountsAsField = withDefaultSort.sort.axis === "Rows" && withDefaultSort.rowsHierarchyDrilldown ? 1 : 0;
+        const realFieldCount = axisFields.filter((f) => f !== MEASURES_PLACEHOLDER).length + drilldownCountsAsField;
         if (realFieldCount !== 1) {
           return { ...withDefaultSort, sort: null };
         }
@@ -728,6 +732,7 @@ export default function PivotBuilder() {
         repeatItemLabels,
         fieldLayouts,
         drilldown: Boolean(lastQuery.rowsHierarchyDrilldown),
+        drilldownSubtotals: lastQuery.subtotals,
       });
     } catch (err) {
       setExportError(err.message);
@@ -812,6 +817,7 @@ export default function PivotBuilder() {
               // expanded-member set and re-runs the query immediately (same auto-run effect as every
               // other field edit), it isn't a display-only toggle.
               rowsHierarchyDrilldown={request.rowsHierarchyDrilldown}
+              drilldownSubtotals={request.subtotals}
               onToggleDrilldownMember={(uniqueName) => {
                 const current = request.rowsHierarchyDrilldown;
                 if (!current) return;

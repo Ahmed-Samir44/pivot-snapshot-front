@@ -175,7 +175,8 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                 // Rows — not a real grouping field, so it must not count toward the "2+ row fields"
                 // gate (caught 2026-10-06, full codebase review: Rows = [Hospital, "[Measures]"]
                 // enabled this with only ONE real field).
-                const needsMoreRowFields = request.rows.filter((f) => f !== MEASURES_PLACEHOLDER).length < 2;
+                // A drilldown hierarchy has subtotals of its own levels (Drilldown v2, 2026-10-14).
+                const needsMoreRowFields = request.rows.filter((f) => f !== MEASURES_PLACEHOLDER).length < 2 && !request.rowsHierarchyDrilldown;
                 return (
                   <div className="flex flex-col gap-1 text-sm">
                     {[
