@@ -20,21 +20,25 @@ import {
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
 import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "../../utils/conditionalFormat";
 
+// Real Excel's own "Show values as" list — its exact order and wording (confirmed 2026-10-14 against
+// screenshots of the real Value Field Settings dialog: "No Calculation", "% of Grand Total", "% of
+// Column Total", "% of Row Total", "% Of", "% of Parent Row Total", …). Excel's "% of Parent Total"
+// and "(next)" base item aren't supported by the backend, so they're left out rather than faked.
 export const SHOW_VALUES_AS_OPTIONS = [
-  { value: "Normal", label: "Normal" },
+  { value: "Normal", label: "No Calculation" },
   { value: "PercentOfGrandTotal", label: "% of Grand Total" },
-  { value: "RunningTotal", label: "Running Total" },
-  { value: "Rank", label: "Rank Largest to Smallest" },
-  { value: "PercentOfParentRow", label: "% of Parent Row" },
-  { value: "DifferenceFrom", label: "Difference From (previous)" },
-  { value: "PercentOfRowTotal", label: "% of Row Total" },
   { value: "PercentOfColumnTotal", label: "% of Column Total" },
-  { value: "PercentOfParentColumn", label: "% of Parent Column" },
-  { value: "Index", label: "Index" },
-  { value: "PercentDifferenceFrom", label: "% Difference From (previous)" },
+  { value: "PercentOfRowTotal", label: "% of Row Total" },
+  { value: "PercentOf", label: "% Of" },
+  { value: "PercentOfParentRow", label: "% of Parent Row Total" },
+  { value: "PercentOfParentColumn", label: "% of Parent Column Total" },
+  { value: "DifferenceFrom", label: "Difference From" },
+  { value: "PercentDifferenceFrom", label: "% Difference From" },
+  { value: "RunningTotal", label: "Running Total In" },
   { value: "PercentRunningTotal", label: "% Running Total In" },
   { value: "RankAscending", label: "Rank Smallest to Largest" },
-  { value: "PercentOf", label: "% Of…" },
+  { value: "Rank", label: "Rank Largest to Smallest" },
+  { value: "Index", label: "Index" },
 ];
 
 // Every Show Values As variant whose output is a ratio meant to be read as a percentage (see
@@ -1645,14 +1649,15 @@ export function CalculatedItemsEditor({ calculatedItems, rows, columns, onChange
 }
 
 
+// Excel's own Format Cells > Number category order (confirmed 2026-10-14 against a screenshot).
 const NUMBER_FORMAT_CATEGORIES = [
   "General",
   "Number",
   "Currency",
   "Accounting",
-  "Percentage",
   "Date",
   "Time",
+  "Percentage",
   "Fraction",
   "Scientific",
   "Text",
@@ -1705,12 +1710,33 @@ const SPECIAL_FORMAT_TYPES = [
 // plays that same role instead.
 const NUMBER_FORMAT_SAMPLE_VALUE = 1234.5;
 
+// The one-line description Excel's Format Cells shows under the Sample for each category (its own
+// wording where the user's screenshot showed it — "General format cells have no specific number
+// format." — and Excel's standard text for the rest).
+const NUMBER_FORMAT_DESCRIPTIONS = {
+  General: "General format cells have no specific number format.",
+  Number: "Number is used for general display of numbers. Currency and Accounting offer specialized formatting for monetary value.",
+  Currency: "Currency formats are used for general monetary values. Use Accounting formats to align decimal points in a column.",
+  Accounting: "Accounting formats line up the currency symbols and decimal points in a column.",
+  Date: "Date formats display date and time serial numbers as date values.",
+  Time: "Time formats display date and time serial numbers as time values.",
+  Percentage: "Percentage formats multiply the cell value by 100 and display the result with a percent symbol.",
+  Text: "Text format cells are treated as text even when a number is in the cell. The cell is displayed exactly as entered.",
+  Special: "Special formats are useful for tracking list and database values.",
+  Custom: "Type the number format code, using one of the existing codes as a starting point.",
+};
+
 // Excel's real "Format Cells" dialog (opened via Value Field Settings' own "Number Format…"
 // button) — a Sample preview above a Category list, not a flat inline dropdown (extended
 // 2026-10-05, against screenshots of that real dialog). Shares the exact same formatNumber()
 // utils/numberFormat.js already uses for the live grid, so the preview here is never out of sync
 // with what the grid will actually show.
-export function NumberFormatEditor({ format, onUpdateFormat, onBack }) {
+export function NumberFormatEditor({ format: initialFormat, onUpdateFormat, onBack, onDone }) {
+  // Like Excel's Format Cells dialog, nothing applies until OK — edits stay in this draft, and
+  // Cancel just leaves (2026-10-14, against screenshots of the real dialog). onUpdateFormat gets the
+  // WHOLE format on OK (both callers merge it over the current one, so a full object is safe).
+  const [format, setFormat] = useState(initialFormat);
+  const update = (patch) => setFormat((current) => ({ ...current, ...patch }));
   const needsDecimals = !["General", "Date", "Time", "Fraction", "Text", "Special", "Custom"].includes(format.type);
   const needsCurrencySymbol = format.type === "Currency" || format.type === "Accounting";
   const needsSpecialType = format.type === "Special";
@@ -1724,36 +1750,38 @@ export function NumberFormatEditor({ format, onUpdateFormat, onBack }) {
 
   return (
     <div className="space-y-3">
-      <button type="button" onClick={onBack} className="inline-flex items-center gap-1 text-xs font-medium text-muted hover:text-ink">
-        <ChevronLeft className="h-3.5 w-3.5" /> Back
-      </button>
-
-      <div>
-        <span className="mb-1 block text-xs font-medium text-muted">Sample</span>
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-ink">
-          {formatNumber(NUMBER_FORMAT_SAMPLE_VALUE, format)}
-        </div>
+      {/* Excel's dialog: title, one "Number" tab, the Category list on the LEFT and the Sample box,
+          the category's description and its options on the RIGHT, OK/Cancel at the bottom. */}
+      <p className="text-sm font-semibold text-ink">Format Cells</p>
+      <div className="border-b border-slate-200">
+        <span className="-mb-px inline-block border-b-2 border-gold px-0.5 pb-1.5 text-xs font-medium text-gold-strong">Number</span>
       </div>
 
-      <span className="block text-xs font-medium text-muted">Category:</span>
       <div className="flex gap-3">
-        <ul className="max-h-48 w-28 shrink-0 overflow-y-auto rounded-md border border-slate-200">
-          {NUMBER_FORMAT_CATEGORIES.map((category) => (
-            <li key={category}>
-              <button
-                type="button"
-                onClick={() => onUpdateFormat({ type: category })}
-                className={`block w-full px-2 py-1.5 text-left text-xs ${
-                  format.type === category ? "bg-gold text-white" : "text-ink hover:bg-slate-100"
-                }`}
-              >
-                {category}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="shrink-0">
+          <span className="mb-1 block text-xs font-medium text-muted">Category:</span>
+          <ul className="max-h-56 w-28 overflow-y-auto rounded-md border border-slate-200">
+            {NUMBER_FORMAT_CATEGORIES.map((category) => (
+              <li key={category}>
+                <button
+                  type="button"
+                  onClick={() => update({ type: category })}
+                  className={`block w-full px-2 py-1 text-left text-xs ${format.type === category ? "bg-gold text-white" : "text-ink hover:bg-slate-100"}`}
+                >
+                  {category}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
 
-        <div className="flex-1 space-y-2">
+        <div className="min-w-0 flex-1 space-y-2">
+          <div>
+            <span className="mb-1 block text-xs font-medium text-muted">Sample</span>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-ink">
+              {formatNumber(NUMBER_FORMAT_SAMPLE_VALUE, format)}
+            </div>
+          </div>
           {needsDecimals && (
             <div>
               <span className="mb-1 block text-xs font-medium text-muted">Decimal places</span>
@@ -1762,7 +1790,7 @@ export function NumberFormatEditor({ format, onUpdateFormat, onBack }) {
                 min={0}
                 max={10}
                 value={format.decimalPlaces}
-                onChange={(e) => onUpdateFormat({ decimalPlaces: Number(e.target.value) })}
+                onChange={(e) => update({ decimalPlaces: Number(e.target.value) })}
                 className="input-field w-20 py-1.5 text-sm"
               />
             </div>
@@ -1770,12 +1798,9 @@ export function NumberFormatEditor({ format, onUpdateFormat, onBack }) {
           {needsCurrencySymbol && (
             <div>
               <span className="mb-1 block text-xs font-medium text-muted">Symbol</span>
-              {/* w-full explicitly — unlike every other control in this panel (the Decimal Places
-                  input, the Category list), a plain <select> with no width class sizes itself to its
-                  OWN selected option's text, not its container. "(None)"/short currency codes never
-                  exposed this; a longer label like "EGP — Egyptian Pound" pushed the box wider than
-                  this narrow flex-1 column and out past the panel's own right edge (caught live,
-                  2026-10-06, "دي بايظة"). */}
+              {/* w-full explicitly — a plain <select> with no width class sizes itself to its OWN
+                  selected option's text, and a long label like "EGP — Egyptian Pound" pushed it out
+                  past this narrow column (caught live, 2026-10-06). */}
               <select
                 className={`${nativeSelectClass} w-full`}
                 value={isCustomSymbol ? "__custom__" : format.currencySymbol}
@@ -1784,7 +1809,7 @@ export function NumberFormatEditor({ format, onUpdateFormat, onBack }) {
                     setForceCustomSymbol(true);
                   } else {
                     setForceCustomSymbol(false);
-                    onUpdateFormat({ currencySymbol: e.target.value });
+                    update({ currencySymbol: e.target.value });
                   }
                 }}
               >
@@ -1799,7 +1824,7 @@ export function NumberFormatEditor({ format, onUpdateFormat, onBack }) {
                 <input
                   type="text"
                   value={format.currencySymbol}
-                  onChange={(e) => onUpdateFormat({ currencySymbol: e.target.value })}
+                  onChange={(e) => update({ currencySymbol: e.target.value })}
                   placeholder="Type a symbol…"
                   className="input-field mt-1.5 w-full py-1.5 text-sm"
                 />
@@ -1809,14 +1834,7 @@ export function NumberFormatEditor({ format, onUpdateFormat, onBack }) {
           {needsSpecialType && (
             <div>
               <span className="mb-1 block text-xs font-medium text-muted">Type</span>
-              {/* Same narrow flex-1 column, same no-width-class bug as the Symbol select above —
-                  SPECIAL_FORMAT_TYPES labels (e.g. "Social Security Number") are long enough to
-                  trigger it too. */}
-              <select
-                className={`${nativeSelectClass} w-full`}
-                value={format.specialType ?? "ZipCode"}
-                onChange={(e) => onUpdateFormat({ specialType: e.target.value })}
-              >
+              <select className={`${nativeSelectClass} w-full`} value={format.specialType ?? "ZipCode"} onChange={(e) => update({ specialType: e.target.value })}>
                 {SPECIAL_FORMAT_TYPES.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
@@ -1831,16 +1849,30 @@ export function NumberFormatEditor({ format, onUpdateFormat, onBack }) {
               <input
                 type="text"
                 value={format.customFormatCode ?? ""}
-                onChange={(e) => onUpdateFormat({ customFormatCode: e.target.value })}
+                onChange={(e) => update({ customFormatCode: e.target.value })}
                 placeholder="#,##0.00"
                 className="input-field w-full py-1.5 text-sm"
               />
             </div>
           )}
-          {!needsDecimals && !needsCurrencySymbol && !needsSpecialType && !needsCustomCode && (
-            <p className="text-xs text-muted">No further options for this category.</p>
-          )}
+          {NUMBER_FORMAT_DESCRIPTIONS[format.type] && <p className="text-xs text-muted">{NUMBER_FORMAT_DESCRIPTIONS[format.type]}</p>}
         </div>
+      </div>
+
+      <div className="flex justify-end gap-2 border-t border-slate-100 pt-2">
+        <button
+          type="button"
+          onClick={() => {
+            onUpdateFormat(format);
+            (onDone ?? onBack)();
+          }}
+          className="btn-primary px-3 py-1 text-xs"
+        >
+          OK
+        </button>
+        <button type="button" onClick={onBack} className="btn-secondary px-3 py-1 text-xs">
+          Cancel
+        </button>
       </div>
     </div>
   );
@@ -1924,7 +1956,6 @@ export function ConditionalFormatEditor({ format, onUpdate, onBack }) {
 function ValuePill({
   v,
   onUpdate,
-  onUpdateFormat,
   onRemove,
   onDropReorder,
   rows,
@@ -2066,7 +2097,7 @@ function ValuePill({
               onBack={() => setPanel("menu")}
             />
           ) : (
-            <ValueFieldSettingsPanel v={v} onUpdate={onUpdate} onUpdateFormat={onUpdateFormat} onBack={() => setPanel("menu")} rows={rows} />
+            <ValueFieldSettingsPanel v={v} onUpdate={onUpdate} onBack={() => setPanel("menu")} onDone={close} rows={rows} />
           )
         }
       </Popover>
@@ -2082,16 +2113,51 @@ function ValuePill({
 // panel-switching the CALLER uses around it (ValuePill's own "menu"/"settings"/"conditionalFormat",
 // or PivotGrid's context menu's own root/showValuesAs) — `onBack` is the only thing the caller
 // controls, fired when this dialog's own top-level Back button is pressed.
-export function ValueFieldSettingsPanel({ v, onUpdate, onUpdateFormat, onBack, rows }) {
-  const format = v.format ?? DEFAULT_FORMAT;
-  // Excel's own Base Field/Base Item picker isn't PercentOf-only — Difference From and % Difference
-  // From can ALSO target a specific named row instead of their default "(previous)" (extended
-  // 2026-10-05, see MdxPivotQueryBuilder.ValidateShowValuesAs's own WHY comment). Only PercentOf
-  // actually REQUIRES a choice here; for the other two, leaving Base Field unset keeps "(previous)".
-  const showsBaseItemPicker = v.showValuesAs === "PercentOf" || v.showValuesAs === "DifferenceFrom" || v.showValuesAs === "PercentDifferenceFrom";
-  const requiresBaseItem = v.showValuesAs === "PercentOf";
+// Excel's "(previous)" Base item for Difference From / % Difference From — stored as baseField null
+// (the backend's own default for those two, see MdxPivotQueryBuilder.ValidateShowValuesAs).
+const PREVIOUS_BASE_ITEM = "__previous__";
+
+// A plain bordered list box, Excel's own control for these choices (not a dropdown) — one row per
+// option, the selected one highlighted, greyed out and inert when `disabled`.
+function ListBox({ options, value, onSelect, disabled = false, className = "" }) {
+  return (
+    <ul className={`overflow-y-auto rounded-md border border-slate-200 ${disabled ? "bg-slate-50 opacity-60" : "bg-white"} ${className}`}>
+      {options.map((opt) => (
+        <li key={opt.value}>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onSelect(opt.value)}
+            className={`block w-full truncate px-2 py-0.5 text-left text-xs ${
+              opt.value === value ? (disabled ? "bg-slate-300 text-ink" : "bg-gold text-white") : disabled ? "text-muted" : "text-ink hover:bg-slate-100"
+            }`}
+          >
+            {opt.label}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
+  // Like Excel's dialog, nothing applies until OK (2026-10-14, against screenshots of the real
+  // Value Field Settings dialog) — every edit, Number Format's included, stays in this draft; OK
+  // sends it in ONE onUpdate call, Cancel just leaves. A Difference From with no base field is shown
+  // the way Excel shows it: the first Rows field with "(previous)" picked.
+  const [draft, setDraft] = useState(() =>
+    (v.showValuesAs === "DifferenceFrom" || v.showValuesAs === "PercentDifferenceFrom") && !v.baseField
+      ? { ...v, baseField: rows[0] ?? null, baseItem: PREVIOUS_BASE_ITEM }
+      : v,
+  );
+  const patchDraft = (patch) => setDraft((current) => ({ ...current, ...patch }));
+  const format = draft.format ?? DEFAULT_FORMAT;
+  // Base field/item only mean something for these three; Excel keeps both lists on screen anyway,
+  // just greyed out.
+  const usesBase = draft.showValuesAs === "PercentOf" || draft.showValuesAs === "DifferenceFrom" || draft.showValuesAs === "PercentDifferenceFrom";
+  const allowsPrevious = draft.showValuesAs === "DifferenceFrom" || draft.showValuesAs === "PercentDifferenceFrom";
   const isDimensionField = v.field.startsWith("[");
-  const dimensionAggregation = v.dimensionAggregation ?? "Count";
+  const dimensionAggregation = draft.dimensionAggregation ?? "Count";
   const sourceName = isDimensionField ? formatDimensionName(v.field) : v.field;
   const computedLabel = isDimensionField ? `${dimensionAggregation} of ${sourceName}` : sourceName;
   const [panel, setPanel] = useState("settings");
@@ -2108,7 +2174,7 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onUpdateFormat, onBack, r
   // Base item options come from the SAME member-search endpoint FilterRow uses — only fetched once
   // a Base field is actually chosen, and re-fetched whenever it changes.
   useEffect(() => {
-    if (!showsBaseItemPicker || !v.baseField) {
+    if (!usesBase || !draft.baseField) {
       setBaseItemOptions([]);
       return;
     }
@@ -2116,7 +2182,7 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onUpdateFormat, onBack, r
     const controller = new AbortController();
     setLoadingBaseItems(true);
     setBaseItemsFailed(false);
-    getMembers(v.baseField, undefined, controller.signal)
+    getMembers(draft.baseField, undefined, controller.signal)
       .then((members) => {
         if (!cancelled) setBaseItemOptions(members);
       })
@@ -2130,36 +2196,54 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onUpdateFormat, onBack, r
       cancelled = true;
       controller.abort();
     };
-  }, [showsBaseItemPicker, v.baseField, baseItemsRetryToken]);
+  }, [usesBase, draft.baseField, baseItemsRetryToken]);
 
   if (panel === "numberFormat") {
-    return <NumberFormatEditor format={format} onUpdateFormat={onUpdateFormat} onBack={() => setPanel("settings")} />;
+    // Format Cells opens over this dialog; its OK only updates the draft (Excel applies both on
+    // this dialog's own OK).
+    return <NumberFormatEditor format={format} onUpdateFormat={(next) => patchDraft({ format: next })} onBack={() => setPanel("settings")} />;
   }
+
+  const apply = () => {
+    const previous = draft.baseItem === PREVIOUS_BASE_ITEM;
+    const patch = {
+      customLabel: draft.customLabel || null,
+      showValuesAs: draft.showValuesAs,
+      baseField: usesBase && !previous ? draft.baseField : null,
+      baseItem: usesBase && !previous ? (draft.baseItem ?? "") : "",
+      ...(isDimensionField ? { dimensionAggregation } : {}),
+      ...(draft.format ? { format: draft.format } : {}),
+    };
+    // % of Grand Total and Index both divide by the Grand Total — MdxPivotQueryBuilder rejects them
+    // without it (see ValidateShowValuesAs), so they turn Grand Totals on, the way Excel does. It
+    // rides along in the SAME onUpdate call (two calls would each build off the same stale request).
+    const requireGrandTotals = draft.showValuesAs === "PercentOfGrandTotal" || draft.showValuesAs === "Index";
+    onUpdate(patch, { requireGrandTotals });
+    (onDone ?? onBack)();
+  };
+  // % Of needs a real base item before OK can apply (the backend rejects it otherwise).
+  const canApply = !(draft.showValuesAs === "PercentOf" && (!draft.baseField || !draft.baseItem || draft.baseItem === PREVIOUS_BASE_ITEM));
 
   return (
     <div className="space-y-3">
-      <button type="button" onClick={onBack} className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-muted hover:text-ink">
-        <ChevronLeft className="h-3.5 w-3.5" /> Back
-      </button>
-      {/* Matches Excel's own "Value Field Settings" dialog shape: Source Name (plain field,
-          read-only) + Custom Name (editable, defaults to the computed "<Aggregation> of
-          <field>" label) sit ABOVE the tab strip, same as the real dialog — flagged live,
-          2026-10-04/05, against screenshots of that real dialog. */}
-      <div className="space-y-1 rounded-md bg-slate-50 p-2">
+      <p className="text-sm font-semibold text-ink">Value Field Settings</p>
+      {/* Matches Excel's own dialog: Source Name (read-only) and Custom Name (editable, defaults to
+          the computed "<Aggregation> of <field>" label) ABOVE the tab strip. */}
+      <div className="space-y-1.5">
         <div className="flex items-center gap-2 text-xs">
           <span className="font-medium text-muted">Source Name:</span>
           <span className="text-ink">{sourceName}</span>
         </div>
-        <div>
-          <span className="mb-1 block text-xs font-medium text-muted">Custom Name</span>
+        <label className="flex items-center gap-2 text-xs">
+          <span className="shrink-0 font-medium text-muted">Custom Name:</span>
           <input
             type="text"
-            className="input-field w-full py-1.5 text-sm"
-            value={v.customLabel ?? ""}
+            className="input-field min-w-0 flex-1 py-1 text-sm"
+            value={draft.customLabel ?? ""}
             placeholder={computedLabel}
-            onChange={(e) => onUpdate({ customLabel: e.target.value || null })}
+            onChange={(e) => patchDraft({ customLabel: e.target.value || null })}
           />
-        </div>
+        </label>
       </div>
 
       <div className="flex gap-4 border-b border-slate-200">
@@ -2181,54 +2265,49 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onUpdateFormat, onBack, r
       </div>
 
       {settingsTab === "summarize" ? (
-        isDimensionField ? (
-          <div>
-            <p className="mb-2 text-xs text-muted">Choose the type of calculation to use to summarize this field.</p>
-            <select className={`${nativeSelectClass} w-full`} value={dimensionAggregation} onChange={(e) => onUpdate({ dimensionAggregation: e.target.value })}>
-              {["Count", "Sum", "Average", "Max", "Min"].map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : (
-          // Real cube measures come with their aggregation pre-built into the cube itself —
-          // confirmed live against the real cube (see PivotModels.PivotValueField's own WHY
-          // comment) — there's no field-level value to re-aggregate here the way Excel's own
-          // generic (non-OLAP) PivotTable can.
-          <p className="text-xs text-muted">This is a real cube measure — its calculation is already built into the cube and can&apos;t be changed here.</p>
-        )
+        <div>
+          <p className="mb-1 text-xs font-semibold text-ink">Summarize value field by</p>
+          <p className="mb-2 text-xs text-muted">Choose the type of calculation that you want to use to summarize data from the selected field</p>
+          {isDimensionField ? (
+            // Excel's list order (Sum, Count, Average, Max, Min, …) — only the calculations the
+            // backend can run are listed (Product/StdDev/Var aren't supported yet).
+            <ListBox
+              className="max-h-28"
+              options={["Sum", "Count", "Average", "Max", "Min"].map((opt) => ({ value: opt, label: opt }))}
+              value={dimensionAggregation}
+              onSelect={(opt) => patchDraft({ dimensionAggregation: opt })}
+            />
+          ) : (
+            // Real cube measures come with their aggregation pre-built into the cube itself —
+            // confirmed live against the real cube (see PivotModels.PivotValueField's own WHY
+            // comment) — there's no field-level value to re-aggregate here the way Excel's own
+            // generic (non-OLAP) PivotTable can.
+            <p className="text-xs text-muted">This is a real cube measure — its calculation is already built into the cube and can&apos;t be changed here.</p>
+          )}
+        </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-ink">Show values as</p>
           <select
             className={`${nativeSelectClass} w-full`}
-            value={v.showValuesAs}
+            value={draft.showValuesAs}
             onChange={(e) => {
               const next = e.target.value;
-              // Both patches must land in ONE onUpdate call — two separate onChange calls would
-              // each build off the same stale `v`/`value` closure, so the second would silently
-              // discard the first (same race already caught and fixed in PivotGrid.jsx's own Show
-              // Values As flyout, missed here when this panel was extracted out of ValuePill — fixed
-              // now too, 2026-10-06). requireGrandTotals is a THIRD thing that needs the same
-              // one-call treatment (it patches request.grandTotals, a level up from this value
-              // field), so it rides along as a second argument instead of a separate onRequireGrandTotals
-              // call — onUpdate's real implementations (FieldPicker.jsx's updateValue,
-              // PivotGrid.jsx's own) fold it into the SAME onChange they already make.
               const patch = { showValuesAs: next };
               // Only auto-switch away from the untouched default — never overrides a format the
-              // user already picked on purpose (e.g. they want a percent ratio shown as plain
-              // Number for some reason).
+              // user already picked on purpose.
               if (PERCENT_SHOW_VALUES_AS.has(next) && format.type === "General") {
                 patch.format = { ...format, type: "Percentage" };
               }
-              // % of Grand Total and Index both divide by the Grand Total — MdxPivotQueryBuilder
-              // rejects them outright without it (see ValidateShowValuesAs), the same way real
-              // Excel auto-enables Grand Totals the moment you pick either of these rather than
-              // leaving you to hit a validation error yourself (flagged live, 2026-10-06, after
-              // exactly that error surfaced with no indication of what to do about it).
-              const requireGrandTotals = next === "PercentOfGrandTotal" || next === "Index";
-              onUpdate(patch, { requireGrandTotals });
+              // Excel pre-selects the first base field and, where it exists, "(previous)".
+              const nextUsesBase = next === "PercentOf" || next === "DifferenceFrom" || next === "PercentDifferenceFrom";
+              if (nextUsesBase && !draft.baseField) patch.baseField = rows[0] ?? null;
+              if (next === "DifferenceFrom" || next === "PercentDifferenceFrom") {
+                if (!draft.baseItem) patch.baseItem = PREVIOUS_BASE_ITEM;
+              } else if (draft.baseItem === PREVIOUS_BASE_ITEM) {
+                patch.baseItem = "";
+              }
+              patchDraft(patch);
             }}
           >
             {SHOW_VALUES_AS_OPTIONS.map((opt) => (
@@ -2237,65 +2316,58 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onUpdateFormat, onBack, r
               </option>
             ))}
           </select>
-          {showsBaseItemPicker && (
-            <div className="space-y-2 rounded-md bg-slate-50 p-2">
-              <div>
-                <span className="mb-1 block text-xs font-medium text-muted">Base field (Rows)</span>
-                {/* Same no-width-class bug as the Symbol select — a real field's display name has no
-                    length limit. */}
-                <select className={`${nativeSelectClass} w-full`} value={v.baseField ?? ""} onChange={(e) => onUpdate({ baseField: e.target.value || null, baseItem: "" })}>
-                  {/* Difference From/% Difference From can leave this as their own default
-                      "(previous)" base — PercentOf has no such fallback, so it must actually
-                      pick a field. */}
-                  <option value="">{requiresBaseItem ? "Choose a row field…" : "(previous)"}</option>
-                  {rows.map((field) => (
-                    <option key={field} value={field}>
-                      {formatDimensionName(field)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {v.baseField && baseItemsFailed && (
-                <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  <span>Couldn't load values — the cube may be busy.</span>
-                  <button
-                    type="button"
-                    onClick={() => setBaseItemsRetryToken((t) => t + 1)}
-                    className="shrink-0 rounded-lg border border-rose-300 px-2 py-1 text-xs font-medium hover:bg-rose-100"
-                  >
+          {/* Excel's two side-by-side lists, always on screen and greyed out when the chosen
+              calculation doesn't use them. The base field is a Rows field (the backend's rule). */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="min-w-0">
+              <span className={`mb-1 block text-xs font-medium ${usesBase ? "text-muted" : "text-muted/60"}`}>Base field:</span>
+              <ListBox
+                className="h-28"
+                disabled={!usesBase}
+                options={rows.filter((f) => f !== MEASURES_PLACEHOLDER).map((field) => ({ value: field, label: formatDimensionName(field) }))}
+                value={draft.baseField}
+                onSelect={(field) => patchDraft({ baseField: field, baseItem: allowsPrevious ? PREVIOUS_BASE_ITEM : "" })}
+              />
+            </div>
+            <div className="min-w-0">
+              <span className={`mb-1 block text-xs font-medium ${usesBase ? "text-muted" : "text-muted/60"}`}>Base item:</span>
+              {usesBase && draft.baseField && baseItemsFailed ? (
+                <div className="flex h-28 flex-col items-start justify-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 text-xs text-rose-700">
+                  <span>Couldn&apos;t load values — the cube may be busy.</span>
+                  <button type="button" onClick={() => setBaseItemsRetryToken((t) => t + 1)} className="rounded border border-rose-300 px-2 py-0.5 font-medium hover:bg-rose-100">
                     Retry
                   </button>
                 </div>
-              )}
-              {v.baseField && !baseItemsFailed && (
-                <div>
-                  <span className="mb-1 block text-xs font-medium text-muted">Base item</span>
-                  {/* Same no-width-class bug — a real member's own label has no length limit either. */}
-                  <select className={`${nativeSelectClass} w-full`} value={v.baseItem ?? ""} onChange={(e) => onUpdate({ baseItem: e.target.value })} disabled={loadingBaseItems}>
-                    <option value="">{loadingBaseItems ? "Loading…" : "Choose a value…"}</option>
-                    {baseItemOptions.map((member) => (
-                      <option key={member} value={member}>
-                        {member}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              ) : (
+                <ListBox
+                  className="h-28"
+                  disabled={!usesBase || loadingBaseItems}
+                  options={[
+                    ...(allowsPrevious ? [{ value: PREVIOUS_BASE_ITEM, label: "(previous)" }] : []),
+                    ...(loadingBaseItems ? [{ value: "__loading__", label: "Loading…" }] : baseItemOptions.map((m) => ({ value: m, label: m === "" ? "(blank)" : m }))),
+                  ]}
+                  value={draft.baseItem}
+                  onSelect={(item) => patchDraft({ baseItem: item })}
+                />
               )}
             </div>
-          )}
+          </div>
         </div>
       )}
 
-      {/* Excel's own "Number Format…" button, sitting below the tab strip (not inside either tab)
-          — opens the SEPARATE Format Cells dialog, same relationship the real Value Field Settings
-          dialog has with it. */}
-      <div className="flex items-center justify-between gap-2 rounded-md bg-slate-50 p-2">
-        <span className="text-xs text-muted">
-          Format: <span className="font-medium text-ink">{format.type}</span>
-        </span>
+      {/* Excel's bottom row: "Number Format" on the left (opens Format Cells), OK / Cancel on the right. */}
+      <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
         <button type="button" onClick={() => setPanel("numberFormat")} className="btn-secondary px-2 py-1 text-xs">
-          Number Format…
+          Number Format
         </button>
+        <div className="flex gap-2">
+          <button type="button" onClick={apply} disabled={!canApply} className="btn-primary px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50">
+            OK
+          </button>
+          <button type="button" onClick={onBack} className="btn-secondary px-3 py-1 text-xs">
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -2367,11 +2439,6 @@ export default function FieldPicker({
     const copy = [...value.values];
     copy[index] = { ...copy[index], ...patch };
     onChange({ ...value, values: copy, ...(options.requireGrandTotals ? { grandTotals: "RowsAndColumns" } : {}) });
-  };
-
-  const updateValueFormat = (index, patch) => {
-    const current = value.values[index].format ?? DEFAULT_FORMAT;
-    updateValue(index, { format: { ...current, ...patch } });
   };
 
   const removeValue = (index) => {
@@ -3086,7 +3153,6 @@ export default function FieldPicker({
                     v={v}
                     rows={value.rows}
                     onUpdate={(patch, options) => updateValue(index, patch, options)}
-                    onUpdateFormat={(patch) => updateValueFormat(index, patch)}
                     onRemove={() => removeValue(index)}
                     onDropReorder={(e) => handleValueRowDrop(e, index)}
                     onMoveTo={(zone) => moveField(v.field, "values", zone)}

@@ -540,9 +540,9 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
           />
         </div>
       ) : panel === "numberFormat" ? (
-        <NumberFormatEditor format={format} onUpdateFormat={updateFormat} onBack={() => setPanel("root")} />
+        <NumberFormatEditor format={format} onUpdateFormat={updateFormat} onBack={() => setPanel("root")} onDone={onClose} />
       ) : panel === "settings" ? (
-        <ValueFieldSettingsPanel v={valueField} onUpdate={updateValue} onUpdateFormat={updateFormat} onBack={() => setPanel("root")} rows={request.rows} />
+        <ValueFieldSettingsPanel v={valueField} onUpdate={updateValue} onBack={() => setPanel("root")} onDone={onClose} rows={request.rows} />
       ) : panel === "pivotTableOptions" ? (
         <div className="space-y-3">
           <button
