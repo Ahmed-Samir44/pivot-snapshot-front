@@ -11,19 +11,85 @@ import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
 
 // One placed field pill (Rows or Columns) — its own component, not inlined in the .map() below,
 // for the same reason it always was (hooks can't live inside a loop whose length changes).
-function PlacedFieldPill({ fullPath, dragSourceKey, onDragStart, onPillDrop, onRemove, contextMenuTargets, onMoveTo }) {
-  // Σ Values can move to the OTHER dimension axis (Rows<->Columns) but never to Filters — it isn't
-  // a real field, so "Move to Filters" is dropped for it specifically, unlike every other target.
+function PlacedFieldPill({
+  fullPath,
+  dragSourceKey,
+  onDragStart,
+  onPillDrop,
+  onRemove,
+  contextMenuTargets,
+  onMoveTo,
+  isFirst,
+  isLast,
+  onMoveUp,
+  onMoveDown,
+  onMoveToBeginning,
+  onMoveToEnd,
+  // Real Excel's per-field "Field Settings…" (2026-10-13) — only passed for Rows (Subtotals is a
+  // Rows-only feature, see PivotBuilder.jsx's own call site); undefined here means "don't show this
+  // menu item at all" rather than showing a non-functional one, so a Columns pill's menu stays
+  // exactly as it was. { reportDefault, overrides, onChange(field, patch) } — see FieldPicker.jsx.
+  fieldSettings,
+  // Custom Name / Layout & Print half of the same dialog (PLAN 6 Phase 2) — a SEPARATE prop from
+  // fieldSettings because it's backed by different state one level up (see FieldPicker.jsx's own
+  // WHY comment on its fieldLayout prop). { overrides, onChange(field, patch) }.
+  fieldLayout,
+  // Show Items With No Data, per field (PLAN 7, EXPERIMENTAL) — a THIRD prop, back in
+  // value/onChange like fieldSettings (query-affecting), not the sibling fieldLayout. { fields,
+  // onChange(field, checked) }.
+  fieldShowNoData,
+}) {
+  // "menu" (the root Move/Remove list) or "subtotals" (the Field Settings sub-panel) — reset to
+  // "menu" from the trigger button's own onClick below (same pattern FieldHeaderMenu's own
+  // setPanel("shortcuts") already uses in PivotGrid.jsx), not on unmount, since this component
+  // itself doesn't unmount/remount across a close/reopen the way the Popover's PANEL content does.
+  const [panel, setPanel] = useState("menu");
+  // Σ Values can move to the OTHER dimension axis (Rows<->Columns) but never to Filters or Values
+  // itself — it isn't a real field, so both are dropped for it specifically, unlike every other
+  // target.
   const isMeasuresPlaceholder = fullPath === MEASURES_PLACEHOLDER;
-  const moveTargets = isMeasuresPlaceholder ? contextMenuTargets.filter((t) => t.zoneKey !== "filters") : contextMenuTargets;
+  const moveTargets = isMeasuresPlaceholder
+    ? contextMenuTargets.filter((t) => t.zoneKey !== "filters" && t.zoneKey !== "values")
+    : contextMenuTargets;
+  // Menu shape and order match a real Excel field pill's own dropdown exactly (confirmed live
+  // 2026-10-13 against a screenshot of it): Move Up/Down/Beginning/End first (grayed out at
+  // whichever ends don't apply, same as Excel does for a field that's already first/last/alone),
+  // then a divider, then the "Move to [other zone]" entries, then a final divider, then "Remove
+  // Field" (capitalized to match — this used to read "Remove field" with no divider before it and
+  // sat at the TOP of the menu instead, neither of which matched the real one), then "Field
+  // Settings…" last (PLAN 6, 2026-10-13) — opens a sub-panel instead of closing the menu, switching
+  // this pill's own `panel` state rather than calling onSelect+closeMenu like every other item.
+  // Excluded for Σ Values (not a real field, nothing to configure) and whenever the caller doesn't
+  // pass `fieldSettings` at all (Columns today — Subtotals is Rows-only, see this component's own
+  // prop comment).
   const menuItems = [
-    { label: "Remove field", onSelect: () => onRemove(fullPath) },
+    { label: "Move Up", onSelect: onMoveUp, disabled: isFirst },
+    { label: "Move Down", onSelect: onMoveDown, disabled: isLast },
+    { label: "Move to Beginning", onSelect: onMoveToBeginning, disabled: isFirst },
+    { label: "Move to End", onSelect: onMoveToEnd, disabled: isLast },
     ...(moveTargets.length > 0 ? [{ divider: true }] : []),
     ...moveTargets.map((target) => ({
       label: target.label,
       onSelect: () => onMoveTo(fullPath, target.zoneKey),
     })),
+    { divider: true },
+    { label: "Remove Field", onSelect: () => onRemove(fullPath) },
+    ...((fieldSettings || fieldLayout || fieldShowNoData) && !isMeasuresPlaceholder
+      ? [{ label: "Field Settings…", onSelect: () => setPanel("subtotals"), keepOpen: true }]
+      : []),
   ];
+
+  // overrides?. (not just fieldSettings?./fieldLayout?.) defends against a request/fieldLayouts
+  // state restored from a localStorage snapshot saved before these fields existed — same "don't
+  // trust an older persisted shape" caution as readPersistedBuilderState's own callers elsewhere;
+  // caught live right after fixing the sibling bug below (this component's outer function never
+  // actually forwarded fieldSettings to this child at all until now, so this code path had never
+  // run against real browser state before).
+  const currentSubtotal = fieldSettings?.overrides?.find((f) => f.field === fullPath);
+  const currentOverride = currentSubtotal?.position ?? null;
+  const currentFunctions = currentSubtotal?.functions ?? null;
+  const currentLayout = fieldLayout?.overrides?.find((f) => f.field === fullPath) ?? {};
+  const SUBTOTAL_FUNCTIONS = ["Sum", "Count", "Average", "Max", "Min"];
 
   return (
     <li
@@ -53,7 +119,10 @@ function PlacedFieldPill({ fullPath, dragSourceKey, onDragStart, onPillDrop, onR
         trigger={(toggle) => (
           <button
             type="button"
-            onClick={toggle}
+            onClick={() => {
+              setPanel("menu");
+              toggle();
+            }}
             className="flex w-full items-center justify-between gap-1 rounded border border-slate-300 bg-white px-2 py-1.5 text-left text-xs font-medium text-ink shadow-sm hover:bg-slate-50"
           >
             <span className="min-w-0 truncate">{formatDimensionName(fullPath)}</span>
@@ -61,27 +130,150 @@ function PlacedFieldPill({ fullPath, dragSourceKey, onDragStart, onPillDrop, onR
           </button>
         )}
       >
-        {(closeMenu) => (
-          <div className="flex flex-col gap-1 text-sm">
-            {menuItems.map((item, i) =>
-              item.divider ? (
-                <div key={`divider-${i}`} className="my-1 border-t border-slate-100" />
-              ) : (
-                <button
-                  key={item.label}
-                  type="button"
-                  onClick={() => {
-                    item.onSelect();
-                    closeMenu();
-                  }}
-                  className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
-                >
-                  {item.label}
-                </button>
-              ),
-            )}
-          </div>
-        )}
+        {(closeMenu) =>
+          panel === "subtotals" ? (
+            // Real Excel's own "Field Settings…" is a two-tab modal (Subtotals & Filters / Layout &
+            // Print) — rendered here as one scrolling panel instead of true tabs, matching this
+            // app's existing single-scroll-panel convention for every other "Field Settings"-style
+            // popover (ValueFieldSettingsPanel is the same shape, not tabbed). The Layout section
+            // below deliberately does NOT reproduce Excel's literal "Outline form / Tabular form"
+            // radio pair — this app's renderer treats Outline and Tabular identically (see
+            // HtmlSnapshotRenderer.cs's own WHY comment), so a field's only real per-field choice is
+            // whether it merges into a shared "compact" column with the next field or stays
+            // standalone; a fake radio reproducing a distinction this app can't actually render
+            // would be worse than an honestly narrower one.
+            <div className="flex max-h-80 flex-col gap-1 overflow-y-auto text-sm">
+              <button
+                type="button"
+                onClick={() => setPanel("menu")}
+                className="mb-1 inline-flex items-center gap-1 px-2 text-xs font-medium text-muted hover:text-ink"
+              >
+                <ChevronDown className="h-3.5 w-3.5 rotate-90" /> Back
+              </button>
+
+              {fieldLayout && (
+                <div className="px-2 pb-2">
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-muted">Custom Name</label>
+                  <input
+                    type="text"
+                    className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                    placeholder={formatDimensionName(fullPath)}
+                    value={currentLayout.customName ?? ""}
+                    onChange={(e) => fieldLayout.onChange(fullPath, { customName: e.target.value || null })}
+                  />
+                </div>
+              )}
+
+              {fieldSettings && (
+                <div className="px-2 pb-2">
+                  <p className="pb-1 text-xs font-bold uppercase tracking-wide text-muted">Subtotals</p>
+                  {[
+                    { key: "automatic", label: "Automatic", active: currentOverride !== "Off" && !currentFunctions },
+                    { key: "none", label: "None", active: currentOverride === "Off" },
+                    { key: "custom", label: "Custom", active: Boolean(currentFunctions) },
+                  ].map((opt) => (
+                    <label key={opt.key} className="flex cursor-pointer items-center gap-2 rounded-lg py-1.5 text-left hover:bg-gold/10">
+                      <input
+                        type="radio"
+                        className="h-3.5 w-3.5 accent-gold"
+                        checked={opt.active}
+                        onChange={() => {
+                          if (opt.key === "automatic") {
+                            fieldSettings.onChange(fullPath, { position: null, functions: null });
+                          } else if (opt.key === "none") {
+                            fieldSettings.onChange(fullPath, { position: "Off", functions: null });
+                          } else {
+                            fieldSettings.onChange(fullPath, { position: currentOverride === "Off" || !currentOverride ? "Bottom" : currentOverride, functions: currentFunctions ?? ["Sum"] });
+                          }
+                        }}
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
+                  {currentFunctions && (
+                    <div className="ml-5 flex flex-col gap-0.5 border-l border-slate-100 pl-2">
+                      {SUBTOTAL_FUNCTIONS.map((fn) => (
+                        <label key={fn} className="flex cursor-pointer items-center gap-2 py-0.5 text-left text-xs">
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 accent-gold"
+                            checked={currentFunctions.includes(fn)}
+                            onChange={(e) => {
+                              const next = e.target.checked ? [...currentFunctions, fn] : currentFunctions.filter((f) => f !== fn);
+                              fieldSettings.onChange(fullPath, { functions: next });
+                            }}
+                          />
+                          {fn}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {fieldLayout && (
+                <div className="px-2 pb-2">
+                  <p className="pb-1 text-xs font-bold uppercase tracking-wide text-muted">Layout</p>
+                  {[
+                    { key: "compact", label: "Compact form (merge with next field)", value: currentLayout.compact ?? false },
+                    { key: "repeatItemLabels", label: "Repeat item labels", value: currentLayout.repeatItemLabels ?? false },
+                    { key: "insertBlankLine", label: "Insert blank line after each item", value: currentLayout.insertBlankLine ?? false },
+                  ].map((opt) => (
+                    <label key={opt.key} className="flex cursor-pointer items-center gap-2 py-1 text-left">
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5 accent-gold"
+                        checked={opt.value}
+                        onChange={(e) => fieldLayout.onChange(fullPath, { [opt.key]: e.target.checked })}
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {fieldShowNoData && (
+                <div className="px-2 pb-2">
+                  <label className="flex cursor-pointer items-center gap-2 py-1 text-left">
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 accent-gold"
+                      checked={Boolean(fieldShowNoData.fields?.includes(fullPath))}
+                      onChange={(e) => fieldShowNoData.onChange(fullPath, e.target.checked)}
+                    />
+                    Show items with no data
+                  </label>
+                  {/* EXPERIMENTAL (PLAN 7, 2026-10-13) — this query-affecting checkbox's generated
+                      MDX hasn't been run against the real cube yet; see the plan file's own WHY
+                      comment. Flagged inline, not just in a WHY comment, so it's visible to whoever
+                      is testing it live, not just someone reading the source. */}
+                  <p className="pt-1 text-[11px] leading-snug text-muted">Experimental — verify against the real cube before relying on this.</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1 text-sm">
+              {menuItems.map((item, i) =>
+                item.divider ? (
+                  <div key={`divider-${i}`} className="my-1 border-t border-slate-100" />
+                ) : (
+                  <button
+                    key={item.label}
+                    type="button"
+                    disabled={item.disabled}
+                    onClick={() => {
+                      item.onSelect();
+                      if (!item.keepOpen) closeMenu();
+                    }}
+                    className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10 disabled:cursor-not-allowed disabled:text-muted/50 disabled:hover:bg-transparent"
+                  >
+                    {item.label}
+                  </button>
+                ),
+              )}
+            </div>
+          )
+        }
       </Popover>
     </li>
   );
@@ -161,10 +353,20 @@ export default function HierarchicalCubePathSelect({
   // 2026-09-28). Defaults to accepting everything so existing callers that never needed this are
   // unaffected.
   isFieldAccepted = () => true,
-  // Extra "Move to [zone]" entries for each pill's right-click menu, e.g.
-  // [{ zoneKey: "filters", label: "Move to Filters" }] — never includes Values, dimension fields
-  // can't go there. Defaults to none so callers that don't pass it just get "Remove field".
+  // Extra "Move to [zone]" entries for each pill's own dropdown menu, e.g.
+  // [{ zoneKey: "filters", label: "Move to Report Filter" }] — including "values" is fine, a
+  // dimension field CAN move there (it just becomes a Count/Sum measure, same as dragging it in —
+  // see FieldPicker.jsx's own moveField). Defaults to none so callers that don't pass it just get
+  // the Move Up/Down/Beginning/End + Remove Field items below.
   contextMenuTargets = [],
+  // Real Excel's per-field "Field Settings…" (2026-10-13) — forwarded straight through to each
+  // PlacedFieldPill below. NOTE: this outer component never actually destructured/forwarded
+  // fieldSettings before this fix (PLAN 6 Phase 2, 2026-10-13) — it was passed in from FieldPicker.jsx
+  // but silently dropped here, so the Phase 1 "Field Settings…" menu item never actually appeared;
+  // caught while adding fieldLayout alongside it.
+  fieldSettings,
+  fieldLayout,
+  fieldShowNoData,
 }) {
   const [step1, setStep1] = useState(null);
   const [step2Multi, setStep2Multi] = useState([]);
@@ -224,6 +426,17 @@ export default function HierarchicalCubePathSelect({
 
   const remove = (fullPath) => {
     onChange(value.filter((v) => v !== fullPath));
+  };
+
+  // Backs the pill menu's "Move Up"/"Move Down"/"Move to Beginning"/"Move to End" items (confirmed
+  // live 2026-10-13 against a real Excel screenshot of this exact menu — this app only had
+  // drag-to-reorder before, not these explicit commands). newIndex is clamped so "Move Up" from the
+  // very top or "Move Down" from the very bottom are no-ops rather than throwing — PlacedFieldPill
+  // disables those buttons anyway, this is just defense in depth.
+  const moveWithinList = (fullPath, newIndex) => {
+    const without = value.filter((v) => v !== fullPath);
+    const clamped = Math.max(0, Math.min(newIndex, without.length));
+    onChange([...without.slice(0, clamped), fullPath, ...without.slice(clamped)]);
   };
 
   const [dragOver, setDragOver] = useState(false);
@@ -358,9 +571,14 @@ export default function HierarchicalCubePathSelect({
           "stretch", which was blowing each pill up to fill that whole leftover height instead of
           leaving it empty below a normal-sized pill (caught live, 2026-09-23). Pinning both to
           "start" keeps the pills their natural size while the extra height still counts as part
-          of the droppable area (the <ul> itself still gets the drop handlers). */}
+          of the droppable area (the <ul> itself still gets the drop handlers).
+          min-h-[6.5rem] — kept matched to FieldPicker.jsx's own ZoneDropArea (Filters/Values), which
+          this component's Columns/Rows boxes must stay the same height as ("الاربع مربعات مش نفس
+          الطول"). Both were cut to 2.75rem chasing a whole-page scrollbar bug that, in the end,
+          turned out to be caused by AppShell.jsx's own padding instead — once that was fixed
+          directly there, both got restored past the original 6rem, to 6.5rem, on request. */}
       <ul
-        className={`flex min-h-[6rem] flex-1 flex-wrap content-start gap-1.5 rounded-lg ${value.length === 0 ? "items-center" : "items-start"} ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
+        className={`flex min-h-[6.5rem] flex-1 flex-wrap content-start gap-1.5 rounded-lg ${value.length === 0 ? "items-center" : "items-start"} ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
           value.length === 0 ? "border-2 border-dashed border-slate-200 px-2" : ""
         }`}
         onDragOver={dragSourceKey && onFieldDropped ? handleDragOver : undefined}
@@ -368,7 +586,7 @@ export default function HierarchicalCubePathSelect({
         onDrop={dragSourceKey && onFieldDropped ? handleDrop : undefined}
       >
         {value.length === 0 && <span className="text-xs text-muted">Drop a field here</span>}
-        {value.map((fullPath) => (
+        {value.map((fullPath, index) => (
           <PlacedFieldPill
             key={fullPath}
             fullPath={fullPath}
@@ -378,6 +596,15 @@ export default function HierarchicalCubePathSelect({
             onRemove={remove}
             contextMenuTargets={contextMenuTargets}
             onMoveTo={(field, toZone) => dragSourceKey && onFieldDropped && onFieldDropped(field, dragSourceKey, toZone)}
+            isFirst={index === 0}
+            isLast={index === value.length - 1}
+            onMoveUp={() => moveWithinList(fullPath, index - 1)}
+            onMoveDown={() => moveWithinList(fullPath, index + 1)}
+            onMoveToBeginning={() => moveWithinList(fullPath, 0)}
+            onMoveToEnd={() => moveWithinList(fullPath, value.length - 1)}
+            fieldSettings={fieldSettings}
+            fieldLayout={fieldLayout}
+            fieldShowNoData={fieldShowNoData}
           />
         ))}
       </ul>

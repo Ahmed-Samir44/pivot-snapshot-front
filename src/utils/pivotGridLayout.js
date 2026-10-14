@@ -54,6 +54,27 @@ export function computeVisibleLevels(labels, previousLabels) {
   return visible;
 }
 
+// Real Excel's per-field "compact form" (PLAN 6 Phase 2, 2026-10-13) — groups consecutive row
+// levels into one shared physical column wherever compactFlags chains them together ("compact
+// form" pulls the NEXT field's labels into THIS field's own column). The old all-or-nothing
+// Compact/Tabular split is just the degenerate all-true/all-false case of this same loop. Mirrors
+// HtmlSnapshotRenderer.cs's BuildRowHeaderGroups exactly, so the live grid and a saved snapshot
+// never disagree on which fields end up sharing a column. The last level's own flag is never
+// consulted (nothing further to pull in).
+export function buildRowHeaderGroups(rowDepth, compactFlags) {
+  const groups = [];
+  let i = 0;
+  while (i < rowDepth) {
+    const start = i;
+    while (compactFlags[i] && i < rowDepth - 1) {
+      i += 1;
+    }
+    groups.push({ start, end: i });
+    i += 1;
+  }
+  return groups;
+}
+
 export function computeCompactVisibility(rowHeaders) {
   const result = [];
   let previousLabels = null;

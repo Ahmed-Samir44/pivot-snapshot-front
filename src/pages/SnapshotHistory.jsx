@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronRight, CirclePause, CirclePlay, Eye, FileSpreadsheet, Pencil, Trash2, X } from "lucide-react";
+import { ChevronRight, CirclePause, CirclePlay, Eye, FileSpreadsheet, Loader2, Pencil, Trash2, X } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import Modal from "../components/forms/Modal";
 import ConfirmModal from "../components/forms/ConfirmModal";
@@ -66,7 +66,7 @@ function useSelection() {
 // One row — used for pivots and versions alike, both Active and Deactivated lists — a bordered
 // card per row (not just a hover tint) so rows read as distinct items instead of a dense block of
 // text and icons running into each other (caught live 2026-09-23: "الشكل كله على بعضه").
-function ListRow({ label, sublabel, onClick, trailingIcon: TrailingIcon, actions, highlighted = false, checked, onToggleCheck }) {
+function ListRow({ label, sublabel, onClick, trailingIcon: TrailingIcon, actions, highlighted = false, checked, onToggleCheck, loading = false }) {
   return (
     <li className="flex items-center gap-1 rounded-xl border border-slate-100 py-1 pl-2 pr-2">
       <input
@@ -79,7 +79,7 @@ function ListRow({ label, sublabel, onClick, trailingIcon: TrailingIcon, actions
       <button
         type="button"
         onClick={onClick}
-        disabled={!onClick}
+        disabled={!onClick || loading}
         className={`flex flex-1 items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-left disabled:cursor-default disabled:hover:bg-transparent ${
           highlighted ? "bg-gold/20 font-semibold" : "hover:bg-slate-50"
         }`}
@@ -88,7 +88,17 @@ function ListRow({ label, sublabel, onClick, trailingIcon: TrailingIcon, actions
           <span className="font-medium text-ink">{label}</span>
           {sublabel && <span className="ml-2 text-xs text-muted">{sublabel}</span>}
         </span>
-        {TrailingIcon && <TrailingIcon className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />}
+        {/* Loading replaces the trailing icon entirely rather than sitting beside it — the eye icon
+            itself means "view this," so leaving it visible next to a spinner while the click is
+            already disabled (below) still reads as "nothing happened yet," which is exactly the
+            ambiguity that let a slow preview fetch get clicked several times over (requested live
+            2026-10-12: "بتاخد وقت طويل... بيخليها تتفتح كذا مرة" — no loading affordance at all
+            meant every repeat click fired its own getVersion() call). */}
+        {loading ? (
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gold-strong" aria-hidden="true" />
+        ) : (
+          TrailingIcon && <TrailingIcon className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
+        )}
       </button>
       <div className="flex shrink-0 items-center gap-1">{actions}</div>
     </li>
@@ -153,6 +163,10 @@ export default function SnapshotHistory() {
   // since showing the same version two different ways was just redundant.
   const [previewVersion, setPreviewVersion] = useState(null);
   const [previewError, setPreviewError] = useState(null);
+  // Which version's getVersion() fetch is currently in flight (its full result/HTML payload can be
+  // a slow Dataverse round-trip) — drives both the spinner on that row (ListRow's own `loading`
+  // prop) and re-click protection in openPreview below (see its own WHY comment).
+  const [loadingVersionId, setLoadingVersionId] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
 
@@ -212,6 +226,12 @@ export default function SnapshotHistory() {
   };
 
   const openPreview = async (versionId, versionNumber) => {
+    // Re-click guard — ListRow already disables the clicked row's own button while its spinner
+    // shows, but that alone doesn't stop a DIFFERENT row being clicked mid-fetch, or a double-click
+    // landing both calls before the first re-render disables anything. One fetch at a time, full
+    // stop, is the simplest correct rule here — a second click just gets dropped, not queued.
+    if (loadingVersionId) return;
+    setLoadingVersionId(versionId);
     setPreviewError(null);
     setExportError(null);
     try {
@@ -219,6 +239,8 @@ export default function SnapshotHistory() {
       setPreviewVersion({ ...version, versionNumber });
     } catch (err) {
       setPreviewError(err.message);
+    } finally {
+      setLoadingVersionId(null);
     }
   };
 
@@ -465,6 +487,7 @@ export default function SnapshotHistory() {
                 sublabel={new Date(v.createdAtUtc).toLocaleString()}
                 onClick={() => openPreview(v.id, v.versionNumber)}
                 trailingIcon={Eye}
+                loading={loadingVersionId === v.id}
                 checked={activeVersionSelection.ids.has(v.id)}
                 onToggleCheck={() => activeVersionSelection.toggle(v.id)}
                 actions={
@@ -514,6 +537,7 @@ export default function SnapshotHistory() {
                     sublabel={new Date(v.createdAtUtc).toLocaleString()}
                     onClick={() => openPreview(v.id, v.versionNumber)}
                     trailingIcon={Eye}
+                    loading={loadingVersionId === v.id}
                     checked={deactivatedVersionSelection.ids.has(v.id)}
                     onToggleCheck={() => deactivatedVersionSelection.toggle(v.id)}
                     actions={

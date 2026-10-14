@@ -139,7 +139,13 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                 badge shows 1 whenever the current choice isn't the "nothing" option, same "this is
                 currently set" affordance every other RibbonButton badge already uses. */}
             <RibbonButton icon={Sigma} label="Grand Totals" badge={request.grandTotals !== "Off" ? 1 : 0}>
-              {() => (
+              {/* `close` is Popover's own render-prop argument (see RibbonButton's own WHY comment
+                  on `{children}` just being Popover's content function) — previously ignored
+                  entirely, so picking an option never closed this dropdown; it just sat open until
+                  an unrelated outside click happened to catch it, reading as "stuck" (caught live,
+                  2026-10-13, "لما بدوس عليها بتهنج كدا شوية ومش بتتقفل" — real Excel's own dropdowns
+                  close immediately on picking an option). */}
+              {(close) => (
                 <div className="flex flex-col gap-1 text-sm">
                   {[
                     { value: "Off", label: "Off" },
@@ -150,7 +156,10 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                     <button
                       key={opt.value}
                       type="button"
-                      onClick={() => onChange({ ...request, grandTotals: opt.value })}
+                      onClick={() => {
+                        onChange({ ...request, grandTotals: opt.value });
+                        close();
+                      }}
                       className={`rounded-lg px-2 py-1.5 text-left ${request.grandTotals === opt.value ? "bg-gold/20 font-semibold text-gold-strong" : "hover:bg-gold/10"}`}
                     >
                       {opt.label}
@@ -160,7 +169,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
               )}
             </RibbonButton>
             <RibbonButton icon={Rows3} label="Subtotals" badge={request.subtotals !== "Off" ? 1 : 0}>
-              {() => {
+              {(close) => {
                 // request.rows can contain the Σ Values sentinel as a plain element when it sits in
                 // Rows — not a real grouping field, so it must not count toward the "2+ row fields"
                 // gate (caught 2026-10-06, full codebase review: Rows = [Hospital, "[Measures]"]
@@ -177,7 +186,10 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                         key={opt.value}
                         type="button"
                         disabled={opt.value !== "Off" && needsMoreRowFields}
-                        onClick={() => onChange({ ...request, subtotals: opt.value })}
+                        onClick={() => {
+                          onChange({ ...request, subtotals: opt.value });
+                          close();
+                        }}
                         className={`rounded-lg px-2 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-40 ${
                           request.subtotals === opt.value ? "bg-gold/20 font-semibold text-gold-strong" : "hover:bg-gold/10"
                         }`}
@@ -196,7 +208,10 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
         {tab === "analyze" && (
           <RibbonGroup label="Filter">
             <RibbonButton icon={LayoutGrid} label="Insert Slicer" badge={0}>
-              {() => (
+              {/* Same ignored-close bug as Grand Totals/Subtotals above, fixed the same way —
+                  picking a field here is a one-click action (it immediately adds the Slicer), so
+                  the popover should close right after, matching real Excel. */}
+              {(close) => (
                 <div className="w-56">
                   <input
                     type="text"
@@ -214,7 +229,10 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                         <button
                           key={d.field}
                           type="button"
-                          onClick={() => addSlicer(d.field)}
+                          onClick={() => {
+                            addSlicer(d.field);
+                            close();
+                          }}
                           className="block w-full rounded-lg px-2 py-1.5 text-left text-sm hover:bg-gold/10"
                         >
                           {d.displayName}
@@ -226,7 +244,8 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
               )}
             </RibbonButton>
             <RibbonButton icon={CalendarRange} label="Insert Timeline" badge={0}>
-              {() => (
+              {/* Same ignored-close bug as the dropdowns above, same fix. */}
+              {(close) => (
                 <div className="w-56">
                   {/* Real Excel never lists every raw day for a date field either — it auto-groups
                       into Year/Quarter/Month/Day instead. Picking a Month/Year-level field here
@@ -251,7 +270,10 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                         <button
                           key={d.field}
                           type="button"
-                          onClick={() => addTimeline(d.field)}
+                          onClick={() => {
+                            addTimeline(d.field);
+                            close();
+                          }}
                           className="block w-full rounded-lg px-2 py-1.5 text-left text-sm hover:bg-gold/10"
                         >
                           {d.displayName}

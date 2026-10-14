@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, ChevronLeft, Filter as FilterIcon, Table2, X } from "lucide-react";
 import Popover from "../forms/Popover";
 import ContextMenu from "../forms/ContextMenu";
@@ -9,7 +9,7 @@ import { SortEditor, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, Con
 import { formatNumber, formatForColumn } from "../../utils/numberFormat";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
-import { computeGroups, computeCompactVisibility } from "../../utils/pivotGridLayout";
+import { computeGroups, computeCompactVisibility, buildRowHeaderGroups } from "../../utils/pivotGridLayout";
 import { MEASURES_PLACEHOLDER, measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "../../utils/measuresPlacement";
 import { drillthroughPivot } from "../../services/pivotApi";
 
@@ -78,6 +78,8 @@ function FilterHeaderRow({ filter, index, request, onChange, dimensionOptions, s
               selectedValueOptions={selectedValueOptions}
               onChange={updateFilter}
               onRemove={removeFilter}
+              onClose={close}
+              hideFieldPicker={Boolean(filter.field)}
             />
           </div>
         )}
@@ -92,10 +94,14 @@ function FilterHeaderRow({ filter, index, request, onChange, dimensionOptions, s
 // edge (see the <th>/<td> className strings below for the gridlines themselves), requested live
 // 2026-09-28 ("نفس الشكل نفس الـ behaviours" — look AND behave like Excel's own PivotTable).
 function HeaderCell({ children, muted = false, isTotal = false }) {
+  // Header band is the app's own gold gradient now (see headerBg's own WHY comment) — white text
+  // throughout reads cleanly on it; muted (field-name labels, not real member captions) dims to
+  // white/75 instead of switching hue, and isTotal stays white but gets its own underline accent so
+  // a Grand Total column still stands out even though the whole band is already one strong color.
   return (
     <span
-      className={`flex items-center justify-center gap-1 text-sm font-semibold ${
-        muted ? "text-muted" : isTotal ? "text-gold-strong" : "text-ink"
+      className={`flex items-center justify-center gap-1 text-sm font-semibold text-white ${
+        muted ? "opacity-75" : isTotal ? "underline decoration-2 underline-offset-2" : ""
       }`}
     >
       {children}
@@ -164,9 +170,23 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
     onChange({ ...request, sort: null });
   };
 
-  const addFilterShortcut = () => onChange({ ...request, filters: [...request.filters, { field, mode: "Members", includedMembers: [] }] });
+  const existingFilter = request.filters.find((f) => f.field === field) ?? null;
+
+  // Reused by FilterRow's own OK (fieldLocked=true, see its own WHY comment) — adds a new filter
+  // entry for this field if none existed yet, or replaces the existing one, matching the backend's
+  // one-filter-per-field model (same shape updateFilter/addFilterShortcut already used before this).
+  const applyFieldFilter = (updatedFilter) => {
+    const exists = request.filters.some((f) => f.field === field);
+    const nextFilters = exists ? request.filters.map((f) => (f.field === field ? updatedFilter : f)) : [...request.filters, updatedFilter];
+    onChange({ ...request, filters: nextFilters });
+  };
 
   const removeFilter = () => onChange({ ...request, filters: request.filters.filter((f) => f.field !== field) });
+
+  // TopN/BottomN/GreaterThan/etc.'s own "Choose a measure…" dropdown needs this same shape
+  // FieldPicker.jsx's Filters zone already builds from value.values — mirrored here since
+  // FieldHeaderMenu only ever receives `request`, not a separate measureOptions prop.
+  const selectedValueOptions = request.values.filter((v) => v.field).map((v) => ({ value: v.field, label: v.field }));
 
   const toggleNoDataItems = (checked) =>
     onChange({
@@ -188,8 +208,13 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
             setPanel("shortcuts");
             toggle();
           }}
+          // text-muted (a gray meant for light backgrounds) had near-zero contrast against this
+          // header's own gold gradient band — every other muted label on this same band
+          // (HeaderCell, just above) already uses white-at-75%-opacity instead; this interactive
+          // button's trigger never matched that, just not noticed until a long raw field identifier
+          // made it obvious (caught live, 2026-10-13, "الheader لونه مش باين").
           className={`flex w-full items-center justify-center gap-1 text-sm font-semibold hover:text-gold ${
-            muted ? "text-muted" : isTotal ? "text-gold-strong" : "text-ink"
+            muted ? "text-white/75" : isTotal ? "text-gold-strong" : "text-ink"
           }`}
           title={`Sort or filter ${label}`}
         >
@@ -217,6 +242,30 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
               rows={request.rows}
               columns={request.columns}
               onChange={(patch) => onChange({ ...request, ...patch })}
+            />
+          </div>
+        ) : panel === "filter" ? (
+          <div>
+            <button
+              type="button"
+              onClick={() => setPanel("shortcuts")}
+              className="mb-2 inline-flex items-center gap-1 text-xs font-medium text-muted hover:text-ink"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" /> Back
+            </button>
+            {/* This field is already fixed (whichever header's arrow was clicked) — no field
+                picker, and Label/Value Filters ("More Filters…")/Exclude become available, matching
+                real Excel's own Row/Column field dropdown (confirmed live 2026-10-12) — see
+                FilterRow's own WHY comment for the full Report-Filter-vs-field-dropdown story. */}
+            <FilterRow
+              filter={existingFilter ?? { field, mode: "Members", includedMembers: [] }}
+              dimensionOptions={[]}
+              selectedValueOptions={selectedValueOptions}
+              onChange={applyFieldFilter}
+              onRemove={removeFilter}
+              onClose={close}
+              hideFieldPicker
+              showAdvancedFilters
             />
           </div>
         ) : (
@@ -257,7 +306,7 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
               More Sort Options…
             </button>
             <div className="my-1 border-t border-slate-100" />
-            {hasFilter ? (
+            {hasFilter && (
               <button
                 type="button"
                 onClick={() => {
@@ -266,20 +315,12 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
                 }}
                 className="rounded-lg px-2 py-1.5 text-left text-muted hover:bg-slate-100"
               >
-                Remove filter
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  addFilterShortcut();
-                  close();
-                }}
-                className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
-              >
-                Add filter…
+                Clear Filter
               </button>
             )}
+            <button type="button" onClick={() => setPanel("filter")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+              Filter…
+            </button>
             <div className="my-1 border-t border-slate-100" />
             <label className="flex items-center gap-2 px-2 py-1.5 font-medium text-ink">
               <input
@@ -589,6 +630,14 @@ export default function PivotGrid({
   dimensions = [],
   layout = "Tabular",
   repeatItemLabels = false,
+  // Real Excel's per-field "Field Settings…" > Custom Name / Layout & Print (PLAN 6 Phase 2) — see
+  // PivotBuilder.jsx's own fieldLayouts state WHY comment for why this is a sibling prop, not part
+  // of `request`.
+  fieldLayouts = [],
+  // Real Excel's per-member OLAP drilldown (PLAN 8, 2026-10-13, EXPERIMENTAL) — { topLevelField,
+  // expandedMemberUniqueNames } or null/undefined when not active.
+  rowsHierarchyDrilldown = null,
+  onToggleDrilldownMember = null,
   request = null,
   onChange = null,
   onRefresh = null,
@@ -660,13 +709,11 @@ export default function PivotGrid({
   // 2026-10-07, against a real Excel screenshot). Compact never responds to this toggle — real
   // Excel grays the option out entirely for Compact Form, since there's no separate per-level
   // column to repeat a label into.
-  const suppressedLevelVisibility = useMemo(
-    () =>
-      result && (layout === "Compact" || ((layout === "Outline" || layout === "Tabular") && !repeatItemLabels))
-        ? computeCompactVisibility(result.rowHeaders)
-        : null,
-    [result, layout, repeatItemLabels],
-  );
+  // Always computed now (PLAN 6 Phase 2) rather than conditionally null — a field's own
+  // RepeatItemLabels override (or lack of one) is resolved per-level at render time instead of
+  // being baked into a single report-wide "show everything vs. suppress" decision up front, same
+  // reasoning as the backend's HtmlSnapshotRenderer unification.
+  const suppressedLevelVisibility = useMemo(() => (result ? computeCompactVisibility(result.rowHeaders) : null), [result]);
 
   // Excel's "Show Details" — the clicked cell's row/column uniqueNames already include an entry at
   // the Σ Values level (a non-member placeholder caption, not a real dimension member — see
@@ -708,8 +755,23 @@ export default function PivotGrid({
   }
 
   const { rowHeaders, columnHeaders, cells } = result;
-  const rowDepth = rowHeaders[0]?.labels.length ?? 0;
-  const rowHeaderColumnCount = layout === "Compact" ? 1 : rowDepth;
+  // MAX across every row, not just row 0 — real Excel's per-member OLAP drilldown (PLAN 8) produces
+  // genuinely ragged rows (a still-collapsed member has fewer labels than an expanded descendant),
+  // so row 0 alone is no longer a reliable stand-in for "how many levels does this table have".
+  // Harmless no-op for every non-drilldown pivot, where every row already shares the same depth.
+  const rowDepth = rowHeaders.reduce((max, h) => Math.max(max, h.labels.length), 0);
+  // One entry per row level, resolved once rather than re-looked-up per row/group — mirrors the
+  // backend's HtmlSnapshotRenderer exactly (same field, same fallback-to-report-default order), so
+  // the live grid and a saved snapshot never disagree on which fields share a column.
+  const rowFieldLayouts = Array.from({ length: rowDepth }, (_, level) => fieldLayouts.find((f) => f.field === rows[level]) ?? null);
+  const compactFlags = rowFieldLayouts.map((fl) => fl?.compact ?? layout === "Compact");
+  // A drilldown hierarchy is always rendered as ONE shared indented column regardless of
+  // reportLayout — matching real Excel's own natural-hierarchy rendering, and the only shape that
+  // can represent ragged depth without a per-level field to anchor separate columns to (there is no
+  // `rows[level]` field backing any level here — Rows is empty in this mode, see
+  // PivotBuilder.jsx's own rowsHierarchyDrilldown WHY comment).
+  const rowHeaderGroups = rowsHierarchyDrilldown ? [{ start: 0, end: Math.max(0, rowDepth - 1) }] : buildRowHeaderGroups(rowDepth, compactFlags);
+  const rowHeaderColumnCount = rowHeaderGroups.length;
   // Backend floor of 1 (not 0) whenever there's at least one row to label: with no Value fields at
   // all (Excel's own "removed the last Value field" state), Columns can legitimately come back with
   // ZERO headers (a literal empty MDX set — see MdxPivotQueryBuilder.BuildAxisFinal's own WHY
@@ -757,7 +819,40 @@ export default function PivotGrid({
 
   // Grid lines on every header/body cell (border on all four sides, not just a per-row bottom
   // border) — the single biggest visual gap vs a real spreadsheet grid (flagged live, 2026-09-28).
-  const cellBorder = "border border-slate-300";
+  // Lightened from slate-300 to slate-200 2026-10-12 ("شكله قذر") — full-strength gridlines on
+  // every single cell edge read as visually busy/heavy at this app's own font size and padding;
+  // the thinner, lighter tone keeps the grid legible (still a real bordered cell, not borderless)
+  // without it dominating the page the way a literal flat worksheet's gridlines do.
+  const cellBorder = "border border-slate-200";
+  // Header band gets its own border tone — a plain slate-200 line (fine on the white/gray body
+  // below) read as a dull mismatched outline on a saturated gold fill, so header cells use a
+  // gold-tinted border instead. See headerBg's own WHY comment just below for the fill itself.
+  const headerCellBorder = "border border-gold-strong/30";
+  // The table's own header band — a flat dark-ink block (tried 2026-10-12, rejected: "مش قادر
+  // تديني تصميم جدول يتماسى مع الشكل العام للسيستم") was a completely different material language
+  // than the rest of this app, which is built entirely on a gold-gradient/glass identity (see
+  // index.css: .btn-primary is this exact `from-gold to-gold-strong` gradient, .card is a white
+  // glass panel, .input-field has a gold focus ring — no component anywhere else in the app uses a
+  // solid dark-navy block). Reusing that SAME gradient for the header band, instead of inventing a
+  // new "BI dashboard" dark-header look from scratch, is what actually makes the table read as part
+  // of this app rather than a bolted-on generic datagrid.
+  const headerBg = "bg-gradient-to-r from-gold to-gold-strong";
+
+  // Excel's own worksheet row-number gutter (the gray "1, 2, 3…" column down the left edge of
+  // every sheet, outside the PivotTable report itself) — requested live 2026-10-12 ("ليه مافيش ال
+  // row number زي ال excel"). One number per literal rendered table row (header rows included, same
+  // as a real worksheet counting from row 1 at the very top), not per pivot data row — a header row
+  // is still a real worksheet row. headerRowCount below is how many header <tr>s render before the
+  // body: the optional column-field-label row (only when columnFieldLabels is non-empty) plus one
+  // row per column header level.
+  const headerRowCount = (columnFieldLabels.length > 0 ? 1 : 0) + columnDepth;
+  // Two variants, not one — the gutter's header-row cells sit in the same gold header band as every
+  // other header cell, so they share that same fill; its body-row cells sit next to plain
+  // white/zebra rows and keep the original light-gray worksheet-gutter look (gray reads as neutral
+  // chrome here, consistent with how .input-field/.btn-secondary already use plain slate-200 borders
+  // elsewhere in this app — it's only the HEADER band that needs to match the gold identity).
+  const rowNumberHeaderClass = `${headerCellBorder} ${headerBg} px-2 py-2 text-center text-xs font-semibold text-white`;
+  const rowNumberBodyClass = `${cellBorder} bg-slate-100 px-2 py-1.5 text-center text-xs font-medium text-muted`;
 
   // Excel's own arrow-key cell navigation — see selectedCell's own WHY comment above. Skips over
   // collapsed/hidden rows the same way the mouse already does (clicking a collapsed group's hidden
@@ -886,42 +981,51 @@ export default function PivotGrid({
           )}
         </div>
       )}
-      {/* w-fit: the white card now hugs the table's actual (content-sized) width instead of
-          stretching to the full page — dropping the table's own w-full (previous fix) stopped
-          individual columns from being stretched, but left the surrounding card still full-width
-          with a large empty gap on the right, which is what "not sized right" meant here.
-          No overflow-hidden anymore either — ANY ancestor with overflow other than visible breaks
-          position:sticky for everything inside it (the thead's own sticky top-0 right below, AND
-          PivotBuilder.jsx's field-list <aside>, which sits as a SIBLING further up the tree but hits
-          the exact same rule) — a non-scrolling overflow:hidden box still counts as "the nearest
-          scroll container" for sticky purposes, so a descendant sticky element ends up pinned
-          relative to a box that itself never scrolls, which looks identical to sticky just not
-          working at all (caught live, 2026-10-06, same general class of bug as Popover.jsx's own
-          portal fix earlier this session, just hitting sticky instead of an absolutely-positioned
-          panel). The table's own rounded corners (clipped by this overflow-hidden before) are a
-          purely cosmetic loss next to a frozen header that doesn't freeze. */}
-      <div className="card w-fit max-w-full p-0">
-      {/* Back to a bounded, scrollable grid area (max-h + overflow-auto on BOTH axes) — the
-          page-scroll version tried just above (removing this box entirely) traded away horizontal
-          containment to get it: with no overflow anywhere in the chain, a WIDE result (many date
-          columns, say) had nothing to clip or scroll it, so it visually bled out under the sticky
-          field-list sidebar instead of being reachable by any scrollbar at all (caught live,
-          2026-10-06, after a direct side-by-side with real Excel's own worksheet pane — "مش
-          المفروض يبقى في جزء ليه scroll bar زي ال excel كدا" — real Excel's grid IS a bounded,
-          independently-scrolling region next to its docked Field List, never a page that grows
-          wider than the window). Sized generously (most of the viewport, not the small, cramped box
-          from an EARLIER complaint this exact area already went through) rather than tiny — this is
-          the balance of both: contained like Excel, not cramped like before. Putting overflow-auto
-          on THIS inner div instead of the outer decorative `card` above also means the thead's own
-          sticky top-0 below sticks correctly within a real, working scroll container (the standard,
-          reliable pattern), rather than relying on the page itself scrolling — no CSS-spec overflow-
-          visible/auto-axis-matching quirk to fight either, since this div's height actually IS
-          constrained now. tabIndex + onKeyDown here (not on individual cells) is what makes
-          arrow-key navigation work — a plain <td> isn't focusable, so a cell click also calls
-          gridRef.current.focus() below to move real DOM focus onto this container. */}
+      {/* ONE element now does both the "card" chrome AND the scrolling — previously these were two
+          nested divs (a decorative outer `card` with no overflow set, wrapping this scrolling box),
+          which is exactly why the table had no visible border-radius ("الجدول مالهوش border radius",
+          2026-10-12): rounding the OUTER div does nothing unless something actually CLIPS the
+          content to that rounded shape, and putting overflow-hidden on that outer div (tried
+          earlier, 2026-10-06) broke the thead's sticky top-0 instead — ANY ancestor with overflow
+          other than visible counts as a scroll container for position:sticky purposes, so a second,
+          non-scrolling overflow box ABOVE the real scrolling one made the browser stick the header
+          to the wrong (non-scrolling) box. Merging the two divs sidesteps the conflict entirely:
+          overflow-auto right here already clips its own content to ITS OWN border-radius (true of
+          any overflow value other than visible, not just hidden), and it's still the exact same,
+          single element the thead's sticky top-0 was always measuring against — no second ancestor
+          in the chain to confuse it. w-fit still hugs the table's real content width instead of
+          stretching full-page (same reasoning as before this merge). */}
       <div
         ref={gridRef}
-        className={boundedHeight ? "max-h-[80vh] overflow-auto outline-none" : "outline-none"}
+        // bg/border/rounded-2xl/shadow-xl: this app's own glass-panel treatment (index.css
+        // `.glass-panel`/`.card`), applied directly here instead of via the `.card` class so the
+        // SAME element also owns the overflow (see this div's own WHY comment above). custom-
+        // scrollbar (index.css) swaps the plain OS scrollbar for this app's own thin gold-tinted
+        // one — already used by Modal.jsx for the exact same "match the system" reason.
+        // No backdrop-blur-xl here, unlike the real `.glass-panel` — this element is BOTH the
+        // overflow-auto scroll container AND the ancestor of the <thead>'s position:sticky (a few
+        // lines down), and backdrop-filter on an element that's also a scrolling ancestor of a
+        // sticky descendant is a known Chromium compositing bug: the browser has to re-composite the
+        // blurred backdrop together with the sticky repositioning on every scroll frame, and during
+        // a fast scroll it visibly falls behind, letting scrolled-past rows render ON TOP of the
+        // header for the whole gesture (confirmed live, 2026-10-12 — persisted even after fixing a
+        // real but separate z-index bug AND adding will-change-transform, which is the normal first
+        // fix for sticky-during-scroll glitches but doesn't address a backdrop-filter-specific one).
+        // bg-white/95 (vs. the usual /80) compensates by staying close to opaque on its own, without
+        // needing a blur to hide whatever's faintly showing through the remaining 5%.
+        // A custom-drawn vertical-only scrollbar thumb (starting below the header instead of at its
+        // top) was also tried here 2026-10-12 to fix the native thumb's travel range including the
+        // header's own height — reverted the same day: hiding just the native VERTICAL scrollbar
+        // relies on the WebKit-only `::-webkit-scrollbar:vertical` selector, which this app's actual
+        // runtime didn't honor, so the native one stayed visible right alongside the new custom thumb
+        // ("بقا في اتنين scroll bars"). Real fix needs either a cross-browser-safe hiding technique
+        // or splitting header/body into genuinely separate scroll regions with synced column widths —
+        // both bigger, separately-scoped tasks. boundedHeight=false (Modal.jsx's own preview) has no
+        // sticky header to protect (see the thead's own WHY comment below) and no independent
+        // scrolling of its own either, so overflow-hidden there is just the plain corner-clipping.
+        className={`w-fit max-w-full bg-white/95 border border-white/50 rounded-2xl shadow-xl custom-scrollbar outline-none ${
+          boundedHeight ? "max-h-[80vh] overflow-auto" : "overflow-hidden"
+        }`}
         tabIndex={0}
         onKeyDown={handleGridKeyDown}
       >
@@ -936,10 +1040,28 @@ export default function PivotGrid({
               فوقيه"). Simplest reliable fix: don't stick it there at all — a small preview popup
               scrolling past its own header once is an acceptable tradeoff for not fighting a
               cross-browser sticky-table-header-in-a-shared-scroll-container quirk. */}
-          <thead className={boundedHeight ? "sticky top-0 z-10" : undefined}>
+          {/* z-30, not z-10: a SELECTED value cell below uses z-20 (so its ring renders above
+              neighboring cells' own borders in this border-collapse table) — with the header at only
+              z-10, scrolling a selected cell up underneath the sticky header let it win the stacking
+              order and render ON TOP of the header instead of being covered by it. The header must
+              always out-rank anything that can appear in the body.
+              will-change-transform: a SEPARATE bug from the z-index one above, caught right after it
+              — confirmed live (2026-10-12) that a scrolled-past row shows through the header for the
+              ENTIRE DURATION of an active scroll gesture (not just a brief one-frame flicker, and not
+              tied to any selected cell), only during the scroll itself. This is a known Chromium
+              compositing quirk: gridRef (this table's scrolling ancestor, a few lines up) has its own
+              backdrop-blur-xl for the app's glass-panel look, and a `backdrop-filter` on an ancestor
+              can make a descendant position:sticky element's repaint lag behind the actual scroll
+              during fast scroll frames, since the browser has to re-composite the blurred backdrop
+              and the sticky repositioning together. will-change: transform (Tailwind's
+              `will-change-transform`) hints the browser to promote the header to its own compositing
+              layer up front, instead of only reacting once scrolling starts — the standard fix for
+              this exact class of "sticky element flickers/lags during scroll" bug. */}
+          <thead className={boundedHeight ? "sticky top-0 z-30 will-change-transform" : undefined}>
             {columnFieldLabels.length > 0 && (
               <tr>
-                <th colSpan={rowHeaderColumnCount} className="bg-white" />
+                <th className={rowNumberHeaderClass}>1</th>
+                <th colSpan={rowHeaderColumnCount} className={`${headerCellBorder} ${headerBg}`} />
                 {/* Math.max(1, ...) — columnHeaders can legitimately be EMPTY (a Columns field
                     configured but the last Value field removed, see columnDepth's own WHY comment
                     above) while a Columns field is still configured (columnFieldLabels.length > 0
@@ -947,7 +1069,7 @@ export default function PivotGrid({
                     cell (with its own working FieldHeaderMenu dropdown) unpredictably instead of
                     just rendering at its practical minimum width (caught 2026-10-06, full codebase
                     review). */}
-                <th colSpan={Math.max(1, columnHeaders.length)} className={`${cellBorder} bg-slate-100 px-2 py-2`}>
+                <th colSpan={Math.max(1, columnHeaders.length)} className={`${headerCellBorder} border-b-2 border-b-white/40 ${headerBg} px-2 py-2`}>
                   <FieldHeaderMenu
                     label={columnFieldLabels.join(" › ")}
                     field={columns.length === 1 ? columns[0] : null}
@@ -961,38 +1083,47 @@ export default function PivotGrid({
             )}
             {Array.from({ length: columnDepth }).map((_, level) => (
               <tr key={level}>
+                <th className={rowNumberHeaderClass}>{(columnFieldLabels.length > 0 ? 1 : 0) + level + 1}</th>
                 {level === 0 && (
                   <>
-                    {layout === "Compact" ? (
-                      // Compact merges every row field into ONE column — not one-to-one with a
-                      // single field, so this stays a plain (non-interactive) header, unlike the
-                      // per-level headers below. Real Excel's own Compact form always shows the
-                      // literal generic caption "Row Labels" here (never the actual field name(s)),
-                      // confirmed live 2026-10-05 against a real Excel screenshot — fixed from
-                      // joining the field names together, which is what Outline/Tabular correctly
-                      // do instead (see the per-level FieldHeaderMenu branch below).
-                      <th rowSpan={columnDepth} className={`${cellBorder} bg-slate-100 px-2 py-2`}>
-                        <HeaderCell muted>Row Labels</HeaderCell>
-                      </th>
-                    ) : (
-                      Array.from({ length: rowDepth }).map((_, rowLevel) => (
-                        <th key={rowLevel} rowSpan={columnDepth} className={`${cellBorder} bg-slate-100 px-2 py-2`}>
+                    {rowHeaderGroups.map((group) =>
+                      // A drilldown hierarchy ALWAYS renders as the merged "Row Labels" caption
+                      // below, even when it currently only has 1 level (nothing expanded yet) — a
+                      // real field, degenerate OR not, is the ONLY thing FieldHeaderMenu's own
+                      // `field` can meaningfully point at, and Rows is empty in drilldown mode (see
+                      // rowsHierarchyDrilldown's own WHY comment), so this branch would otherwise
+                      // render a blank header (caught live, 2026-10-13, "الheader...مش باين" — this
+                      // was actually the SAME degenerate-depth-1 case as the color-contrast bug, not
+                      // a second contrast issue).
+                      group.start === group.end && !rowsHierarchyDrilldown ? (
+                        <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-white/40 ${headerBg} px-2 py-2`}>
                           <FieldHeaderMenu
-                            label={rowFieldLabels[rowLevel] ?? ""}
-                            field={rows[rowLevel] ?? null}
+                            label={rowFieldLayouts[group.start]?.customName || rowFieldLabels[group.start] || ""}
+                            field={rows[group.start] ?? null}
                             axis="Rows"
-                            level={rowLevel}
+                            level={group.start}
                             request={request}
                             onChange={onChange}
                             muted
                           />
                         </th>
-                      ))
+                      ) : (
+                        // A merged (compact-style) column spanning 2+ fields — not one-to-one with a
+                        // single field, so this stays a plain (non-interactive) header, matching real
+                        // Excel's own Compact form literal "Row Labels" caption (confirmed live
+                        // 2026-10-05 against a real Excel screenshot) for BOTH the old all-fields-
+                        // merged case and a new partial merge — there's no confirmed screenshot of
+                        // what a partial merge's own header shows, so this reuses the one convention
+                        // already verified for the full-merge case rather than guessing a new one.
+                        <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-white/40 ${headerBg} px-2 py-2`}>
+                          <HeaderCell muted>Row Labels</HeaderCell>
+                        </th>
+                      ),
                     )}
                   </>
                 )}
                 {columnHeaders.map((col, colIndex) => (
-                  <th key={colIndex} className={`${cellBorder} px-2 py-2 ${col.isTotal ? "bg-gold/10" : "bg-slate-50"}`}>
+                  <th key={colIndex} className={`${headerCellBorder} ${headerBg} px-2 py-2`}>
                     <HeaderCell isTotal={col.isTotal}>{col.labels[level]}</HeaderCell>
                   </th>
                 ))}
@@ -1007,7 +1138,13 @@ export default function PivotGrid({
 
               const group = groupForRow.get(rowIndex);
               const isGroupSubtotalRow = group?.hasSubtotal && rowIndex === group.end - 1;
-              const rowTint = row.isTotal ? "bg-gold/10" : visibleRowPosition.get(rowIndex) % 2 === 0 ? "bg-slate-50/60" : "";
+              // Softer zebra tint + a hover state (2026-10-12, "شكله قذر") — a plain alternating
+              // gray with no hover feedback read as flat/dead; the hover highlight is purely
+              // cosmetic (selectedCell's own ring is still the real "this is the active cell"
+              // signal) but makes the grid feel alive under the mouse the way a real spreadsheet does.
+              const rowTint = row.isTotal
+                ? "bg-gold/10 hover:bg-gold/15 border-t-2 border-gold/40"
+                : `${visibleRowPosition.get(rowIndex) % 2 === 0 ? "bg-slate-50/50" : "bg-white"} hover:bg-gold-soft/60`;
 
               const collapseToggle = isGroupSubtotalRow && (
                 <button
@@ -1020,42 +1157,103 @@ export default function PivotGrid({
                 </button>
               );
 
+              // Real Excel's per-field "Insert blank line after each item" (PLAN 6 Phase 2) — a pure
+              // rendering decision, mirroring the backend's HtmlSnapshotRenderer exactly: whenever a
+              // configured level's label is about to change going into the NEXT VISIBLE row, draw
+              // one empty separator <tr> after this one. Uses visibleRowPosition's own next-visible
+              // row (not simply rowIndex + 1) so a collapsed group doesn't leave a stray blank line
+              // sitting in front of a row that's currently hidden.
+              const nextVisibleIndex = rowHeaders.findIndex((r, i) => i > rowIndex && isRowVisible(r, i));
+              const needsBlankLine =
+                nextVisibleIndex >= 0 &&
+                rowFieldLayouts.some((fl, level) => fl?.insertBlankLine && row.labels[level] !== rowHeaders[nextVisibleIndex].labels[level]);
+
               return (
-                <tr key={rowIndex} className={rowTint}>
-                  {layout === "Compact" ? (
-                    <td
-                      className={`${cellBorder} whitespace-nowrap px-6 py-2.5 text-left ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        {collapseToggle}
-                        <span>
-                          {row.labels.map((label, level) =>
-                            suppressedLevelVisibility[rowIndex][level] ? (
-                              <div key={level} style={{ paddingLeft: level * 16 }}>
-                                {label}
-                              </div>
-                            ) : null,
-                          )}
-                        </span>
-                      </span>
-                    </td>
-                  ) : (
-                    // Outline and Tabular render identically — one <td> per row field — the only
-                    // difference is whether a repeated outer-level label is suppressed, which
-                    // suppressedLevelVisibility above already resolved to null (show everything,
-                    // Repeat All Item Labels is on) or a real per-row/per-level visibility array.
-                    row.labels.map((label, level) => (
-                      <td
-                        key={level}
-                        className={`${cellBorder} whitespace-nowrap px-6 py-2.5 text-center ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}
-                      >
-                        <span className="inline-flex items-center justify-center gap-1.5">
-                          {level === 0 && collapseToggle}
-                          {suppressedLevelVisibility ? (suppressedLevelVisibility[rowIndex][level] ? label : "") : label}
+                <Fragment key={rowIndex}>
+                <tr className={`${rowTint} transition-colors`}>
+                  <td className={rowNumberBodyClass}>{headerRowCount + visibleRowPosition.get(rowIndex)}</td>
+                  {rowHeaderGroups.map((group) => {
+                    // Same degenerate-depth-1 fix as the title row above — a drilldown hierarchy
+                    // always goes through the merged branch below (where the +/- toggle lives), even
+                    // with only 1 level today, since a SIBLING row could still be deeper once
+                    // something else gets expanded.
+                    if (group.start === group.end && !rowsHierarchyDrilldown) {
+                      const level = group.start;
+                      const effectiveRepeat = rowFieldLayouts[level]?.repeatItemLabels ?? repeatItemLabels;
+                      const text = effectiveRepeat || suppressedLevelVisibility[rowIndex][level] ? row.labels[level] : "";
+                      return (
+                        <td
+                          key={level}
+                          className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-center ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}
+                        >
+                          <span className="inline-flex items-center justify-center gap-1.5">
+                            {level === 0 && collapseToggle}
+                            {text}
+                          </span>
+                        </td>
+                      );
+                    }
+
+                    // A merged (compact-style) column spanning 2+ fields — same per-level
+                    // RepeatItemLabels resolution as the standalone branch above, except a merged
+                    // column keeps suppressing by default when no field in it has an explicit
+                    // override (matches the backend's own HtmlSnapshotRenderer — an existing test
+                    // there locks this in: Compact never responds to the report-wide flag alone).
+                    return (
+                      <td key={group.start} className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-left ${row.isTotal ? "font-bold text-ink" : "font-medium text-ink"}`}>
+                        <span className="inline-flex items-center gap-1.5">
+                          {group.start === 0 && collapseToggle}
+                          <span>
+                            {row.labels.slice(group.start, group.end + 1).map((label, offset) => {
+                              const level = group.start + offset;
+                              const effectiveRepeat = rowFieldLayouts[level]?.repeatItemLabels ?? false;
+                              if (!(effectiveRepeat || suppressedLevelVisibility[rowIndex][level])) {
+                                return null;
+                              }
+                              // Real Excel's per-member OLAP drilldown (PLAN 8, EXPERIMENTAL) — the
+                              // +/- toggle sits on the row's own DEEPEST label (its actual current
+                              // member, whatever level that happens to be for this particular row —
+                              // ragged depth means that's not always the same level across rows),
+                              // never on an ancestor label that happens to render in the same merged
+                              // column. uniqueNames walks the same ancestry as labels (see
+                              // CubeQueryService.BuildDrilldownHeaders), so the last entry is always
+                              // this row's own member.
+                              const isOwnMember = rowsHierarchyDrilldown && !row.isTotal && level === row.labels.length - 1;
+                              const rawUniqueName = isOwnMember ? row.uniqueNames?.[row.uniqueNames.length - 1] : null;
+                              // Real data-quality issue caught live, 2026-10-13: some members on this
+                              // cube have an incomplete UniqueName (e.g. ending in a bare "&" with no
+                              // key after it — a malformed/empty key on the cube side, not a bug in
+                              // this app's own ancestry walk). Every genuine MDX unique-name segment
+                              // ends in "]" (either "[x]" or "&[x]") — a value that doesn't is
+                              // rejected here instead of being sent to the backend, where it would
+                              // fail validation and break the WHOLE query for every row, not just
+                              // this one member's own toggle.
+                              const uniqueName = rawUniqueName && rawUniqueName.endsWith("]") ? rawUniqueName : null;
+                              return (
+                                <div key={level} style={{ paddingLeft: offset * 16 }} className="flex items-center gap-1">
+                                  {uniqueName && onToggleDrilldownMember && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onToggleDrilldownMember(uniqueName)}
+                                      className="text-muted hover:text-ink"
+                                      aria-label={rowsHierarchyDrilldown.expandedMemberUniqueNames.includes(uniqueName) ? "Collapse" : "Expand"}
+                                    >
+                                      {rowsHierarchyDrilldown.expandedMemberUniqueNames.includes(uniqueName) ? (
+                                        <ChevronDown className="h-3 w-3" />
+                                      ) : (
+                                        <ChevronRight className="h-3 w-3" />
+                                      )}
+                                    </button>
+                                  )}
+                                  {label}
+                                </div>
+                              );
+                            })}
+                          </span>
                         </span>
                       </td>
-                    ))
-                  )}
+                    );
+                  })}
                   {cells[rowIndex].map((cell, colIndex) => {
                     const isTotalCell = row.isTotal || columnHeaders[colIndex].isTotal;
                     // Which PivotValueField a cell belongs to is read directly off whichever axis
@@ -1082,9 +1280,9 @@ export default function PivotGrid({
                     return (
                       <td
                         key={colIndex}
-                        className={`${cellBorder} whitespace-nowrap px-6 py-2.5 text-center tabular-nums ${
+                        className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-center tabular-nums ${
                           isTotalCell ? "font-bold text-ink" : "text-slate-700"
-                        } ${isSelected ? "relative z-20 ring-2 ring-inset ring-ink" : ""}`}
+                        } ${isSelected ? "relative z-20 ring-2 ring-inset ring-gold-strong" : ""}`}
                         style={conditionalStyle ?? undefined}
                         onClick={() => {
                           setSelectedCell({ row: rowIndex, col: colIndex });
@@ -1114,11 +1312,16 @@ export default function PivotGrid({
                     );
                   })}
                 </tr>
+                {needsBlankLine && (
+                  <tr>
+                    <td colSpan={1 + rowHeaderColumnCount + Math.max(1, columnHeaders.length)} className="h-2 border-0 p-0" />
+                  </tr>
+                )}
+                </Fragment>
               );
             })}
           </tbody>
         </table>
-      </div>
       </div>
       {cellMenu && request && onChange && (
         <ValueCellContextMenu

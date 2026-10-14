@@ -35,6 +35,7 @@ export function saveSnapshot(
   chartType = "Bar",
   reportLayout = "Tabular",
   repeatItemLabels = false,
+  fieldLayouts = [],
   builderStateJson = null,
   versionName = null,
 ) {
@@ -50,6 +51,7 @@ export function saveSnapshot(
       chartType,
       reportLayout,
       repeatItemLabels,
+      fieldLayouts,
       builderStateJson,
       versionName,
     }),

@@ -143,7 +143,19 @@ export default function AppShell({ children }) {
         )}
       </aside>
 
-      <main className={`p-8 transition-[margin] duration-200 ${collapsed ? "ml-16" : "ml-64"}`}>{children}</main>
+      {/* pb-4, not p-8's own 32px bottom padding (2026-10-12) — traced to the exact pixel via the
+          browser console, not guessed: `document.documentElement.scrollHeight - window.innerHeight`
+          stayed at a stubborn 12px no matter how much page CONTENT got trimmed, because the actual
+          cause was never the content at all — this <main>'s own p-8 (32px top + 32px bottom = 64px)
+          pushed its needed height past the viewport even with its own child comfortably inside it.
+          First cut to pb-5 (20px, exactly closing the 12px gap) — then cut one step further to pb-4
+          (16px) the SAME day after a later change (FieldPicker's Fields/zones fill-height feature)
+          tipped the page back into needing a scrollbar again, purely from sub-pixel rounding: an
+          exact 0px-slack fit is fragile, since getBoundingClientRect() is fractional and
+          scrollHeight rounds UP, so ANY future fraction-of-a-pixel addition anywhere reopens this
+          exact bug. pb-4 keeps a small deliberate buffer instead of sitting exactly on the edge.
+          top/left/right stay the full p-8 24px/32px as before. */}
+      <main className={`p-8 pb-4 transition-[margin] duration-200 ${collapsed ? "ml-16" : "ml-64"}`}>{children}</main>
     </div>
   );
 }

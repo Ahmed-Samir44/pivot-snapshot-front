@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FileSpreadsheet, Loader2 } from "lucide-react";
+import { FileSpreadsheet, Loader2, Plus } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import FieldPicker from "../components/pivot/FieldPicker";
 import PivotToolbar from "../components/pivot/PivotToolbar";
@@ -36,11 +36,30 @@ const EMPTY_REQUEST = {
   // Defaults to Off, preserving this app's existing behavior (no live-Excel confirmation yet of
   // what Excel's own default position actually is — see EXCEL_PARITY_AUDIT.md).
   subtotals: "Off",
+  // Real Excel's own per-field "Field Settings…" → Subtotals (2026-10-13) — overrides `subtotals`
+  // above for ONE specific Rows field, falling back to it when a field has no entry here. Each entry
+  // is `{ field, position }` (position: "Off"/"Bottom"/"Top", matching `subtotals`' own string
+  // values exactly so both share the same <select> options). Same "list of per-field records" shape
+  // `values`/`filters` already use, not a dictionary.
+  fieldSubtotals: [],
   calculatedFields: [],
   calculatedItems: [],
   dateGroupings: [],
   numericGroupings: [],
   showItemsWithNoData: [],
+  // Real Excel's per-field "Show items with no data" (PLAN 7, 2026-10-13, EXPERIMENTAL — see the
+  // plan file's own WHY comment on why this needs live-cube verification). Unlike showItemsWithNoData
+  // above (per-AXIS), this is a plain list of field names — a field in this list keeps its own
+  // zero-data members even when the rest of its axis still filters normally. Query-affecting (unlike
+  // fieldLayouts' Compact/RepeatItemLabels/CustomName/InsertBlankLine), so it stays inside `request`
+  // and IS sent to queryPivot, not stripped out. Rows-only; v1 supports exactly one field at a time
+  // (MdxPivotQueryBuilder rejects more — see its own WHY comment).
+  fieldsShowingItemsWithNoData: [],
+  // Real Excel's per-member OLAP drilldown (PLAN 8, 2026-10-13, EXPERIMENTAL) — { topLevelField,
+  // expandedMemberUniqueNames } or null. Mutually exclusive with `rows` having any real field (see
+  // FieldPicker.jsx's own startDrilldown/Rows-onChange WHY comments) — query-affecting, stays in
+  // `request` and IS sent to queryPivot, same as fieldsShowingItemsWithNoData.
+  rowsHierarchyDrilldown: null,
   // Excel's own Slicer control (Insert > Slicer) — a separate button-grid widget bound to a field,
   // distinct from the Filters drop zone/Report Filter rows even though it reads/writes the SAME
   // request.filters entry (Members mode). This array is purely "which fields get the Slicer widget
@@ -138,7 +157,16 @@ function structuralSignature(req) {
 }
 
 export default function PivotBuilder() {
-  const [request, setRequestRaw] = useState(() => readPersistedBuilderState()?.request ?? EMPTY_REQUEST);
+  // Merged with EMPTY_REQUEST's own defaults (not a bare `?? EMPTY_REQUEST` fallback) — a request
+  // blob saved to localStorage BEFORE a newer field existed (fieldSubtotals, fieldLayouts,
+  // fieldsShowingItemsWithNoData, rowsHierarchyDrilldown, …) would otherwise restore with that key
+  // simply MISSING rather than defaulted, and every `request.<newField>.filter(...)`-style call
+  // throughout this file assumes it's always at least an empty array/null, not undefined — caught
+  // live, 2026-10-13, the first time a stale pre-PLAN-7 localStorage blob hit one of those call
+  // sites ("Cannot read properties of undefined (reading 'filter')"). A shallow merge is enough:
+  // every one of these fields is a plain top-level array/scalar/null, never itself a nested object
+  // whose OWN missing sub-keys would need defaulting too.
+  const [request, setRequestRaw] = useState(() => ({ ...EMPTY_REQUEST, ...readPersistedBuilderState()?.request }));
   // Wraps every setRequest call with normalizeMeasuresPlacement so `request` itself ALWAYS has Σ
   // Values at an explicit position (defaulting to the end of Columns) the instant at least one
   // Value field exists — see that function's own WHY comment for the real bug this fixes (silently
@@ -280,6 +308,12 @@ export default function PivotBuilder() {
   // number or add next to it" — read as "support both": a blank name still shows plain "Version N",
   // exactly as before this existed, so it's purely additive).
   const [versionName, setVersionName] = useState("");
+  // Version name input starts hidden behind a small "+ Add..." button, only offered once a
+  // Snapshot name has actually been typed (requested live 2026-10-12: "خلي ال snapshot name بس
+  // وجواه... لو عايز version name ولو لا يبقى خلاص") — two always-visible stacked inputs for what's
+  // usually a one-field decision (most saves don't need a version label at all) was more UI than the
+  // common case needed, now that this sidebar is otherwise a tight, vertically-stacked column.
+  const [showVersionName, setShowVersionName] = useState(false);
   // Existing snapshot names, offered as <datalist> suggestions on the name field below — native
   // HTML combo behavior (pick one of these OR type anything else) needs no custom dropdown
   // component, and typing a name that doesn't match any of these is exactly how a NEW snapshot is
@@ -305,6 +339,13 @@ export default function PivotBuilder() {
   // meaningful for Outline/Tabular (Compact has no separate per-level column to repeat a label
   // into, same as real Excel graying the option out there — see PivotGrid.jsx's own WHY comment).
   const [repeatItemLabels, setRepeatItemLabels] = useState(() => readPersistedBuilderState()?.repeatItemLabels ?? false);
+  // Real Excel's per-field "Field Settings…" > Custom Name / Layout & Print (PLAN 6 Phase 2,
+  // 2026-10-13) — one entry per Rows field with its own Compact/RepeatItemLabels/InsertBlankLine/
+  // CustomName override. Deliberately a sibling of reportLayout/repeatItemLabels above, NOT part of
+  // `request` — none of these four change which rows/cells the backend returns, only how they're
+  // displayed, so (like reportLayout/repeatItemLabels) they must stay out of structuralSignature or
+  // every per-field display toggle would needlessly re-query the live cube.
+  const [fieldLayouts, setFieldLayouts] = useState(() => readPersistedBuilderState()?.fieldLayouts ?? []);
   // Excel's value-cell context menu has "Hide Field List" — toggles the FIELDS sidebar's own
   // visibility, with a small floating button to bring it back (Excel keeps the same toggle on the
   // PivotTable Analyze ribbon too, not just the context menu, but there's no ribbon button for it
@@ -427,6 +468,10 @@ export default function PivotBuilder() {
         columnLevelSorts: request.columnLevelSorts,
         grandTotals: request.grandTotals,
         subtotals: request.subtotals,
+        // Defensive, same reasoning as every other per-field array cleaned here — a field's own
+        // override is meaningless (and the backend's own FieldSubtotals model doesn't expect it)
+        // once that field has actually left Rows.
+        fieldSubtotals: request.fieldSubtotals.filter((f) => request.rows.includes(f.field)),
         calculatedFields: request.calculatedFields.filter((f) => f.name && f.leftField && f.rightField),
         // A CalculatedItem needs a field, a name, and at least one member on either side (see
         // MdxPivotQueryBuilder.ValidateCalculatedItems) — mirrors the calculatedFields cleaning
@@ -441,6 +486,20 @@ export default function PivotBuilder() {
           (g) => (request.rows.includes(g.field) || request.columns.includes(g.field)) && g.binSize > 0,
         ),
         showItemsWithNoData: request.showItemsWithNoData,
+        fieldsShowingItemsWithNoData: request.fieldsShowingItemsWithNoData.filter((f) => request.rows.includes(f)),
+        // Defensive, same reasoning as every other array cleaned here — but for a real data-quality
+        // issue, not a stale-reference one: some members on this cube return an incomplete
+        // UniqueName (ending in a bare "&" with no key after it). PivotGrid.jsx already refuses to
+        // render a +/- toggle for one of these, but an ALREADY-expanded one from before that guard
+        // existed can still be sitting in localStorage-persisted state — caught live, 2026-10-13,
+        // "عملت Refresh ولسه نفس المشكلة": the stale entry survives a refresh since it's part of the
+        // persisted request, not component state. Filtering it out here means it self-heals on the
+        // very next query instead of needing a manual Reset every time this specific cube quirk
+        // happens to recur.
+        rowsHierarchyDrilldown: request.rowsHierarchyDrilldown && {
+          ...request.rowsHierarchyDrilldown,
+          expandedMemberUniqueNames: request.rowsHierarchyDrilldown.expandedMemberUniqueNames.filter((u) => u.endsWith("]")),
+        },
       };
       const data = await queryPivot(cleaned, { signal: controller.signal });
       if (token !== queryTokenRef.current) return; // a newer call already landed/owns the UI
@@ -477,7 +536,13 @@ export default function PivotBuilder() {
   // Skipped while the pivot is still empty (nothing in Rows/Columns/Values) — Excel shows nothing
   // until then either, no point querying for it.
   const requestSignature = structuralSignature(request);
-  const isPivotEmpty = request.rows.length === 0 && request.columns.length === 0 && request.values.length === 0;
+  // Real Excel's per-member OLAP drilldown (PLAN 8) leaves request.rows EMPTY on purpose
+  // (RowsHierarchyDrilldown replaces it entirely) — without this check, clicking "Drilldown" set
+  // rowsHierarchyDrilldown but rows/columns/values all stayed empty, so isPivotEmpty stayed true and
+  // the auto-run effect below silently never queried at all (caught live, 2026-10-13, "بدوس عليها
+  // مش بيحصل حاجة" — the state WAS changing, the query just never fired).
+  const isPivotEmpty =
+    request.rows.length === 0 && request.columns.length === 0 && request.values.length === 0 && !request.rowsHierarchyDrilldown;
   useEffect(() => {
     if (isPivotEmpty) return undefined;
     const timer = setTimeout(() => {
@@ -495,13 +560,22 @@ export default function PivotBuilder() {
     try {
       localStorage.setItem(
         BUILDER_STATE_STORAGE_KEY,
-        JSON.stringify({ request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels }),
+        JSON.stringify({ request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts }),
       );
     } catch {
       // Per-browser convenience only — same no-op-on-failure as every other localStorage write in
       // this file; worst case, the next visit just starts blank again.
     }
-  }, [request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels]);
+  }, [request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts]);
+
+  // Orphaned-entry cleanup for fieldLayouts, same reasoning as request.fieldSubtotals' own cleanup
+  // in FieldPicker.jsx (moveField/addHierarchyToAxis) — a field that leaves Rows should take its
+  // Layout override with it. Done here instead of inside FieldPicker's onChange handlers because
+  // fieldLayouts lives OUTSIDE `request` (see its own WHY comment above), so FieldPicker's
+  // request-only onChange has no way to touch it directly.
+  useEffect(() => {
+    setFieldLayouts((prev) => prev.filter((f) => request.rows.includes(f.field)));
+  }, [request.rows]);
 
   // Clears the whole builder back to a blank slate — fields, result, every warning/message, and
   // the save-panel inputs. Doesn't touch dimensions/measures (still the same cube, no need to
@@ -537,6 +611,7 @@ export default function PivotBuilder() {
     setError(null);
     setSnapshotName("");
     setVersionName("");
+    setShowVersionName(false);
     setTableStyle("Default");
     setIncludeChart(false);
     setChartType("Bar");
@@ -578,7 +653,7 @@ export default function PivotBuilder() {
       // sends) the persistence effect above already writes to localStorage — reused as-is here so
       // Edit later restores this exactly as it looked while being edited, not just a filtered/
       // query-ready subset of it. See BUILDER_STATE_STORAGE_KEY's own WHY comment.
-      const builderStateJson = JSON.stringify({ request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels });
+      const builderStateJson = JSON.stringify({ request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts });
       const saved = await saveSnapshot(
         snapshotName.trim(),
         { ...lastQuery, values: displayValues },
@@ -588,6 +663,7 @@ export default function PivotBuilder() {
         chartType,
         reportLayout,
         repeatItemLabels,
+        fieldLayouts,
         builderStateJson,
         versionName.trim() || null,
       );
@@ -609,6 +685,16 @@ export default function PivotBuilder() {
 
   const handleExport = async () => {
     if (!result || !lastQuery) return;
+    // Real Excel's per-member OLAP drilldown (PLAN 8, EXPERIMENTAL v1) — exportExcel.js's own
+    // merge-run tracking assumes one fixed row depth for the whole table (confirmed by direct code
+    // reading before ever attempting this feature) and would silently merge an expanded
+    // descendant's cell into an unrelated collapsed row's column span. Rejected with a clear
+    // message instead, same "reject, don't guess" discipline as the Save Snapshot endpoint's own
+    // equivalent guard.
+    if (lastQuery.rowsHierarchyDrilldown) {
+      setExportError("Exporting to Excel isn't supported yet for a per-member drilldown pivot.");
+      return;
+    }
     setExporting(true);
     setExportError(null);
     try {
@@ -664,14 +750,14 @@ export default function PivotBuilder() {
               Excel itself shows no persistent indicator either, just a brief status-bar flicker
               during a real recalculation. */}
           {loading && (
-            <p className="flex items-center gap-1.5 text-sm text-muted">
+            <p className="mb-2 flex items-center gap-1.5 text-sm text-muted">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               Updating…
             </p>
           )}
 
           {error && (
-            <div className="mt-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-red-800">
+            <div className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-red-800">
               <p>{error}</p>
               <button type="button" onClick={() => runQuery()} disabled={loading} className="btn-secondary mt-2 disabled:cursor-not-allowed disabled:opacity-50">
                 Retry
@@ -679,7 +765,13 @@ export default function PivotBuilder() {
             </div>
           )}
 
-          <div className="mt-6">
+          {/* No top margin here (removed 2026-10-12, "الجزء دا عايز يطلع لفوق" — the Insert Slicer/
+              Timeline/Calculated Field/Item ribbon) — with no loading/error message above it (the
+              common case), this mt-6 was the only thing pushing it down from the column's own top,
+              leaving it visibly lower than the Fields/zones cards next to it even though all three
+              start at the same flex-row position. loading/error above already carry their own
+              spacing (flex gap / mt-4) when they're actually shown. */}
+          <div>
             <PivotToolbar
               request={request}
               onChange={setRequest}
@@ -696,6 +788,20 @@ export default function PivotBuilder() {
               dimensions={dimensions}
               layout={reportLayout}
               repeatItemLabels={repeatItemLabels}
+              fieldLayouts={fieldLayouts}
+              // Real Excel's per-member OLAP drilldown (PLAN 8, EXPERIMENTAL) — keyed off `request`
+              // (not lastQuery) like the Sort/Filter menus just below: clicking +/- edits the LIVE
+              // expanded-member set and re-runs the query immediately (same auto-run effect as every
+              // other field edit), it isn't a display-only toggle.
+              rowsHierarchyDrilldown={request.rowsHierarchyDrilldown}
+              onToggleDrilldownMember={(uniqueName) => {
+                const current = request.rowsHierarchyDrilldown;
+                if (!current) return;
+                const expanded = current.expandedMemberUniqueNames.includes(uniqueName)
+                  ? current.expandedMemberUniqueNames.filter((u) => u !== uniqueName)
+                  : [...current.expandedMemberUniqueNames, uniqueName];
+                setRequest({ ...request, rowsHierarchyDrilldown: { ...current, expandedMemberUniqueNames: expanded } });
+              }}
               // request/onChange, not lastQuery: a header's Sort/Filter menu edits the LIVE field
               // config (same request/setRequest pair FieldPicker already uses) — rows/columns above
               // stay keyed off lastQuery so the field identifiers always match what's actually
@@ -717,113 +823,18 @@ export default function PivotBuilder() {
             <PivotChart result={result} valueFields={displayValues} chartType={chartType} rows={lastQuery?.rows} columns={lastQuery?.columns} />
           )}
 
-          {result && (
-            <div className="card mt-6 flex flex-wrap items-center gap-3">
-              <input
-                type="text"
-                list="snapshot-name-list"
-                className="input-field max-w-xs"
-                placeholder="Snapshot name…"
-                value={snapshotName}
-                onChange={(e) => setSnapshotName(e.target.value)}
-                title="Pick an existing snapshot to save a new version under it, or type a new name"
-              />
-              {/* The native combo behavior itself (suggestions while still accepting free text) —
-                  no custom dropdown component needed for "pick existing or type new." */}
-              <datalist id="snapshot-name-list">
-                {existingSnapshotNames.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-              <input
-                type="text"
-                className="input-field max-w-xs"
-                placeholder="Version name (optional)…"
-                value={versionName}
-                onChange={(e) => setVersionName(e.target.value)}
-                title="An optional label for just this version, e.g. &quot;Q3 Final&quot;"
-              />
-              <select
-                className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
-                value={tableStyle}
-                onChange={(e) => setTableStyle(e.target.value)}
-                title="Table style for the saved snapshot"
-              >
-                <option value="Default">Style: Default</option>
-                <option value="Banded">Style: Banded rows</option>
-                <option value="Dark">Style: Dark</option>
-                <option value="Minimal">Style: Minimal</option>
-              </select>
-              <select
-                className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
-                value={reportLayout}
-                onChange={(e) => setReportLayout(e.target.value)}
-                title="Report layout for the Rows area"
-              >
-                <option value="Tabular">Layout: Tabular</option>
-                <option value="Compact">Layout: Compact</option>
-                <option value="Outline">Layout: Outline</option>
-              </select>
-              {/* Real Excel grays this option out entirely for Compact Form (no separate per-level
-                  column to repeat a label into) — disabled here the same way, rather than letting it
-                  silently have no effect (see PivotGrid.jsx's own WHY comment). */}
-              <label
-                className={`flex items-center gap-2 text-sm ${reportLayout === "Compact" ? "text-muted" : "text-ink"}`}
-                title="Repeat every row field's label on every row, instead of showing it once per group"
-              >
-                <input
-                  type="checkbox"
-                  checked={repeatItemLabels}
-                  disabled={reportLayout === "Compact"}
-                  onChange={(e) => setRepeatItemLabels(e.target.checked)}
-                />
-                Repeat All Item Labels
-              </label>
-              <label className="flex items-center gap-2 text-sm text-ink">
-                <input type="checkbox" checked={includeChart} onChange={(e) => setIncludeChart(e.target.checked)} />
-                Include chart
-              </label>
-              {includeChart && (
-                <select
-                  className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
-                  value={chartType}
-                  onChange={(e) => setChartType(e.target.value)}
-                  title="Chart type"
-                >
-                  <option value="Bar">Chart: Bar</option>
-                  <option value="Line">Chart: Line</option>
-                  <option value="Pie">Chart: Pie</option>
-                </select>
-              )}
-              <button
-                type="button"
-                onClick={() => handleSave()}
-                disabled={saving || !snapshotName.trim()}
-                className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {saving ? "Saving…" : "Save Snapshot"}
-              </button>
-              <button
-                type="button"
-                onClick={handleExport}
-                disabled={exporting}
-                className="btn-secondary inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <FileSpreadsheet className="h-4 w-4" style={{ color: "#217346" }} />
-                {exporting ? "Exporting…" : "Export to Excel"}
-              </button>
-              {saveMessage && <span className="text-sm font-medium text-green-700">{saveMessage}</span>}
-              {saveError && <span className="text-sm font-medium text-red-700">{saveError}</span>}
-              {exportError && <span className="text-sm font-medium text-red-700">{exportError}</span>}
-            </div>
-          )}
         </div>
 
         {/* sticky, no overflow/max-height: deliberately NOT giving this its own inner scroll —
             CSS2.1 §11.1.1 would force overflow-x to 'auto' too the moment overflow-y is set to
             anything but 'visible', silently clipping every Popover panel inside FieldPicker that
             extends past this pane's own width (several are min-w-[22rem], barely narrower than the
-            pane itself). Plain sticky avoids that since position:sticky sets no overflow property.
+            pane itself) — Popover.jsx's own panel now portals to document.body so it wouldn't
+            actually be clipped anymore, but adding a scrollbar here was never what was asked for
+            regardless (tried 2026-10-12, reverted the SAME day: "انا ماقولتلكش زود scroll bar!!") —
+            the actual ask is for the content to genuinely FIT without needing to scroll anywhere,
+            not to relocate the scrollbar from the page onto this pane instead. Plain sticky avoids
+            the CSS2.1 clipping rule entirely since position:sticky sets no overflow property.
             top-8 matches AppShell's own p-8 page padding. */}
         {/* Narrowed back down (640 → 600 → 460): real Excel's own Field List is a fixed, fairly
             narrow pane regardless of monitor size — the WORKSHEET (here, PivotGrid) is what's
@@ -843,7 +854,145 @@ export default function PivotBuilder() {
               onEnabledTableNamesChange={updateEnabledTables}
               fieldsLoading={fieldsLoading}
               onReset={handleReset}
+              fieldLayouts={fieldLayouts}
+              onFieldLayoutsChange={setFieldLayouts}
             />
+            {/* Moved here from the main column (2026-10-12, "تحت الفلاتر و الحته بتاعت اختيار ال
+                dimensions") — "الفلاتر" meant FieldPicker's OWN Filters zone (one of its Rows/
+                Columns/Values/Filters drop zones above), not the Report Filter pills PivotGrid
+                renders over the table; "below that AND the dimension-selection part" together just
+                means below this whole FieldPicker sidebar, not somewhere in the main content column
+                at all (an earlier placement right above the grid was corrected after guessing wrong
+                once already — see PivotBuilder's own git history for that one-day detour). Stacked
+                vertically (flex-col, w-full inputs) instead of the old wide-row flex-wrap layout,
+                which only made sense stretched across the main column — unmodified in this narrow
+                460px sidebar, that row would just wrap into a messy multi-line block. */}
+            {result && (
+              // p-3 (not .card's own p-6) and gap-1.5 (not gap-3), plus py-2 on both text inputs
+              // below (not .input-field's own py-3) — shrunk 2026-10-12 ("صغر ارتفاع دي شوية", then
+              // cut further the same day chasing a whole-page scrollbar — "انت مش راضي تحل
+              // المشكلة"): this card sits right under the zones column in a tight sidebar, so the
+              // more generous default padding/spacing other `.card`/`.input-field` surfaces use
+              // elsewhere in the app was more height than this particular spot could spare.
+              <div className="card mt-2 flex flex-col gap-1.5 p-3">
+                <input
+                  type="text"
+                  list="snapshot-name-list"
+                  className="input-field w-full py-2"
+                  placeholder="Snapshot name…"
+                  value={snapshotName}
+                  onChange={(e) => setSnapshotName(e.target.value)}
+                  title="Pick an existing snapshot to save a new version under it, or type a new name"
+                />
+                {/* The native combo behavior itself (suggestions while still accepting free text) —
+                    no custom dropdown component needed for "pick existing or type new." */}
+                <datalist id="snapshot-name-list">
+                  {existingSnapshotNames.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+                {/* Only offered once a Snapshot name exists — nothing to attach a version label TO
+                    before that — and only shown as a text field once the user actually asks for one,
+                    not stacked underneath by default (see showVersionName's own WHY comment above). */}
+                {snapshotName.trim() && !showVersionName && (
+                  <button
+                    type="button"
+                    onClick={() => setShowVersionName(true)}
+                    className="inline-flex items-center gap-1 self-start text-xs font-medium text-gold-strong hover:underline"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Add a version name
+                  </button>
+                )}
+                {showVersionName && (
+                  <input
+                    type="text"
+                    autoFocus
+                    className="input-field w-full py-2"
+                    placeholder="Version name (optional)…"
+                    value={versionName}
+                    onChange={(e) => setVersionName(e.target.value)}
+                    title="An optional label for just this version, e.g. &quot;Q3 Final&quot;"
+                  />
+                )}
+                <div className="flex gap-2">
+                  <select
+                    className="w-1/2 rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
+                    value={tableStyle}
+                    onChange={(e) => setTableStyle(e.target.value)}
+                    title="Table style for the saved snapshot"
+                  >
+                    <option value="Default">Style: Default</option>
+                    <option value="Banded">Style: Banded rows</option>
+                    <option value="Dark">Style: Dark</option>
+                    <option value="Minimal">Style: Minimal</option>
+                  </select>
+                  <select
+                    className="w-1/2 rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
+                    value={reportLayout}
+                    onChange={(e) => setReportLayout(e.target.value)}
+                    title="Report layout for the Rows area"
+                  >
+                    <option value="Tabular">Layout: Tabular</option>
+                    <option value="Compact">Layout: Compact</option>
+                    <option value="Outline">Layout: Outline</option>
+                  </select>
+                </div>
+                {/* Real Excel grays this option out entirely for Compact Form (no separate per-level
+                    column to repeat a label into) — disabled here the same way, rather than letting it
+                    silently have no effect (see PivotGrid.jsx's own WHY comment). */}
+                <label
+                  className={`flex items-center gap-2 text-sm ${reportLayout === "Compact" ? "text-muted" : "text-ink"}`}
+                  title="Repeat every row field's label on every row, instead of showing it once per group"
+                >
+                  <input
+                    type="checkbox"
+                    checked={repeatItemLabels}
+                    disabled={reportLayout === "Compact"}
+                    onChange={(e) => setRepeatItemLabels(e.target.checked)}
+                  />
+                  Repeat All Item Labels
+                </label>
+                <label className="flex items-center gap-2 text-sm text-ink">
+                  <input type="checkbox" checked={includeChart} onChange={(e) => setIncludeChart(e.target.checked)} />
+                  Include chart
+                </label>
+                {includeChart && (
+                  <select
+                    className="w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
+                    value={chartType}
+                    onChange={(e) => setChartType(e.target.value)}
+                    title="Chart type"
+                  >
+                    <option value="Bar">Chart: Bar</option>
+                    <option value="Line">Chart: Line</option>
+                    <option value="Pie">Chart: Pie</option>
+                  </select>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSave()}
+                    disabled={saving || !snapshotName.trim()}
+                    className="btn-primary flex-1 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {saving ? "Saving…" : "Save Snapshot"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExport}
+                    disabled={exporting}
+                    className="btn-secondary flex-1 inline-flex items-center justify-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <FileSpreadsheet className="h-4 w-4" style={{ color: "#217346" }} />
+                    {exporting ? "Exporting…" : "Export to Excel"}
+                  </button>
+                </div>
+                {saveMessage && <span className="text-sm font-medium text-green-700">{saveMessage}</span>}
+                {saveError && <span className="text-sm font-medium text-red-700">{saveError}</span>}
+                {exportError && <span className="text-sm font-medium text-red-700">{exportError}</span>}
+              </div>
+            )}
           </aside>
         ) : (
           // Excel's own "Hide Field List" (ribbon toggle + value-cell context menu item) hides

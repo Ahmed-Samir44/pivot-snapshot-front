@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Select from "react-select";
 import { X, GripVertical, Plus, Filter, Columns3, Rows3, Sigma, Loader2, ChevronDown, ChevronRight, ChevronLeft, Search, Folder, Table2 } from "lucide-react";
 import HierarchicalCubePathSelect from "../forms/HierarchicalCubePathSelect";
@@ -173,7 +173,7 @@ function hierarchyGroupLabel(hierarchyUniqueName) {
 // indented by `depth`), then its sub-folders (each its own collapsed-by-default expand/collapse
 // row), recursing one level deeper per nested folder — mirrors real Excel's own indentation for a
 // multi-level Display Folder.
-function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleFolder, isPlaced, onFieldCheckToggle, onAddHierarchy }) {
+function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleFolder, isPlaced, onFieldCheckToggle, onAddHierarchy, onStartDrilldown }) {
   const indent = 28 + depth * 16;
   const renderFieldRow = ({ field, label }, rowIndent) => (
     <li
@@ -232,6 +232,22 @@ function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleF
                   </button>
                 </span>
               )}
+              {/* Real Excel's own per-member +/- drilldown (PLAN 8, 2026-10-13, EXPERIMENTAL — see
+                  plan file WHY comment) — this button's own label/placement is a plain functional
+                  entry point, NOT a reproduction of a specific real-Excel dialog's exact wording or
+                  look (unlike every other dialog built this session), since no screenshot exists yet
+                  for how Excel's own field list visually distinguishes a drillable hierarchy field.
+                  Deliberately next to "+ Rows"/"+ Cols", not replacing them — v1 Rows-only. */}
+              {onStartDrilldown && (
+                <button
+                  type="button"
+                  onClick={() => onStartDrilldown(fieldsInOrder[0])}
+                  className="ml-1 shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-muted hover:bg-slate-50 hover:text-ink"
+                  title="Add this hierarchy to Rows with real per-member +/- drilldown (experimental)"
+                >
+                  Drilldown
+                </button>
+              )}
             </div>
             <ul>{ordered.map((f) => renderFieldRow(f, indent + 16))}</ul>
           </li>
@@ -270,6 +286,7 @@ function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleF
                     isPlaced={isPlaced}
                     onFieldCheckToggle={onFieldCheckToggle}
                     onAddHierarchy={onAddHierarchy}
+                    onStartDrilldown={onStartDrilldown}
                   />
                 </ul>
               )}
@@ -280,7 +297,7 @@ function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleF
   );
 }
 
-function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tables, tablesLoading, enabledTableNames, onEnabledTableNamesChange, fieldsLoading, onFieldDropped, onAddHierarchy }) {
+function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tables, tablesLoading, enabledTableNames, onEnabledTableNamesChange, fieldsLoading, onFieldDropped, onAddHierarchy, onStartDrilldown }) {
   // Real Excel's own Field List shows EVERY table immediately, collapsed, with its own ▸/▾ arrow —
   // no prior "search and pick a table" step at all (confirmed live, 2026-10-05, against real
   // Excel's own PivotTable Fields pane screenshots: ~300 tables, all listed, none pre-selected).
@@ -397,7 +414,11 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
   const showValuesPseudoField = valuesCount >= 2 && (!query || "σ values".includes(query) || "values".includes(query));
 
   return (
-    <div className="card">
+    // h-full flex flex-col: fills the exact pixel height its caller's wrapper div sets (from
+    // zonesColumnHeight — see FieldPicker's own WHY comment) instead of sizing to its own content;
+    // only the scrollable list below (flex-1 min-h-0) actually grows/shrinks into whatever's left
+    // after the header and search box above, which stay their natural height either way.
+    <div className="card flex h-full flex-col">
       <div className="mb-1.5 flex items-center justify-between">
         <p className="text-xs font-bold uppercase tracking-wide text-muted">Fields</p>
         <button type="button" onClick={collapseAll} className="btn-secondary px-2 py-1 text-xs">
@@ -427,13 +448,13 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
         </div>
       )}
       <div
-        // Fixed, modest height (~28 rows, requested live 2026-10-05 after an earlier attempt to
-        // dynamically fill the rest of the viewport kept re-triggering a real page-level scrollbar
-        // bug in a new way each time) — same idea real Excel's own Field List uses: a reasonably
-        // sized pane with its own internal scrollbar, not something that tries to be exactly as
-        // tall as the screen. Simple and reliably safe instead: this can never push the page taller
-        // than the viewport, regardless of what else is on the page.
-        className={`max-h-[40rem] overflow-y-auto rounded-lg border border-slate-200 ${
+        // flex-1 min-h-0: fills whatever's left of the card's own height (set by its caller from
+        // the zones column's measured height) after the header/search box above. min-h-0 overrides
+        // a flex child's default min-height:auto (its content's size), which would otherwise keep
+        // forcing this box tall enough to show everything un-scrolled no matter what flex-1 says —
+        // with it, overflow-y-auto actually scrolls within whatever height it's given, same as a
+        // fixed max-height would, just dynamically sized to match the zones column instead.
+        className={`min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-200 ${
           dragOverRemove ? "bg-red-50 ring-2 ring-red-300 ring-inset" : ""
         }`}
         onDragOver={(e) => {
@@ -493,6 +514,7 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
                     isPlaced={isPlaced}
                     onFieldCheckToggle={onFieldCheckToggle}
                     onAddHierarchy={onAddHierarchy}
+                    onStartDrilldown={onStartDrilldown}
                   />
                   {fields.length === 0 && <li className="py-1 pl-7 text-[11px] text-muted">No fields</li>}
                 </ul>
@@ -555,8 +577,13 @@ function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, empty
     // empty or holding pills, never shrinking to fit just what's inside (flagged live, 2026-10-04:
     // "ليه المربعات الـ 4 لما بحط فيهم حاجة واحدة بيصغروا... مع ان الإكسل مش كدا"). Only the
     // dashed border/padding is conditional on actually being empty.
+    // 6.5rem — slightly past the original 6rem (2026-10-12), on request, after restoring from an
+    // earlier 2.75rem cut made chasing a page-scrollbar bug that turned out to be caused by
+    // AppShell.jsx's own padding instead (now fixed directly there), so none of those cuts were ever
+    // actually necessary. Still a real fixed minimum (not shrink-to-content), so the "stays the same
+    // size empty or full" Excel parity from the original 2026-10-04 decision holds.
     <div
-      className={`min-h-[6rem] flex-1 rounded-lg ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
+      className={`min-h-[6.5rem] flex-1 rounded-lg ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
         isEmpty && emptyIsDropTarget ? "border-2 border-dashed border-slate-200 p-2" : ""
       }`}
       onDragOver={(e) => {
@@ -571,18 +598,35 @@ function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, empty
   );
 }
 
-const FILTER_MODE_OPTIONS = [
-  { value: "Members", label: "Members (pick exact values)" },
-  { value: "Exclude", label: "Exclude (hide picked values)" },
-  { value: "LabelContains", label: "Label contains…" },
-  { value: "LabelBeginsWith", label: "Label begins with…" },
-  { value: "LabelEndsWith", label: "Label ends with…" },
-  { value: "TopN", label: "Top N by value" },
-  { value: "BottomN", label: "Bottom N by value" },
-  { value: "GreaterThan", label: "Value greater than…" },
-  { value: "LessThan", label: "Value less than…" },
-  { value: "Between", label: "Value between…" },
+// Real Excel's own filter dropdown never mixes these into one flat list — the member checklist is
+// always the default view the instant a field is picked, with Label Filters/Value Filters sitting
+// as two SEPARATE named flyout groups below it (confirmed live, 2026-10-12, against a real Excel
+// screenshot: our old single FILTER_MODE_OPTIONS dropdown combining "Members"/"Exclude" with every
+// rule-based mode was flagged as invented UI, "حاسس انك مصمم تجود من عندك"). This now only covers
+// the RULE-based modes, grouped to match Excel's own Label/Value Filters submenus — Members/Exclude
+// are handled separately below (the checklist is always visible; Exclude is a small toggle beside
+// it, not a dropdown entry — see FilterRow's own WHY comment for why that one stays conservative).
+const MORE_FILTER_GROUPS = [
+  {
+    label: "Label Filters",
+    options: [
+      { value: "LabelContains", label: "Contains…" },
+      { value: "LabelBeginsWith", label: "Begins With…" },
+      { value: "LabelEndsWith", label: "Ends With…" },
+    ],
+  },
+  {
+    label: "Value Filters",
+    options: [
+      { value: "TopN", label: "Top N…" },
+      { value: "BottomN", label: "Bottom N…" },
+      { value: "GreaterThan", label: "Greater Than…" },
+      { value: "LessThan", label: "Less Than…" },
+      { value: "Between", label: "Between…" },
+    ],
+  },
 ];
+const MORE_FILTER_MODES = new Set(MORE_FILTER_GROUPS.flatMap((g) => g.options.map((o) => o.value)));
 
 // One filter's member list is only fetched once its field is chosen (and only needed for
 // Mode "Members"/"Exclude" — the rule-based modes below never show a member list, they describe a
@@ -594,7 +638,44 @@ const FILTER_MODE_OPTIONS = [
 // the ACTUAL search term sent to the cube each time; searching only within an already-fetched
 // unfiltered page can silently miss a real member that just wasn't in that first page at all
 // (caught live 2026-09-23).
-export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onChange, onRemove }) {
+// Real Excel's own filter dropdown stages EVERY edit (field, mode, text, numbers, the member
+// checklist) locally behind one outer OK/Cancel pair — nothing re-queries the cube until OK is
+// clicked, and Cancel (or closing any other way) discards the whole draft (confirmed live,
+// 2026-10-12, against a real Excel screenshot: our old version called the live onChange on every
+// single edit, re-triggering PivotBuilder's auto-run per keystroke/click, with only yesterday's
+// MemberCheckboxList-only Apply button as a partial, inconsistent fix). `filter` is only ever read
+// ONCE, as this local `draft`'s initial value — Popover.jsx only mounts its children while open
+// (see its own `open && (...)` panel), so FilterRow remounts fresh every time this popover opens,
+// which is what makes a plain `useState(filter)` initializer correct here with no extra re-sync
+// effect needed. `onChange` (the real, live-request-mutating one) is now called exactly once, from
+// handleOk — everywhere else in this component reads/writes `draft`/`setDraft` instead.
+//
+// FilterRow is used in TWO structurally different real-Excel contexts, confirmed live 2026-10-12
+// against three separate screenshots — these are two INDEPENDENT axes, not one combined flag:
+//
+// `hideFieldPicker` (default false): whether the field is already fixed before this popover opens.
+// Real Excel NEVER shows a "choose a field" control inside a filter dropdown — the field is always
+// already decided by the time you open one (dragged into Report Filter, or it's whichever Row/
+// Column header you clicked). This app's OWN "+"-button-adds-an-empty-filter-slot flow used to be
+// the one exception, needing an inline picker — fixed 2026-10-12 so "+" now opens a small
+// field-picker-only popover FIRST (mirrors the Values zone's own "+" popover), meaning by the time
+// FilterRow itself ever mounts, `filter.field` is always already set — so this is passed `true`
+// at EVERY call site now, with the old inline Select/drag-handle/remove-X kept only as a defensive
+// fallback for the (should-be-impossible) case of a still-fieldless filter reaching here.
+//
+// `showAdvancedFilters` (default false): which of the two real Excel dropdown SHAPES this is.
+// False = Report Filter (page field) shape — ONLY the member checklist + "Select Multiple Items";
+// confirmed by a screenshot showing literally nothing between the search box and OK/Cancel besides
+// the list and that checkbox (no Label/Value Filters, no Exclude toggle at all). True = a Row/
+// Column field's own filter-arrow dropdown shape (FieldHeaderMenu) — confirmed by a screenshot of a
+// real "Patient Name" Row field's own dropdown: has "Label Filters"/"Value Filters" but no "Select
+// Multiple Items" (a Row/Column field is always unrestricted multi-select, no toggle needed).
+// "Exclude these items" has no confirmed real-Excel equivalent in EITHER shape — kept available
+// only when showAdvancedFilters (closer to where Label/Value Filters live) rather than removed
+// outright, since the backend's Exclude mode is a real, already-shipped feature with no other
+// reachable UI entry point yet; flagged as still-unconfirmed, not claimed as a verified match.
+export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onChange, onRemove, onClose, hideFieldPicker = false, showAdvancedFilters = false }) {
+  const [draft, setDraft] = useState(filter);
   const [memberOptions, setMemberOptions] = useState([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   // Distinct from "options came back empty" — a failed fetch (e.g. the cube's own well-known
@@ -606,16 +687,17 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
   const [membersFailed, setMembersFailed] = useState(false);
   const [membersRetryToken, setMembersRetryToken] = useState(0);
   const [memberSearch, setMemberSearch] = useState("");
-  const mode = filter.mode ?? "Members";
+  const mode = draft.mode ?? "Members";
+  const isMoreFilterMode = MORE_FILTER_MODES.has(mode);
 
   // A search typed for the PREVIOUS field shouldn't silently carry over and narrow the new
   // field's member list before the user has typed anything for it.
   useEffect(() => {
     setMemberSearch("");
-  }, [filter.field]);
+  }, [draft.field]);
 
   useEffect(() => {
-    if (!filter.field || (mode !== "Members" && mode !== "Exclude")) {
+    if (!draft.field || (mode !== "Members" && mode !== "Exclude")) {
       setMemberOptions([]);
       return;
     }
@@ -627,7 +709,7 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
     // same reasoning as CardinalityGuard exists at all — the shared cube server has crashed
     // before under query load.
     const timeoutId = setTimeout(() => {
-      getMembers(filter.field, memberSearch || undefined, controller.signal)
+      getMembers(draft.field, memberSearch || undefined, controller.signal)
         .then((members) => {
           if (!cancelled) setMemberOptions(members);
         })
@@ -649,54 +731,86 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
       // instead of finishing a search nobody's waiting on anymore (requested live, 2026-10-05).
       controller.abort();
     };
-  }, [filter.field, mode, memberSearch, membersRetryToken]);
+  }, [draft.field, mode, memberSearch, membersRetryToken]);
 
-  const selectedField = dimensionOptions.find((opt) => opt.value === filter.field) ?? null;
+  const selectedField = dimensionOptions.find((opt) => opt.value === draft.field) ?? null;
 
   const handleModeChange = (nextMode) => {
-    onChange({ field: filter.field, mode: nextMode, includedMembers: [], labelText: "", n: 10, byMeasureField: null, value: null, valueTo: null });
+    setDraft({ field: draft.field, mode: nextMode, includedMembers: [], labelText: "", n: 10, byMeasureField: null, value: null, valueTo: null });
   };
+
+  const handleOk = () => {
+    onChange(draft);
+    onClose?.();
+  };
+  const handleCancel = () => onClose?.();
 
   return (
     <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-      <div className="mb-3 flex items-start gap-3">
-        {filter.field && (
-          <span
-            draggable
-            onDragStart={(e) => setFieldDragPayload(e, filter.field, "filters")}
-            className="mt-2 cursor-grab text-muted hover:text-ink active:cursor-grabbing"
-            title="Drag to move this field to another zone"
-          >
-            <GripVertical className="h-5 w-5" />
-          </span>
-        )}
-        <div className="flex-1">
-          <Select
-            className="react-select-container"
-            classNamePrefix="react-select"
-            placeholder="Choose a field to filter…"
-            options={dimensionOptions}
-            value={selectedField}
-            onChange={(opt) => onChange({ field: opt?.value ?? "", mode: "Members", includedMembers: [] })}
-            isClearable
-            menuPortalTarget={typeof document !== "undefined" ? document.body : null}
-            menuPosition="fixed"
-            styles={{ menuPortal: (base) => ({ ...base, zIndex: 10000 }) }}
-          />
+      {/* Defensive fallback only — every real call site now passes hideFieldPicker=true, since a
+          filter's field is always already fixed before FilterRow ever mounts (see this component's
+          own WHY comment above). Kept so a still-fieldless filter (should be unreachable) doesn't
+          render as a dead end with no way to pick a field or remove itself. */}
+      {!hideFieldPicker && (
+        <div className="mb-3 flex items-start gap-3">
+          {draft.field && (
+            <span
+              draggable
+              onDragStart={(e) => setFieldDragPayload(e, draft.field, "filters")}
+              className="mt-2 cursor-grab text-muted hover:text-ink active:cursor-grabbing"
+              title="Drag to move this field to another zone"
+            >
+              <GripVertical className="h-5 w-5" />
+            </span>
+          )}
+          <div className="flex-1">
+            <Select
+              className="react-select-container"
+              classNamePrefix="react-select"
+              placeholder="Choose a field to filter…"
+              options={dimensionOptions}
+              value={selectedField}
+              onChange={(opt) => setDraft({ field: opt?.value ?? "", mode: "Members", includedMembers: [] })}
+              isClearable
+              menuPortalTarget={typeof document !== "undefined" ? document.body : null}
+              menuPosition="fixed"
+              styles={{ menuPortal: (base) => ({ ...base, zIndex: 10000 }) }}
+            />
+          </div>
         </div>
-        <button type="button" onClick={onRemove} className="mt-2 text-muted hover:text-ink" aria-label="Remove filter">
-          <X className="h-5 w-5" />
-        </button>
-      </div>
-      {filter.field && (
+      )}
+      {draft.field && (
         <div className="flex flex-col gap-3">
-          <select className={`${nativeSelectClass} w-full`} value={mode} onChange={(e) => handleModeChange(e.target.value)}>
-            {FILTER_MODE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+          {/* The member checklist (today's "Members" mode) is the ALWAYS-visible default the
+              instant a field is picked — no mode dropdown needed to reach it, matching real
+              Excel's own filter dropdown. "More Filters" only renders when showAdvancedFilters (the
+              Row/Column field context) — confirmed absent from the Report Filter context's own
+              dropdown entirely (see this component's own WHY comment above).
+              The "Exclude these items" checkbox that used to sit here is gone (2026-10-13) — a full
+              screenshot of a real Row field's own filter dropdown (Sort A-Z/Z-A, More Sort Options,
+              Clear Filter, Label Filters, Value Filters, search, checklist, OK/Cancel) confirmed it
+              has NO such control anywhere; this app's own copy of it was never actually verified
+              against Excel and turned out to be invented. The backend's Exclude filter mode still
+              exists (ValidateDuplicateValues etc. don't reference it, nothing breaks), it's just no
+              longer reachable from this menu — no real Excel UI path means no UI path here either. */}
+          {showAdvancedFilters && (
+            <select
+              className={`${nativeSelectClass} w-full`}
+              value={isMoreFilterMode ? mode : ""}
+              onChange={(e) => (e.target.value ? handleModeChange(e.target.value) : handleModeChange("Members"))}
+            >
+              <option value="">{isMoreFilterMode ? "Back to member list" : "More Filters…"}</option>
+              {MORE_FILTER_GROUPS.map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.options.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          )}
 
           {(mode === "Members" || mode === "Exclude") && membersFailed && (
             <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
@@ -713,12 +827,13 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
           {(mode === "Members" || mode === "Exclude") && !membersFailed && (
             <MemberCheckboxList
               options={memberOptions}
-              value={filter.includedMembers}
-              onChange={(includedMembers) => onChange({ ...filter, includedMembers })}
+              value={draft.includedMembers}
+              onChange={(includedMembers) => setDraft((prev) => ({ ...prev, includedMembers }))}
               placeholder={
                 loadingMembers ? "Loading members…" : mode === "Exclude" ? "Type to search values to exclude…" : "Type to search members…"
               }
               isLoading={loadingMembers}
+              showSelectMultiple={!showAdvancedFilters}
               onInputChange={(text, actionMeta) => {
                 // Only a real keystroke should update the search term — react-select also fires
                 // this on "menu-close"/"input-blur"/"set-value" with a value we don't want (e.g.
@@ -731,13 +846,46 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
             />
           )}
 
+          {/* Real Excel's own "Include new items in manual filter" lives in the Field Settings
+              dialog (PLAN 6), not here — placed here instead (PLAN 7, 2026-10-13) since this is
+              where the backend's existing Members/Exclude modes (and the full member list needed to
+              flip between them) already live; wiring it through the separate Field Settings popover
+              would need threading request.filters and a live member fetch into a component that has
+              neither today. Unchecked (default) = Members mode: the checked members ARE the
+              selection, anything not checked (including a member added to the cube LATER) stays
+              excluded. Checked = Exclude mode: the SAME visually-checked set is preserved by
+              inverting storage to its complement, so an unseen/future member defaults to INCLUDED
+              instead (MdxPivotQueryBuilder's Except(...) already handles an empty exclusion list as
+              "everyone" — see ValidateFilterShape's own WHY comment). Needs the FULL member list to
+              compute a correct complement, which `memberOptions` only holds while memberSearch is
+              empty (it's server-filtered otherwise) — disabled while searching rather than risk
+              silently wrong membership. */}
+          {(mode === "Members" || mode === "Exclude") && !membersFailed && (
+            <label
+              className={`flex items-center gap-2 text-xs text-ink ${memberSearch ? "cursor-not-allowed text-muted/60" : "cursor-pointer"}`}
+              title={memberSearch ? "Clear the search box first" : undefined}
+            >
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 accent-gold"
+                checked={mode === "Exclude"}
+                disabled={Boolean(memberSearch)}
+                onChange={(e) => {
+                  const complement = memberOptions.filter((m) => !draft.includedMembers.includes(m));
+                  setDraft((prev) => ({ ...prev, mode: e.target.checked ? "Exclude" : "Members", includedMembers: complement }));
+                }}
+              />
+              Include new items in manual filter
+            </label>
+          )}
+
           {(mode === "LabelContains" || mode === "LabelBeginsWith" || mode === "LabelEndsWith") && (
             <input
               type="text"
               className="input-field"
               placeholder="Text to match…"
-              value={filter.labelText ?? ""}
-              onChange={(e) => onChange({ ...filter, labelText: e.target.value })}
+              value={draft.labelText ?? ""}
+              onChange={(e) => setDraft((prev) => ({ ...prev, labelText: e.target.value }))}
             />
           )}
 
@@ -747,13 +895,13 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
                 type="number"
                 min={1}
                 className="input-field w-24"
-                value={filter.n ?? 10}
-                onChange={(e) => onChange({ ...filter, n: Number(e.target.value) })}
+                value={draft.n ?? 10}
+                onChange={(e) => setDraft((prev) => ({ ...prev, n: Number(e.target.value) }))}
               />
               <select
                 className={nativeSelectClass}
-                value={filter.byMeasureField ?? ""}
-                onChange={(e) => onChange({ ...filter, byMeasureField: e.target.value || null })}
+                value={draft.byMeasureField ?? ""}
+                onChange={(e) => setDraft((prev) => ({ ...prev, byMeasureField: e.target.value || null }))}
               >
                 <option value="">Choose a measure…</option>
                 {selectedValueOptions.map((m) => (
@@ -771,22 +919,22 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
                 type="number"
                 className="input-field w-28"
                 placeholder={mode === "Between" ? "From…" : "Value…"}
-                value={filter.value ?? ""}
-                onChange={(e) => onChange({ ...filter, value: e.target.value === "" ? null : Number(e.target.value) })}
+                value={draft.value ?? ""}
+                onChange={(e) => setDraft((prev) => ({ ...prev, value: e.target.value === "" ? null : Number(e.target.value) }))}
               />
               {mode === "Between" && (
                 <input
                   type="number"
                   className="input-field w-28"
                   placeholder="To…"
-                  value={filter.valueTo ?? ""}
-                  onChange={(e) => onChange({ ...filter, valueTo: e.target.value === "" ? null : Number(e.target.value) })}
+                  value={draft.valueTo ?? ""}
+                  onChange={(e) => setDraft((prev) => ({ ...prev, valueTo: e.target.value === "" ? null : Number(e.target.value) }))}
                 />
               )}
               <select
                 className={nativeSelectClass}
-                value={filter.byMeasureField ?? ""}
-                onChange={(e) => onChange({ ...filter, byMeasureField: e.target.value || null })}
+                value={draft.byMeasureField ?? ""}
+                onChange={(e) => setDraft((prev) => ({ ...prev, byMeasureField: e.target.value || null }))}
               >
                 <option value="">Choose a measure…</option>
                 {selectedValueOptions.map((m) => (
@@ -799,6 +947,35 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
           )}
         </div>
       )}
+      {/* Outer OK/Cancel — the one place this whole draft actually reaches the live request (via
+          handleOk's onChange call). Cancel discards everything typed/checked above without
+          touching it, matching real Excel's own dropdown exactly. "Remove filter" moved here (from
+          the now-hidden field-picker row's own X) once hideFieldPicker became the normal case —
+          still the one place a filter can be deleted outright, not just edited. */}
+      <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-200 pt-3">
+        {hideFieldPicker && onRemove ? (
+          <button
+            type="button"
+            onClick={() => {
+              onRemove();
+              onClose?.();
+            }}
+            className="text-xs font-medium text-muted hover:text-ink"
+          >
+            Remove filter
+          </button>
+        ) : (
+          <span />
+        )}
+        <div className="flex gap-2">
+          <button type="button" onClick={handleCancel} className="btn-secondary px-3 py-1.5 text-xs">
+            Cancel
+          </button>
+          <button type="button" onClick={handleOk} className="btn-primary px-3 py-1.5 text-xs">
+            OK
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -887,6 +1064,8 @@ function FilterPill({ filter, dimensionOptions, selectedValueOptions, onChange, 
               selectedValueOptions={selectedValueOptions}
               onChange={onChange}
               onRemove={onRemove}
+              onClose={close}
+              hideFieldPicker={Boolean(filter.field)}
             />
           </div>
         )}
@@ -2086,7 +2265,33 @@ export default function FieldPicker({
   onEnabledTableNamesChange,
   fieldsLoading,
   onReset,
+  // Real Excel's per-field "Field Settings…" > Custom Name / Layout & Print (PLAN 6 Phase 2) — see
+  // PivotBuilder.jsx's own fieldLayouts state WHY comment for why this is a sibling pair of props,
+  // not part of value/onChange.
+  fieldLayouts,
+  onFieldLayoutsChange,
 }) {
+  // Measures the Rows/Columns/Values/Filters zones column's OWN rendered height, so the Fields tree
+  // card next to it can match it exactly in EITHER direction (requested live 2026-10-12, "خلي الـ
+  // fields تاخد المكان الفاضي" — after a plain CSS grid `items-stretch` attempt made things WORSE,
+  // not better: stretch can only GROW a shorter item to match a taller one, never shrink a naturally
+  // huge one down, so it just stretched the short zones column to match the field list's own full,
+  // uncapped ~300-table height instead of the other way around). A ResizeObserver on this ONE
+  // sibling element is a much narrower, safer measurement than the "rest of the viewport" approach
+  // that caused a real page-scrollbar bug the last time dynamic sizing was tried here (2026-10-05) —
+  // this only ever reacts to the zones column's own height, never the page's.
+  const zonesColumnRef = useRef(null);
+  const [zonesColumnHeight, setZonesColumnHeight] = useState(null);
+  useEffect(() => {
+    const el = zonesColumnRef.current;
+    if (!el) return undefined;
+    const measure = () => setZonesColumnHeight(el.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   const dimensionOptions = dimensions.map((d) => ({ value: d.field, label: d.displayName }));
   const measureOptions = measures.map((m) => ({ value: m.field, label: m.displayName }));
   // A calculated field's own LeftField/RightField must reference a real cube measure only (no
@@ -2167,8 +2372,16 @@ export default function FieldPicker({
     onChange({ ...value, filters: value.filters.filter((_, i) => i !== index) });
   };
 
-  const addFilter = () => {
-    onChange({ ...value, filters: [...value.filters, { field: "", includedMembers: [] }] });
+  // Real Excel never shows a "choose a field" control inside a filter's own dropdown — the field
+  // is always already fixed by the time you open one (see FilterRow's own WHY comment). "+" used to
+  // add a genuinely EMPTY filter needing FilterRow's own inline picker to fix that; now picks the
+  // field FIRST, in this small popover (mirrors the Values zone's own "+" popover, just a single
+  // Select instead of isMulti — one filter added per click, not a bulk add), so FilterRow always
+  // receives an already-complete filter and never needs its inline picker at all (caught live,
+  // 2026-10-12, "ليه عامل search , drop down مع ان في الexcel واحدة بس").
+  const addFilter = (field) => {
+    if (!field || value.filters.some((f) => f.field === field)) return;
+    onChange({ ...value, filters: [...value.filters, { field, mode: "Members", includedMembers: [] }] });
   };
 
   // Excel's classic "drag a field between zones" — see HierarchicalCubePathSelect/ZoneDropArea
@@ -2233,6 +2446,10 @@ export default function FieldPicker({
       // field that's no longer in Rows (ValidateGroupings).
       next.dateGroupings = value.dateGroupings.filter((g) => g.field !== field);
       next.numericGroupings = value.numericGroupings.filter((g) => g.field !== field);
+      // Same orphaned-per-field-config cleanup, for the Field Settings Subtotals override
+      // (2026-10-13) — meaningless once the field it was configured for has left Rows.
+      next.fieldSubtotals = value.fieldSubtotals.filter((f) => f.field !== field);
+      next.fieldsShowingItemsWithNoData = value.fieldsShowingItemsWithNoData.filter((f) => f !== field);
     }
     // Values deliberately does NOT strip/replace an existing entry for this same field here (unlike
     // rows/columns/filters above, which a field can only ever occupy once) — dragging an
@@ -2247,6 +2464,13 @@ export default function FieldPicker({
 
     if (toZone === "rows" && !next.rows.includes(field)) {
       next.rows = [...next.rows, field];
+      // Real bug caught live, 2026-10-13: checking a field's own checkbox in the Available Fields
+      // tree goes through THIS function (onFieldCheckToggle → moveField), a different path from the
+      // Rows HierarchicalCubePathSelect's own onChange (which already clears this) — a stray leftover
+      // rowsHierarchyDrilldown from an earlier "Drilldown" click combined with this newly-added flat
+      // field hit MdxPivotQueryBuilder's "can't combine" validation on the very next query ("دوست على
+      // ال specialty وبعدين شيلتها"). Same mutual-exclusivity rule, enforced here too.
+      next.rowsHierarchyDrilldown = null;
     } else if (toZone === "columns" && !next.columns.includes(field)) {
       next.columns = [...next.columns, field];
     } else if (toZone === "values") {
@@ -2358,11 +2582,39 @@ export default function FieldPicker({
     next.columnLevelSorts = [];
     next.dateGroupings = value.dateGroupings.filter((g) => !levelFields.includes(g.field));
     next.numericGroupings = value.numericGroupings.filter((g) => !levelFields.includes(g.field));
+    // Same orphaned-per-field-config cleanup as moveField's own (2026-10-13) — only matters when
+    // axis is "columns" (levelFields leaving Rows), harmless no-op otherwise since none of
+    // levelFields would have a fieldSubtotals entry to begin with if they were already in Columns.
+    next.fieldSubtotals = value.fieldSubtotals.filter((f) => !levelFields.includes(f.field));
+    next.fieldsShowingItemsWithNoData = value.fieldsShowingItemsWithNoData.filter((f) => !levelFields.includes(f));
     next.calculatedItems = clearOrphanedCalculatedItems(value.calculatedItems, next.rows, next.columns);
     next.values = clearDanglingBaseFieldReferences(next.values, next.rows);
     Object.assign(next, clearDanglingMeasureReferences(next, next.values.map((v) => v.field)));
+    // Same mutual-exclusivity rule as moveField's own fix just above — "+ Rows" adds real flat
+    // fields to Rows too, which can't coexist with a leftover rowsHierarchyDrilldown either.
+    if (axis === "rows") {
+      next.rowsHierarchyDrilldown = null;
+    }
 
     onChange(next);
+  };
+
+  // Real Excel's per-member OLAP drilldown (PLAN 8, 2026-10-13, EXPERIMENTAL). v1 scope: a
+  // drilldown hierarchy REPLACES flat-field Rows entirely rather than crossjoining alongside other
+  // fields (MdxPivotQueryBuilder rejects the combination — see HierarchyDrilldown's own WHY
+  // comment), so starting it clears Rows and every Rows-only per-field config outright rather than
+  // trying to merge with whatever was there. The Rows HierarchicalCubePathSelect's own onChange
+  // (below) clears rowsHierarchyDrilldown right back whenever a real field gets added to Rows the
+  // normal way, keeping the two mutually exclusive in both directions.
+  const startDrilldown = (topLevelField) => {
+    onChange({
+      ...value,
+      rows: [],
+      rowsHierarchyDrilldown: { topLevelField, expandedMemberUniqueNames: [] },
+      rowLevelSorts: [],
+      fieldSubtotals: [],
+      fieldsShowingItemsWithNoData: [],
+    });
   };
 
   const isFieldPlaced = (field) =>
@@ -2376,10 +2628,15 @@ export default function FieldPicker({
     // pane apparently reflows between a single stacked column and a 2×2 grid depending on its own
     // width/version, so this now matches the most recent, most explicit screenshot+instruction
     // rather than re-arguing which one is "more canonical".
-    // items-start: without it, CSS grid's default align-items:stretch forces the field list card
-    // to match the height of the (usually much taller, 4-stacked-boxes) zones column next to it,
-    // leaving a huge empty white card when few/no tables are picked yet (flagged live, 2026-10-04:
-    // "الـ tables كبيرة ليه").
+    // items-start: the field list card's HEIGHT is now driven explicitly by zonesColumnHeight (a
+    // narrow, self-contained ResizeObserver measurement of the zones column alone — see this
+    // function's own top-of-component WHY comment), not by grid's own align-items:stretch — stretch
+    // was tried live 2026-10-12 ("خلي ارتفاع ال fields زي ال 4 اللي جنبه") and made things WORSE: it
+    // can only GROW a shorter item to match a taller one's natural content size, never SHRINK a
+    // naturally-huge one (this field list, ~300+ tables, uncapped) down — so it stretched the SHORT
+    // zones column to match the field list's own enormous natural height instead ("انت شايف ان دا
+    // كدا صح؟"), the opposite of intended. items-start here just means "don't ALSO let grid stretch
+    // interfere" — the actual matching happens via the explicit pixel height set below instead.
     // minmax(0, Nfr), not just Nfr: a plain fr track defaults to a minimum of its own content's
     // min-content width — the classic CSS Grid version of the flexbox min-width:auto trap (see
     // PivotBuilder.jsx's own WHY comment on that one) — so a long unbreakable string anywhere
@@ -2387,65 +2644,90 @@ export default function FieldPicker({
     // wider than the card actually sizes to, spilling a sliver of content out past the card's own
     // right edge (flagged live, 2026-10-04: "ليه طالع برا الكارد"). minmax(0, …) lets each column
     // actually shrink to the space it's given, so `truncate` inside it can do its job.
-    //
-    // Both columns size to their own NATURAL content again (2026-10-05) — a whole saga of trying
-    // to dynamically measure "the rest of the viewport" and give both columns that exact height
-    // kept producing a real page-level scrollbar bug in some new way each time (a page banner
-    // changing the available space, then the zones column growing past it once the tree alone was
-    // capped, ...). Simpler and reliably correct instead: the Fields tree below just gets a fixed,
-    // modest max-height (~28 rows' worth, requested live) with its own internal scrollbar — same
-    // idea real Excel's own Field List uses (a reasonably sized pane, not the full screen) — so
-    // neither column can ever push the PAGE taller than the viewport, regardless of what else is
-    // on the page.
     <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)] items-start gap-2">
-      <AvailableFieldsPanel
-        dimensions={dimensions}
-        measures={measures}
-        valuesCount={value.values.length}
-        isPlaced={isFieldPlaced}
-        tables={tables}
-        tablesLoading={tablesLoading}
-        enabledTableNames={enabledTableNames}
-        onEnabledTableNamesChange={onEnabledTableNamesChange}
-        fieldsLoading={fieldsLoading}
-        onFieldDropped={moveField}
-        onAddHierarchy={addHierarchyToAxis}
-      />
+      {/* Height set explicitly from the zones column's OWN measured height (zonesColumnHeight,
+          above) once known — min 200px as a sane floor for the very first render (before the
+          ResizeObserver's first callback fires) and for the unlikely case of an almost-empty zones
+          column. AvailableFieldsPanel fills whatever height this div ends up with (h-full flex-col,
+          its own scrollable list as flex-1) — see its own WHY comment. */}
+      <div style={{ height: zonesColumnHeight ? `${Math.max(zonesColumnHeight, 200)}px` : undefined }}>
+        <AvailableFieldsPanel
+          dimensions={dimensions}
+          measures={measures}
+          valuesCount={value.values.length}
+          isPlaced={isFieldPlaced}
+          tables={tables}
+          tablesLoading={tablesLoading}
+          enabledTableNames={enabledTableNames}
+          onEnabledTableNamesChange={onEnabledTableNamesChange}
+          fieldsLoading={fieldsLoading}
+          onFieldDropped={moveField}
+          onAddHierarchy={addHierarchyToAxis}
+          onStartDrilldown={startDrilldown}
+        />
+      </div>
 
       {/* Each zone shows only its pill list; the full add/edit form (dimension picker, filter
           mode, show-values-as, ...) lives in a Popover behind the zone's "+" or, for Filters/
-          Values, behind the pill itself — one click away instead of permanently occupying space. */}
-      <div>
-        {/* Real Excel's own instructional text above its four drop zones — confirmed live,
-            2026-10-05, against a real Excel screenshot: it says "Drag fields between areas
-            below:", not a second "FIELDS" label (that was a copy-paste leftover from the field
-            tree panel's own header, and having two panels both say "FIELDS" was genuinely
-            confusing). Reset on its own row (not sharing one with the text) — squeezed next to the
-            button, this column's own width (narrower than the field tree's) wrapped it across 3
-            cramped lines instead of reading naturally (caught live, 2026-10-05). Reset itself stays
-            where it was — moved out of the page header per explicit request, 2026-09-27. */}
+          Values, behind the pill itself — one click away instead of permanently occupying space.
+          ref={zonesColumnRef}: this is the sibling FieldPicker's own Fields card measures itself
+          against — see zonesColumnHeight's own WHY comment above.
+          pt-2, not the original pt-6 (cut 2026-10-12 alongside the zone boxes above, same reason):
+          this existed purely so "Reset" lines up with "FIELDS" (.card's own p-6 top padding) —
+          real, but strictly cosmetic, and the page-scrollbar problem took priority over it being
+          pixel-perfect. Still a little breathing room instead of "Reset" flush against the edge. */}
+      <div ref={zonesColumnRef} className="pt-2">
+        {/* Real Excel's own instructional text used to sit here ("Drag fields between areas
+            below:", confirmed live 2026-10-05 against a real Excel screenshot) — removed again
+            2026-10-12 on explicit request ("شيل دا"): this sidebar is tight on vertical space now
+            that the save/export controls also live in it (see PivotBuilder.jsx's own WHY comment),
+            so literal Excel-instructional-text parity lost out to reclaiming the row for it. */}
         <div className="mb-1 flex justify-end">
           <button type="button" onClick={onReset} className="btn-secondary px-3 py-1.5 text-xs">
             Reset
           </button>
         </div>
-        <p className="mb-2 text-xs text-muted">Drag fields between areas below:</p>
-        <div className="grid grid-cols-1 gap-2">
+        <div className="grid grid-cols-1 gap-1.5">
           <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
                 <Filter className="h-3.5 w-3.5" />
                 Filters {value.filters.length > 0 && <span className="text-gold">({value.filters.length})</span>}
               </span>
-              <button
-                type="button"
-                onClick={addFilter}
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold hover:bg-gold/25"
-                aria-label="Add filter"
-                title="Add filter"
+              <Popover
+                align="right"
+                trigger={(toggle) => (
+                  <button
+                    type="button"
+                    onClick={toggle}
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold hover:bg-gold/25"
+                    aria-label="Add filter"
+                    title="Add filter"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                )}
               >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
+                {(close) => (
+                  <div>
+                    <p className="mb-2 text-xs text-muted">Choose a field to filter.</p>
+                    <Select
+                      className="react-select-container"
+                      classNamePrefix="react-select"
+                      placeholder="Choose a field to filter…"
+                      options={dimensionOptions}
+                      value={null}
+                      onChange={(opt) => {
+                        addFilter(opt?.value);
+                        close();
+                      }}
+                      menuPortalTarget={typeof document !== "undefined" ? document.body : null}
+                      menuPosition="fixed"
+                      styles={{ menuPortal: (base) => ({ ...base, zIndex: 10000 }) }}
+                    />
+                  </div>
+                )}
+              </Popover>
             </div>
             <ZoneDropArea
               zoneKey="filters"
@@ -2527,8 +2809,9 @@ export default function FieldPicker({
               onFieldDropped={moveField}
               isFieldAccepted={(field) => field === MEASURES_PLACEHOLDER || dimensionOptions.some((opt) => opt.value === field)}
               contextMenuTargets={[
-                { zoneKey: "rows", label: "Move to Rows" },
-                { zoneKey: "filters", label: "Move to Filters" },
+                { zoneKey: "filters", label: "Move to Report Filter" },
+                { zoneKey: "rows", label: "Move to Row Labels" },
+                { zoneKey: "values", label: "Move to Values" },
               ]}
             />
           </div>
@@ -2554,6 +2837,12 @@ export default function FieldPicker({
                 // targets a Rows field — removed here, same dangling-reference class as
                 // clearDanglingMeasureReferences above, just for Rows instead of Values.
                 const values = clearDanglingBaseFieldReferences(value.values, rows);
+                // A field's own Field Settings Subtotals override is meaningless once it's left
+                // Rows — same orphaned-per-field-config cleanup as dateGroupings/numericGroupings/
+                // calculatedItems above, just for fieldSubtotals (added 2026-10-13).
+                const fieldSubtotals = value.fieldSubtotals.filter((f) => rows.includes(f.field));
+                // Same orphaned-per-field cleanup, for Show Items With No Data (PLAN 7, 2026-10-13).
+                const fieldsShowingItemsWithNoData = value.fieldsShowingItemsWithNoData.filter((f) => rows.includes(f));
                 onChange({
                   ...value,
                   rows,
@@ -2562,8 +2851,13 @@ export default function FieldPicker({
                   dateGroupings,
                   numericGroupings,
                   calculatedItems,
+                  fieldSubtotals,
+                  fieldsShowingItemsWithNoData,
                   rowLevelSorts: [],
                   columnLevelSorts: newlyAddedToRows.length > 0 ? [] : value.columnLevelSorts,
+                  // Mutually exclusive with per-member drilldown (PLAN 8) — a real flat field added
+                  // to Rows the normal way means the user's leaving drilldown mode.
+                  rowsHierarchyDrilldown: rows.length > 0 ? null : value.rowsHierarchyDrilldown,
                 });
               }}
               dragSourceKey="rows"
@@ -2572,9 +2866,65 @@ export default function FieldPicker({
               // accepts the Σ Values sentinel.
               isFieldAccepted={(field) => field === MEASURES_PLACEHOLDER || dimensionOptions.some((opt) => opt.value === field)}
               contextMenuTargets={[
-                { zoneKey: "columns", label: "Move to Columns" },
-                { zoneKey: "filters", label: "Move to Filters" },
+                { zoneKey: "filters", label: "Move to Report Filter" },
+                { zoneKey: "columns", label: "Move to Column Labels" },
+                { zoneKey: "values", label: "Move to Values" },
               ]}
+              // Real Excel's per-field "Field Settings…" (2026-10-13) — Subtotals only for now (see
+              // PLAN 6's own scope cuts: per-field Layout needs more design work first, Subtotals'
+              // "Custom" function picker is a separate follow-up). Rows-only: SubtotalsProcessor has
+              // never applied Subtotals to Columns, so there's nothing for a Columns field's own
+              // Field Settings to configure yet — that instance above gets no fieldSettings prop at
+              // all, which hides the menu item entirely rather than showing a non-functional one.
+              fieldSettings={{
+                reportDefault: value.subtotals,
+                overrides: value.fieldSubtotals,
+                // patch is a partial { position, functions } — merged onto whatever override
+                // already exists for this field (or defaults, for a field with none yet). An
+                // override collapses back to "no entry at all" once both position and functions are
+                // back to their Automatic/null state, same "don't store a no-op override" rule as
+                // before this (PLAN 6 Phase 2) extended it from position-only to position+functions.
+                onChange: (field, patch) => {
+                  const existing = value.fieldSubtotals.find((f) => f.field === field);
+                  const next = { position: existing?.position ?? null, functions: existing?.functions ?? null, ...patch };
+                  const withoutField = value.fieldSubtotals.filter((f) => f.field !== field);
+                  const isDefault = !next.position && (!next.functions || next.functions.length === 0);
+                  onChange({
+                    ...value,
+                    fieldSubtotals: isDefault ? withoutField : [...withoutField, { field, ...next }],
+                  });
+                },
+              }}
+              // Real Excel's per-field "Field Settings…" > Custom Name / Layout & Print (PLAN 6
+              // Phase 2, 2026-10-13) — a SEPARATE prop from fieldSettings above because this data
+              // lives OUTSIDE `value`/`onChange` entirely (see PivotBuilder.jsx's own fieldLayouts
+              // state WHY comment: none of these four change the query result, only the display, so
+              // they're kept out of PivotRequest/structuralSignature on purpose).
+              fieldLayout={{
+                overrides: fieldLayouts,
+                onChange: (field, patch) => {
+                  const existing = fieldLayouts.find((f) => f.field === field) ?? {};
+                  const next = { ...existing, ...patch };
+                  const withoutField = fieldLayouts.filter((f) => f.field !== field);
+                  const isDefault = !next.customName && next.compact == null && next.repeatItemLabels == null && !next.insertBlankLine;
+                  onFieldLayoutsChange(isDefault ? withoutField : [...withoutField, { field, ...next }]);
+                },
+              }}
+              // Real Excel's per-field "Show items with no data" (PLAN 7, 2026-10-13, EXPERIMENTAL —
+              // see the plan file's own WHY comment on why this needs live-cube verification). Back
+              // in `value`/`onChange` (unlike fieldLayout above) — this one genuinely changes which
+              // rows come back from the query, so it has to reach request.fieldsShowingItemsWithNoData,
+              // not the presentation-only sibling list.
+              fieldShowNoData={{
+                fields: value.fieldsShowingItemsWithNoData,
+                onChange: (field, checked) => {
+                  const withoutField = value.fieldsShowingItemsWithNoData.filter((f) => f !== field);
+                  onChange({
+                    ...value,
+                    fieldsShowingItemsWithNoData: checked ? [...withoutField, field] : withoutField,
+                  });
+                },
+              }}
             />
           </div>
 
