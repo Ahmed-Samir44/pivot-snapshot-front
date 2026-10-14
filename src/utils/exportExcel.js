@@ -166,11 +166,17 @@ export async function exportPivotToExcel({
   layout = "Tabular",
   fieldLayouts = [],
   repeatItemLabels = false,
+  // A per-member drilldown pivot (PLAN 8): ragged rows in ONE indented "Row Labels" column, same
+  // as the live grid and the saved snapshot.
+  drilldown = false,
 }) {
   const { rowHeaders, columnHeaders, cells } = result;
-  const labelDepth = rowHeaders[0]?.labels.length ?? 0;
+  // MAX across every row — a drilldown's rows have different depths.
+  const labelDepth = rowHeaders.reduce((max, h) => Math.max(max, h.labels.length), 0);
   const rowFieldLayouts = Array.from({ length: labelDepth }, (_, level) => fieldLayouts.find((f) => f.field === rows[level]) ?? null);
-  const rowHeaderGroups = buildRowHeaderGroups(labelDepth, rowFieldLayouts.map((fl) => fl?.compact ?? layout === "Compact"));
+  const rowHeaderGroups = drilldown
+    ? [{ start: 0, end: Math.max(0, labelDepth - 1) }]
+    : buildRowHeaderGroups(labelDepth, rowFieldLayouts.map((fl) => fl?.compact ?? layout === "Compact"));
   // One sheet column per row-header GROUP (a compact-merged group shares one column), not per level.
   const rowDepth = rowHeaderGroups.length;
   // Same floor-of-1 fallback PivotGrid.jsx uses for its own on-screen rendering (see that file's own
@@ -241,7 +247,7 @@ export async function exportPivotToExcel({
   // Row headers + values, one sheet row per DISPLAY row (see buildDisplayRows) — the same rows the
   // live grid draws: compact-form item rows (indented with Excel's own cell indent), "ER Total"/
   // "Grand Total" captions, each label shown once (Excel doesn't merge label cells by default).
-  const displayRows = buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts, repeatItemLabels, measuresLevel: rowsMeasuresIndex, outline: layout !== "Tabular" });
+  const displayRows = buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts, repeatItemLabels, measuresLevel: rowsMeasuresIndex, outline: layout !== "Tabular", drilldown });
   const firstDataRow = currentRow;
   // Sheet row of every display row that shows a result row's values: [excelRow, rowIndex, kind].
   const placedRows = [];

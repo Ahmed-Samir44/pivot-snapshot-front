@@ -33,6 +33,13 @@ function versionLabel(v) {
   return v.versionName ? `Version ${v.versionNumber} — ${v.versionName}` : `Version ${v.versionNumber}`;
 }
 
+// A saved per-member drilldown pivot (PLAN 8) has no Rows fields but does have row labels — its
+// hierarchy replaces Rows entirely. Read off the version itself (not its builder state, which an
+// older version may lack), so the preview and export draw it as one indented "Row Labels" column.
+function isDrilldownVersion(version) {
+  return version.rows.length === 0 && version.result.rowHeaders.some((h) => h.labels.length > 0);
+}
+
 function parseBuilderState(builderStateJson) {
   if (!builderStateJson) return null;
   try {
@@ -317,6 +324,7 @@ export default function SnapshotHistory() {
         layout: parseBuilderState(previewVersion.builderStateJson)?.reportLayout ?? "Tabular",
         repeatItemLabels: parseBuilderState(previewVersion.builderStateJson)?.repeatItemLabels ?? false,
         fieldLayouts: parseBuilderState(previewVersion.builderStateJson)?.fieldLayouts ?? [],
+        drilldown: isDrilldownVersion(previewVersion),
       });
     } catch (err) {
       setExportError(err.message);
@@ -659,6 +667,8 @@ export default function SnapshotHistory() {
               layout={builderState?.reportLayout ?? "Tabular"}
               repeatItemLabels={builderState?.repeatItemLabels ?? false}
               fieldLayouts={builderState?.fieldLayouts ?? []}
+              // Read-only here: no onToggleDrilldownMember, so no +/- toggles — just the frozen rows.
+              rowsHierarchyDrilldown={isDrilldownVersion(previewVersion) ? { expandedMemberUniqueNames: [] } : null}
               boundedHeight={false}
             />
           </Modal>

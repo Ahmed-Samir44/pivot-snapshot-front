@@ -706,16 +706,8 @@ export default function PivotBuilder() {
 
   const handleExport = async () => {
     if (!result || !lastQuery) return;
-    // Real Excel's per-member OLAP drilldown (PLAN 8, EXPERIMENTAL v1) — exportExcel.js's own
-    // merge-run tracking assumes one fixed row depth for the whole table (confirmed by direct code
-    // reading before ever attempting this feature) and would silently merge an expanded
-    // descendant's cell into an unrelated collapsed row's column span. Rejected with a clear
-    // message instead, same "reject, don't guess" discipline as the Save Snapshot endpoint's own
-    // equivalent guard.
-    if (lastQuery.rowsHierarchyDrilldown) {
-      setExportError("Exporting to Excel isn't supported yet for a per-member drilldown pivot.");
-      return;
-    }
+    // A per-member drilldown pivot (PLAN 8) exports since 2026-10-14 (Drilldown v2): exportExcel.js
+    // draws it through the same display-rows step as the live grid, in `drilldown` mode.
     setExporting(true);
     setExportError(null);
     try {
@@ -735,6 +727,7 @@ export default function PivotBuilder() {
         layout: reportLayout,
         repeatItemLabels,
         fieldLayouts,
+        drilldown: Boolean(lastQuery.rowsHierarchyDrilldown),
       });
     } catch (err) {
       setExportError(err.message);
