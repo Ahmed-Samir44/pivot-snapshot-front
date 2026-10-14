@@ -87,7 +87,15 @@ export function totalCaptionInfo(row, measuresLevel = -1) {
 // blanks that row's values and adds a "<member> Total" row (the SAME cube values, not a re-sum, so
 // it's exact even for non-additive measures) after its descendants; "Off" just blanks it. A blanked
 // parent keeps labelSourceIndex so its +/- toggle still knows which member it is.
-export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts = [], repeatItemLabels = false, measuresLevel = -1, drilldown = false, outline = false, drilldownSubtotals = "Top" }) {
+//
+// drillSlot (Drilldown v3, 2026-10-14): the Rows position of a drilldown hierarchy COMBINED with other
+// fields (-1 = none; a drilldown ALONE still uses `drilldown`). Rows then have one label per field
+// and row.drill = { level, depth, ancestorUniqueNames, memberUniqueName? } from the backend. The
+// slot's labels are indented by that depth, and a member's BLOCK is its own rows plus every row with
+// it among drill ancestors (same outer item) — so a total that belongs after a member (a Tabular
+// Top moved to bottom, or an expanded parent's "Bottom" total when the slot is the last field)
+// lands after the member's whole block, Hospital's rows included — real Excel's rule.
+export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts = [], repeatItemLabels = false, measuresLevel = -1, drilldown = false, outline = false, drilldownSubtotals = "Top", drillSlot = -1 }) {
   const groupOfLevel = [];
   rowHeaderGroups.forEach((g, gi) => {
     for (let l = g.start; l <= g.end; l++) groupOfLevel[l] = gi;
@@ -110,6 +118,13 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
   const belongs = (labels, path) => path.every((p, i) => labels[i] === p);
   const isGrand = (row) => row.isTotal && totalCaptionInfo(row, measuresLevel).level === -1;
 
+  // Combined drilldown (drillSlot): the member a row stands for at the slot, its depth, the extra
+  // indent the slot's label gets, and whether a row sits inside a member's block.
+  const memberAt = (row) => row.drill?.memberUniqueName ?? row.uniqueNames?.[drillSlot];
+  const indentFor = (g, l, row) => (isMerged(g) ? l - g.start : 0) + (drillSlot >= 0 && l === drillSlot ? (row?.drill?.depth ?? 0) : 0);
+  const inDrillBlock = (row, outerLabels, member) =>
+    drillSlot >= 0 && belongs(row.labels, outerLabels) && (memberAt(row) === member || (row.drill?.ancestorUniqueNames ?? []).includes(member));
+
   const out = [];
   const deferred = []; // stack of { path, level, indexes } — totals moved to the bottom of their item
   const emittedHeaders = new Set();
@@ -120,7 +135,7 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
       const lines = [];
       const inGroup = level === -1 ? g.start === 0 : level >= g.start && level <= g.end;
       if (inGroup) {
-        lines.push({ text: caption, indent: level === -1 || !isMerged(g) ? 0 : level - g.start, level: Math.max(level, 0) });
+        lines.push({ text: caption, indent: level === -1 ? 0 : indentFor(g, level, row), level: Math.max(level, 0) });
       } else if (measuresLevel > level && measuresLevel >= g.start && measuresLevel <= g.end) {
         lines.push({ text: row.labels[measuresLevel] ?? "", indent: isMerged(g) ? measuresLevel - g.start : 0, level: measuresLevel });
       }
@@ -137,43 +152,53 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
   // Repeat Item Labels — like Excel; a label merged into a shared compact column never does.
   const showsOuterLabel = (g, l, visible) => (!isHeaderLevel(l) || (!isMerged(g) && repeatFor(l))) && (repeatFor(l) || visible[l]);
 
-  const pushHeader = (level, path, sourceIndex, uniqueNames) => {
+  // src = the row this header was derived from (for uniqueNames/drill depth). labelSourceIndex lets
+  // a header at the drilldown slot keep its member's +/- toggle even with blank values.
+  const pushHeader = (level, path, sourceIndex, src, srcIndex) => {
     const visible = computeVisibleLevels(path, prevPath);
     const groupCells = rowHeaderGroups.map((g) => {
       const lines = [];
       for (let l = g.start; l <= Math.min(g.end, level); l++) {
         if (l === level || showsOuterLabel(g, l, visible)) {
-          lines.push({ text: display(path[l], uniqueNames?.[l]), indent: isMerged(g) ? l - g.start : 0, level: l });
+          lines.push({ text: display(path[l], src?.uniqueNames?.[l]), indent: indentFor(g, l, src), level: l });
         }
       }
       return { lines };
     });
-    out.push({ kind: "header", sourceIndex, level, path, groupCells });
+    out.push({ kind: "header", sourceIndex, labelSourceIndex: srcIndex, level, path, groupCells });
     emittedHeaders.add(`${level}\u0001${path.join("\u0001")}`);
     prevPath = path;
   };
 
-  const flushDeferred = (labels) => {
-    while (deferred.length > 0 && (labels === null || !belongs(labels, deferred[deferred.length - 1].path))) {
+  // A deferred total at the drilldown slot stays pending through its member's WHOLE block (its
+  // expanded descendants' rows included), not just rows sharing its own label.
+  const stillInside = (row, entry) => belongs(row.labels, entry.path) || (entry.member !== undefined && inDrillBlock(row, entry.path.slice(0, drillSlot), entry.member));
+
+  const flushDeferred = (row) => {
+    while (deferred.length > 0 && (row === null || !stillInside(row, deferred[deferred.length - 1]))) {
       const d = deferred.pop();
       d.indexes.forEach((index) => pushSubtotal(index, d.level));
     }
   };
 
   // Drilldown "Bottom" subtotals: expanded parents whose "<member> Total" row is still pending,
-  // innermost last — emitted once a row no longer belongs under them.
+  // innermost last — emitted once a row no longer belongs under them. A combined drilldown's parent
+  // carries its member/outer labels, and its total goes only in the slot's own column.
   const openDrillParents = [];
-  const flushDrillParents = (labels) => {
-    while (openDrillParents.length > 0 && (labels === null || !belongs(labels, openDrillParents[openDrillParents.length - 1].path))) {
+  const flushDrillParents = (row) => {
+    const keep = (p) => (p.member !== undefined ? inDrillBlock(row, p.outer, p.member) : belongs(row.labels, p.path));
+    while (openDrillParents.length > 0 && (row === null || !keep(openDrillParents[openDrillParents.length - 1]))) {
       const p = openDrillParents.pop();
-      const row = rowHeaders[p.index];
-      const caption = `${display(row.labels[p.level], row.uniqueNames?.[p.level])} Total`;
+      const parent = rowHeaders[p.index];
+      const caption = `${display(parent.labels[p.level], parent.uniqueNames?.[p.level])} Total`;
       out.push({
         kind: "subtotal",
         sourceIndex: p.index,
         level: p.level,
-        path: row.labels,
-        groupCells: rowHeaderGroups.map((g) => ({ lines: [{ text: caption, indent: p.level - g.start, level: p.level }] })),
+        path: parent.labels,
+        groupCells: rowHeaderGroups.map((g) => ({
+          lines: p.member === undefined || (p.level >= g.start && p.level <= g.end) ? [{ text: caption, indent: p.member === undefined ? p.level - g.start : indentFor(g, p.level, parent), level: p.level }] : [],
+        })),
       });
     }
   };
@@ -190,8 +215,8 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
       continue;
     }
 
-    flushDrillParents(row.labels);
-    flushDeferred(row.labels);
+    flushDrillParents(row);
+    flushDeferred(row);
 
     if (row.isTotal) {
       const { level } = totalCaptionInfo(row, measuresLevel);
@@ -206,13 +231,15 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
       const after = rowHeaders[j];
       const isTop = after !== undefined && !isGrand(after) && belongs(after.labels, path);
 
+      // At the drilldown slot the member's identity rides on the total itself (drill.memberUniqueName).
+      const member = drillSlot >= 0 && level === drillSlot ? memberAt(row) : undefined;
       if (!isTop) {
         indexes.forEach((index) => pushSubtotal(index, level));
       } else if (isHeaderLevel(level) && indexes.length === 1) {
-        pushHeader(level, path, i, row.uniqueNames);
+        pushHeader(level, path, i, row, member !== undefined ? i : undefined);
       } else {
-        if (isHeaderLevel(level)) pushHeader(level, path, null, row.uniqueNames);
-        deferred.push({ path, level, indexes });
+        if (isHeaderLevel(level)) pushHeader(level, path, null, row, member !== undefined ? i : undefined);
+        deferred.push({ path, level, indexes, member });
       }
       i = j - 1;
       continue;
@@ -221,7 +248,7 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
     // Detail row: first the item rows for any header level not shown yet.
     for (let level = 0; level < row.labels.length; level++) {
       if (isHeaderLevel(level) && !emittedHeaders.has(`${level}\u0001${pathOf(row.labels, level).join("\u0001")}`)) {
-        pushHeader(level, pathOf(row.labels, level), null, row.uniqueNames);
+        pushHeader(level, pathOf(row.labels, level), null, row, drillSlot >= 0 && level === drillSlot ? i : undefined);
       }
     }
 
@@ -240,18 +267,32 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
       const lines = [];
       for (let l = g.start; l <= g.end && l < row.labels.length; l++) {
         if (showsOuterLabel(g, l, visible)) {
-          lines.push({ text: display(row.labels[l], row.uniqueNames?.[l]), indent: isMerged(g) ? l - g.start : 0, level: l });
+          lines.push({ text: display(row.labels[l], row.uniqueNames?.[l]), indent: indentFor(g, l, row), level: l });
         }
       }
       return { lines };
     });
-    // An expanded drilldown member: its child comes right after it.
+    // An expanded drilldown member: its child comes right after it. Combined (drillSlot) only when
+    // the slot is the LAST Rows field — with fields after it, the backend's own subtotal rows handle
+    // the member's total (see SubtotalsProcessor.InsertDrillSlotSubtotals).
     const next = rowHeaders[i + 1];
-    const isExpandedDrillParent =
-      drilldown && next !== undefined && !next.isTotal && next.labels.length > row.labels.length && belongs(next.labels, row.labels);
+    const isExpandedDrillParent = drilldown
+      ? next !== undefined && !next.isTotal && next.labels.length > row.labels.length && belongs(next.labels, row.labels)
+      : drillSlot >= 0 &&
+        drillSlot === row.labels.length - 1 &&
+        next !== undefined &&
+        !next.isTotal &&
+        belongs(next.labels, row.labels.slice(0, drillSlot)) &&
+        (next.drill?.ancestorUniqueNames ?? []).includes(memberAt(row));
     if (isExpandedDrillParent && drilldownSubtotals !== "Top") {
       out.push({ kind: "detail", sourceIndex: null, labelSourceIndex: i, level: row.labels.length - 1, path: row.labels, groupCells });
-      if (drilldownSubtotals === "Bottom") openDrillParents.push({ index: i, level: row.labels.length - 1, path: row.labels });
+      if (drilldownSubtotals === "Bottom") {
+        openDrillParents.push(
+          drilldown
+            ? { index: i, level: row.labels.length - 1, path: row.labels }
+            : { index: i, level: drillSlot, path: row.labels, outer: row.labels.slice(0, drillSlot), member: memberAt(row) },
+        );
+      }
     } else {
       out.push({ kind: "detail", sourceIndex: i, level: row.labels.length - 1, path: row.labels, groupCells });
     }

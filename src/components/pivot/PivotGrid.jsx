@@ -652,6 +652,9 @@ export default function PivotGrid({
   // expandedMemberUniqueNames } or null/undefined when not active.
   rowsHierarchyDrilldown = null,
   onToggleDrilldownMember = null,
+  // (uniqueName, row) => boolean — whether that member is expanded on that row (per outer item for a
+  // combined drilldown, Drilldown v3). Optional: without it, the drilldown's plain list is used.
+  isDrilldownMemberExpanded = null,
   // The report Subtotals setting as applied to a drilldown hierarchy (see buildDisplayRows'
   // drilldownSubtotals). Passed explicitly rather than read off `request`, since a read-only
   // snapshot preview has no live request.
@@ -774,7 +777,14 @@ export default function PivotGrid({
   // can represent ragged depth without a per-level field to anchor separate columns to (there is no
   // `rows[level]` field backing any level here — Rows is empty in this mode, see
   // PivotBuilder.jsx's own rowsHierarchyDrilldown WHY comment).
-  const rowHeaderGroups = rowsHierarchyDrilldown ? [{ start: 0, end: Math.max(0, rowDepth - 1) }] : buildRowHeaderGroups(rowDepth, compactFlags);
+  //
+  // Drilldown v3: a drilldown COMBINED with other Rows fields (its slot among `rows`) is laid out like
+  // any Rows field instead — one label per field, the slot's own labels indented by member depth
+  // (see buildDisplayRows' drillSlot). Only a drilldown ALONE keeps the single ragged column.
+  const drillSlot = rowsHierarchyDrilldown ? rows.indexOf(rowsHierarchyDrilldown.topLevelField) : -1;
+  const drilldownAlone = Boolean(rowsHierarchyDrilldown) && rows.filter((f) => f !== MEASURES_PLACEHOLDER && f !== rowsHierarchyDrilldown.topLevelField).length === 0;
+  const combinedDrillSlot = rowsHierarchyDrilldown && !drilldownAlone ? drillSlot : -1;
+  const rowHeaderGroups = drilldownAlone ? [{ start: 0, end: Math.max(0, rowDepth - 1) }] : buildRowHeaderGroups(rowDepth, compactFlags);
   const rowHeaderColumnCount = rowHeaderGroups.length;
   // Backend floor of 1 (not 0) whenever there's at least one row to label: with no Value fields at
   // all (Excel's own "removed the last Value field" state), Columns can legitimately come back with
@@ -805,11 +815,12 @@ export default function PivotGrid({
     rowFieldLayouts,
     repeatItemLabels,
     measuresLevel: rowsMeasuresIndex,
-    drilldown: Boolean(rowsHierarchyDrilldown),
+    drilldown: drilldownAlone,
     // Excel's Outline AND Compact layouts are both "outline form" (outer items on their own row);
     // only Tabular puts an item on its first child's row.
     outline: layout !== "Tabular",
     drilldownSubtotals,
+    drillSlot: combinedDrillSlot,
   });
   // A drilldown hierarchy has its OWN per-member +/- (onToggleDrilldownMember) — the outer-item
   // collapse would be a second, conflicting toggle on the same rows.
@@ -1088,7 +1099,7 @@ export default function PivotGrid({
                       // render a blank header (caught live, 2026-10-13, "الheader...مش باين" — this
                       // was actually the SAME degenerate-depth-1 case as the color-contrast bug, not
                       // a second contrast issue).
-                      group.start === group.end && !rowsHierarchyDrilldown ? (
+                      group.start === group.end && !drilldownAlone ? (
                         <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-white/40 ${headerBg} px-2 py-2`}>
                           <FieldHeaderMenu
                             label={rowFieldLayouts[group.start]?.customName || rowFieldLabels[group.start] || ""}
@@ -1098,6 +1109,8 @@ export default function PivotGrid({
                             request={request}
                             onChange={onChange}
                             muted
+                            // A combined drilldown slot's own column: sort only (Drilldown v3).
+                            sortOnly={group.start === combinedDrillSlot}
                           />
                         </th>
                       ) : (
@@ -1109,7 +1122,7 @@ export default function PivotGrid({
                         // what a partial merge's own header shows, so this reuses the one convention
                         // already verified for the full-merge case rather than guessing a new one.
                         <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-white/40 ${headerBg} px-2 py-2`}>
-                          {rowsHierarchyDrilldown ? (
+                          {drilldownAlone ? (
                             // A drilldown hierarchy sorts from here (Drilldown v2) — sort only, see
                             // FieldHeaderMenu's sortOnly WHY comment.
                             <FieldHeaderMenu
@@ -1185,7 +1198,9 @@ export default function PivotGrid({
                     // always goes through the merged branch below (where the +/- toggle lives), even
                     // with only 1 level today, since a SIBLING row could still be deeper once
                     // something else gets expanded.
-                    if (group.start === group.end && !rowsHierarchyDrilldown) {
+                    // A combined drilldown slot's own column (Drilldown v3) goes through the line
+                    // renderer below too — it's where the depth indent and the +/- toggle live.
+                    if (group.start === group.end && !drilldownAlone && group.start !== combinedDrillSlot) {
                       return (
                         // Left-aligned like Excel's own row labels in every layout (was centered).
                         <td key={group.start} className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-left ${labelWeight}`}>
@@ -1215,9 +1230,13 @@ export default function PivotGrid({
                               // column. uniqueNames walks the same ancestry as labels (see
                               // CubeQueryService.BuildDrilldownHeaders), so the last entry is always
                               // this row's own member.
+                              //
+                              // Drilldown v3: combined with other Rows fields, the member is the one
+                              // at the slot (combinedDrillSlot), and every row has one label per field.
+                              const memberLevel = drilldownAlone ? labelRow?.labels.length - 1 : combinedDrillSlot;
                               const isOwnMember =
-                                rowsHierarchyDrilldown && labelRow && !labelRow.isTotal && displayRow.kind !== "subtotal" && level === labelRow.labels.length - 1;
-                              const rawUniqueName = isOwnMember ? labelRow.uniqueNames?.[labelRow.uniqueNames.length - 1] : null;
+                                rowsHierarchyDrilldown && labelRow && !labelRow.isTotal && displayRow.kind !== "subtotal" && level === memberLevel;
+                              const rawUniqueName = isOwnMember ? labelRow.uniqueNames?.[memberLevel] : null;
                               // Real data-quality issue caught live, 2026-10-13: some members on this
                               // cube have an incomplete UniqueName (e.g. ending in a bare "&" with no
                               // key after it — a malformed/empty key on the cube side, not a bug in
@@ -1227,16 +1246,21 @@ export default function PivotGrid({
                               // fail validation and break the WHOLE query for every row, not just
                               // this one member's own toggle.
                               const uniqueName = rawUniqueName && rawUniqueName.endsWith("]") ? rawUniqueName : null;
+                              // Per outer item when combined (Drilldown v3) — the caller knows the
+                              // expansion state; the plain list is the drilldown-alone fallback.
+                              const expanded = uniqueName
+                                ? (isDrilldownMemberExpanded?.(uniqueName, labelRow) ?? rowsHierarchyDrilldown.expandedMemberUniqueNames.includes(uniqueName))
+                                : false;
                               return (
                                 <div key={level} style={{ paddingLeft: line.indent * 16 }} className="flex items-center gap-1">
                                   {uniqueName && onToggleDrilldownMember && (
                                     <button
                                       type="button"
-                                      onClick={() => onToggleDrilldownMember(uniqueName)}
+                                      onClick={() => onToggleDrilldownMember(uniqueName, labelRow)}
                                       className="text-muted hover:text-ink"
-                                      aria-label={rowsHierarchyDrilldown.expandedMemberUniqueNames.includes(uniqueName) ? "Collapse" : "Expand"}
+                                      aria-label={expanded ? "Collapse" : "Expand"}
                                     >
-                                      {rowsHierarchyDrilldown.expandedMemberUniqueNames.includes(uniqueName) ? (
+                                      {expanded ? (
                                         <ChevronDown className="h-3 w-3" />
                                       ) : (
                                         <ChevronRight className="h-3 w-3" />

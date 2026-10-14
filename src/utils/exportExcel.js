@@ -171,6 +171,9 @@ export async function exportPivotToExcel({
   drilldown = false,
   // The report Subtotals setting applied to the drilldown hierarchy (see buildDisplayRows).
   drilldownSubtotals = "Top",
+  // A drilldown COMBINED with other Rows fields (Drilldown v3): its slot's index in `rows` (-1 =
+  // none). Laid out like any Rows field; buildDisplayRows indents the slot by member depth.
+  drillSlot = -1,
 }) {
   const { rowHeaders, columnHeaders, cells } = result;
   // MAX across every row — a drilldown's rows have different depths.
@@ -249,7 +252,7 @@ export async function exportPivotToExcel({
   // Row headers + values, one sheet row per DISPLAY row (see buildDisplayRows) — the same rows the
   // live grid draws: compact-form item rows (indented with Excel's own cell indent), "ER Total"/
   // "Grand Total" captions, each label shown once (Excel doesn't merge label cells by default).
-  const displayRows = buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts, repeatItemLabels, measuresLevel: rowsMeasuresIndex, outline: layout !== "Tabular", drilldown, drilldownSubtotals });
+  const displayRows = buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts, repeatItemLabels, measuresLevel: rowsMeasuresIndex, outline: layout !== "Tabular", drilldown, drilldownSubtotals, drillSlot });
   const firstDataRow = currentRow;
   // Sheet row of every display row that shows a result row's values: [excelRow, rowIndex, kind].
   const placedRows = [];

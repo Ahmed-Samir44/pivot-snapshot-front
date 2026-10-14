@@ -15,6 +15,7 @@ import {
   clearOrphanedCalculatedItems,
   clearDanglingMeasureReferences,
   clearDanglingBaseFieldReferences,
+  reconcileDrilldown,
 } from "../../utils/dragDrop";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
 import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "../../utils/conditionalFormat";
@@ -2514,13 +2515,6 @@ export default function FieldPicker({
 
     if (toZone === "rows" && !next.rows.includes(field)) {
       next.rows = [...next.rows, field];
-      // Real bug caught live, 2026-10-13: checking a field's own checkbox in the Available Fields
-      // tree goes through THIS function (onFieldCheckToggle → moveField), a different path from the
-      // Rows HierarchicalCubePathSelect's own onChange (which already clears this) — a stray leftover
-      // rowsHierarchyDrilldown from an earlier "Drilldown" click combined with this newly-added flat
-      // field hit MdxPivotQueryBuilder's "can't combine" validation on the very next query ("دوست على
-      // ال specialty وبعدين شيلتها"). Same mutual-exclusivity rule, enforced here too.
-      next.rowsHierarchyDrilldown = null;
     } else if (toZone === "columns" && !next.columns.includes(field)) {
       next.columns = [...next.columns, field];
     } else if (toZone === "values") {
@@ -2558,6 +2552,9 @@ export default function FieldPicker({
     // (plain drag-and-drop between zones, and each pill's own right-click "Move to…" menu).
     next.values = clearDanglingBaseFieldReferences(next.values, next.rows);
     Object.assign(next, clearDanglingMeasureReferences(next, next.values.map((v) => v.field)));
+    // Drilldown v3: the drilldown is a Rows slot now — it survives this move unless its own slot
+    // left Rows or a same-hierarchy field arrived (see reconcileDrilldown).
+    Object.assign(next, reconcileDrilldown(next.rowsHierarchyDrilldown, next.rows));
 
     onChange(next);
   };
@@ -2640,29 +2637,32 @@ export default function FieldPicker({
     next.calculatedItems = clearOrphanedCalculatedItems(value.calculatedItems, next.rows, next.columns);
     next.values = clearDanglingBaseFieldReferences(next.values, next.rows);
     Object.assign(next, clearDanglingMeasureReferences(next, next.values.map((v) => v.field)));
-    // Same mutual-exclusivity rule as moveField's own fix just above — "+ Rows" adds real flat
-    // fields to Rows too, which can't coexist with a leftover rowsHierarchyDrilldown either.
-    if (axis === "rows") {
-      next.rowsHierarchyDrilldown = null;
-    }
+    // Drilldown v3: same rule as moveField's — "+ Rows" ends the drilldown only if it adds a level
+    // of the drilldown's OWN hierarchy (or "+ Cols" takes its slot away).
+    Object.assign(next, reconcileDrilldown(next.rowsHierarchyDrilldown, next.rows));
 
     onChange(next);
   };
 
-  // Real Excel's per-member OLAP drilldown (PLAN 8, 2026-10-13, EXPERIMENTAL). v1 scope: a
-  // drilldown hierarchy REPLACES flat-field Rows entirely rather than crossjoining alongside other
-  // fields (MdxPivotQueryBuilder rejects the combination — see HierarchyDrilldown's own WHY
-  // comment), so starting it clears Rows and every Rows-only per-field config outright rather than
-  // trying to merge with whatever was there. The Rows HierarchicalCubePathSelect's own onChange
-  // (below) clears rowsHierarchyDrilldown right back whenever a real field gets added to Rows the
-  // normal way, keeping the two mutually exclusive in both directions.
+  // Real Excel's per-member OLAP drilldown (PLAN 8). Since Drilldown v3 (2026-10-14) the hierarchy
+  // JOINS Rows as one slot (its top-level field, appended at the end like any field added to Rows)
+  // instead of replacing Rows — the other Rows fields stay, and the slot can be dragged/reordered
+  // among them like a normal pill (see reconcileDrilldown for when drilldown mode ends). Any flat
+  // levels of this SAME hierarchy already in Rows are dropped: SSAS can't put one hierarchy on an
+  // axis twice. Σ Values moves to Columns (the backend requires it there for a combined drilldown),
+  // and show-items-with-no-data is cleared (not supported alongside a combined drilldown).
   const startDrilldown = (topLevelField) => {
+    const sameHierarchy = (f) => f.split("].[").slice(0, 2).join("].[") === topLevelField.split("].[").slice(0, 2).join("].[");
+    const otherRows = value.rows.filter((f) => !sameHierarchy(f) && f !== MEASURES_PLACEHOLDER);
+    const columns =
+      value.rows.includes(MEASURES_PLACEHOLDER) && !value.columns.includes(MEASURES_PLACEHOLDER) ? [...value.columns, MEASURES_PLACEHOLDER] : value.columns;
     onChange({
       ...value,
-      rows: [],
+      rows: [...otherRows, topLevelField],
+      columns,
       rowsHierarchyDrilldown: { topLevelField, expandedMemberUniqueNames: [] },
       rowLevelSorts: [],
-      fieldSubtotals: [],
+      fieldSubtotals: value.fieldSubtotals.filter((s) => otherRows.includes(s.field)),
       fieldsShowingItemsWithNoData: [],
       // Drilldown v2 (2026-10-14): Subtotals now applies to the hierarchy, and Excel's own default
       // for a new hierarchy is subtotals at Top (each expanded member's row shows its total). This
@@ -2901,9 +2901,12 @@ export default function FieldPicker({
                 const fieldSubtotals = value.fieldSubtotals.filter((f) => rows.includes(f.field));
                 // Same orphaned-per-field cleanup, for Show Items With No Data (PLAN 7, 2026-10-13).
                 const fieldsShowingItemsWithNoData = value.fieldsShowingItemsWithNoData.filter((f) => rows.includes(f));
+                // Drilldown v3: the drilldown keeps its slot among these Rows fields unless it was
+                // removed or a same-hierarchy field joined (see reconcileDrilldown).
+                const drilldownState = reconcileDrilldown(value.rowsHierarchyDrilldown, rows);
                 onChange({
                   ...value,
-                  rows,
+                  rows: drilldownState.rows,
                   columns,
                   values,
                   dateGroupings,
@@ -2913,9 +2916,7 @@ export default function FieldPicker({
                   fieldsShowingItemsWithNoData,
                   rowLevelSorts: [],
                   columnLevelSorts: newlyAddedToRows.length > 0 ? [] : value.columnLevelSorts,
-                  // Mutually exclusive with per-member drilldown (PLAN 8) — a real flat field added
-                  // to Rows the normal way means the user's leaving drilldown mode.
-                  rowsHierarchyDrilldown: rows.length > 0 ? null : value.rowsHierarchyDrilldown,
+                  rowsHierarchyDrilldown: drilldownState.rowsHierarchyDrilldown,
                 });
               }}
               dragSourceKey="rows"

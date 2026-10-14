@@ -28,6 +28,24 @@ export function clearOrphanedCalculatedItems(calculatedItems, rows, columns) {
   return calculatedItems.filter((item) => rows.includes(item.field) || columns.includes(item.field));
 }
 
+// "[Dim].[Hierarchy].[Level]" → "[Dim].[Hierarchy]" (unchanged if it's already 2 segments).
+function hierarchyOf(field) {
+  return field.match(/^(\[[^\]]+\]\.\[[^\]]+\])/)?.[1] ?? field;
+}
+
+// Drilldown v3 (2026-10-14): the drilldown hierarchy is a SLOT among the Rows fields (its own
+// topLevelField sits in Rows). It survives any Rows change as long as that slot is still there and
+// no other Rows field comes from the same hierarchy (SSAS can't put one hierarchy on an axis twice);
+// otherwise drilldown mode ends — the slot is dropped too, so no stale entry is left in Rows.
+// Returns the reconciled { rows, rowsHierarchyDrilldown } pair to spread into the next request.
+export function reconcileDrilldown(drilldown, rows) {
+  if (!drilldown) return { rows, rowsHierarchyDrilldown: null };
+  const top = drilldown.topLevelField;
+  const clash = rows.some((f) => f !== top && hierarchyOf(f) === hierarchyOf(top));
+  if (rows.includes(top) && !clash) return { rows, rowsHierarchyDrilldown: drilldown };
+  return { rows: rows.filter((f) => f !== top), rowsHierarchyDrilldown: null };
+}
+
 // Several request pieces reference a Value by its bare FIELD NAME (Filter.byMeasureField for
 // TopN/BottomN/GreaterThan/LessThan/Between, Sort.byMeasureField, RowLevelSorts/ColumnLevelSorts'
 // own byMeasureField) — removing that Value from Values used to leave these references dangling,
