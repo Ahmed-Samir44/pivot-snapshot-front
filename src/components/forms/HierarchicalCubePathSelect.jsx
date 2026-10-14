@@ -40,6 +40,11 @@ function PlacedFieldPill({
   // onChange(field, checked) }.
   fieldShowNoData,
 }) {
+  // Columns (2026-10-14) passes fieldSettings for its drilldown field only — appliesTo(field) picks
+  // it, and noCustom hides "Custom" (column totals have no function choice here).
+  if (fieldSettings?.appliesTo && !fieldSettings.appliesTo(fullPath)) {
+    fieldSettings = undefined;
+  }
   // "menu" (the root Move/Remove list) or "subtotals" (the Field Settings sub-panel) — reset to
   // "menu" from the trigger button's own onClick below (same pattern FieldHeaderMenu's own
   // setPanel("shortcuts") already uses in PivotGrid.jsx), not on unmount, since this component
@@ -174,7 +179,7 @@ function PlacedFieldPill({
                     { key: "automatic", label: "Automatic", active: effectivePosition !== "Off" && !currentFunctions },
                     { key: "none", label: "None", active: effectivePosition === "Off" },
                     { key: "custom", label: "Custom", active: effectivePosition !== "Off" && Boolean(currentFunctions) },
-                  ].map((opt) => (
+                  ].filter((opt) => !(fieldSettings.noCustom && opt.key === "custom")).map((opt) => (
                     <label key={opt.key} className="flex cursor-pointer items-center gap-2 rounded-lg py-1.5 text-left hover:bg-gold/10">
                       <input
                         type="radio"

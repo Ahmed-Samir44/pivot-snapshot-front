@@ -1086,11 +1086,15 @@ export default function PivotGrid({
                 <th colSpan={Math.max(1, columnHeaders.length)} className={`${headerCellBorder} border-b-2 border-b-white/40 ${headerBg} px-2 py-2`}>
                   <FieldHeaderMenu
                     label={columnFieldLabels.join(" › ")}
-                    field={columns.length === 1 ? columns[0] : null}
+                    // A Columns drilldown sorts from here (A→Z/Z→A or by value), whatever else is on
+                    // Columns — the backend counts it as the axis's one sortable field. Sort only,
+                    // same as the Rows drilldown's "Row Labels" header.
+                    field={columnsDrillSlot >= 0 ? columns[columnsDrillSlot] : columns.length === 1 ? columns[0] : null}
                     axis="Columns"
                     request={request}
                     onChange={onChange}
                     muted
+                    sortOnly={columnsDrillSlot >= 0}
                   />
                 </th>
               </tr>

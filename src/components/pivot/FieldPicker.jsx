@@ -2666,7 +2666,9 @@ export default function FieldPicker({
       rowsHierarchyDrilldown: { topLevelField, expandedMemberUniqueNames: [] },
       columnsHierarchyDrilldown: columnsDrill && !sameHierarchy(columnsDrill.topLevelField) ? columnsDrill : null,
       rowLevelSorts: [],
-      fieldSubtotals: value.fieldSubtotals.filter((s) => otherRows.includes(s.field)),
+      fieldSubtotals: value.fieldSubtotals.filter(
+        (s) => otherRows.includes(s.field) || (columnsDrill && !sameHierarchy(columnsDrill.topLevelField) && s.field === columnsDrill.topLevelField),
+      ),
       fieldsShowingItemsWithNoData: [],
       // Drilldown v2 (2026-10-14): Subtotals now applies to the hierarchy, and Excel's own default
       // for a new hierarchy is subtotals at Top (each expanded member's row shows its total). This
@@ -2877,6 +2879,25 @@ export default function FieldPicker({
                 { zoneKey: "rows", label: "Move to Row Labels" },
                 { zoneKey: "values", label: "Move to Values" },
               ]}
+              // Columns drilldown (2026-10-14): its own Field Settings > Subtotals (Automatic/None)
+              // decides the "Egypt Total" columns independently of the Rows subtotals — stored in the
+              // same fieldSubtotals list (see ColumnDrilldownLayoutProcessor). Only that one field.
+              fieldSettings={
+                value.columnsHierarchyDrilldown
+                  ? {
+                      reportDefault: value.subtotals,
+                      overrides: value.fieldSubtotals,
+                      appliesTo: (field) => field === value.columnsHierarchyDrilldown.topLevelField,
+                      noCustom: true,
+                      onChange: (field, patch) => {
+                        const existing = value.fieldSubtotals.find((f) => f.field === field);
+                        const position = patch.position !== undefined ? patch.position : (existing?.position ?? null);
+                        const withoutField = value.fieldSubtotals.filter((f) => f.field !== field);
+                        onChange({ ...value, fieldSubtotals: position ? [...withoutField, { field, position, functions: null }] : withoutField });
+                      },
+                    }
+                  : undefined
+              }
             />
           </div>
 
@@ -2904,7 +2925,8 @@ export default function FieldPicker({
                 // A field's own Field Settings Subtotals override is meaningless once it's left
                 // Rows — same orphaned-per-field-config cleanup as dateGroupings/numericGroupings/
                 // calculatedItems above, just for fieldSubtotals (added 2026-10-13).
-                const fieldSubtotals = value.fieldSubtotals.filter((f) => rows.includes(f.field));
+                // (A Columns drilldown's own override stays — it isn't a Rows setting.)
+                const fieldSubtotals = value.fieldSubtotals.filter((f) => rows.includes(f.field) || f.field === value.columnsHierarchyDrilldown?.topLevelField);
                 // Same orphaned-per-field cleanup, for Show Items With No Data (PLAN 7, 2026-10-13).
                 const fieldsShowingItemsWithNoData = value.fieldsShowingItemsWithNoData.filter((f) => rows.includes(f));
                 // Drilldown v3: the drilldown keeps its slot among these Rows fields unless it was

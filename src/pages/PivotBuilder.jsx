@@ -567,8 +567,12 @@ export default function PivotBuilder() {
         // A null position means "follow the report-wide Subtotals position" (a Custom field keeps
         // its functions but not its own position) — resolved here because the backend's
         // FieldSubtotals.Position is required (null was a 400, caught live 2026-10-14).
+        // Also kept for a Columns drilldown's own field (its "Egypt Total" columns, 2026-10-14); never
+        // for a Rows drilldown slot (the backend rejects an override there).
         fieldSubtotals: request.fieldSubtotals
-          .filter((f) => request.rows.includes(f.field))
+          .filter((f) =>
+            request.columnsHierarchyDrilldown?.topLevelField === f.field ||
+            (request.rows.includes(f.field) && request.rowsHierarchyDrilldown?.topLevelField !== f.field))
           .map((f) => ({ ...f, position: f.position ?? request.subtotals })),
         calculatedFields: request.calculatedFields.filter((f) => f.name && f.leftField && f.rightField),
         // A CalculatedItem needs a field, a name, and at least one member on either side (see
