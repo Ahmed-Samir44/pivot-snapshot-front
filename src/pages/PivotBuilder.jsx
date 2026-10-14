@@ -11,6 +11,7 @@ import { getTables, getDimensionsForTable, getMeasures } from "../services/cubeM
 import { saveSnapshot, listDefinitions } from "../services/snapshotApi";
 import { MEASURES_PLACEHOLDER, normalizeMeasuresPlacement, hideMeasuresLabelIfSingleValue } from "../utils/measuresPlacement";
 import { readFieldDragPayload, FIELD_DRAG_MIME, removeFieldEverywhere } from "../utils/dragDrop";
+import { isCompleteCalculatedField } from "../utils/calculatedFields";
 
 // This screen renders a live, interactive pivot (React state + re-fetch on every change).
 // It is NOT the saved snapshot: "Save Snapshot" below freezes the CURRENT result (the one already
@@ -574,7 +575,7 @@ export default function PivotBuilder() {
             request.columnsHierarchyDrilldown?.topLevelField === f.field ||
             (request.rows.includes(f.field) && request.rowsHierarchyDrilldown?.topLevelField !== f.field))
           .map((f) => ({ ...f, position: f.position ?? request.subtotals })),
-        calculatedFields: request.calculatedFields.filter((f) => f.name && f.leftField && f.rightField),
+        calculatedFields: request.calculatedFields.filter(isCompleteCalculatedField),
         // A CalculatedItem needs a field, a name, and at least one member on either side (see
         // MdxPivotQueryBuilder.ValidateCalculatedItems) — mirrors the calculatedFields cleaning
         // above.

@@ -18,6 +18,7 @@ import {
   reconcileDrilldowns,
 } from "../../utils/dragDrop";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
+import { calculatedFieldFormula, formulaFieldReference, isCompleteCalculatedField } from "../../utils/calculatedFields";
 import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "../../utils/conditionalFormat";
 
 // Real Excel's own "Show values as" list — its exact order and wording (confirmed 2026-10-14 against
@@ -1348,6 +1349,216 @@ function LevelSortEditor({ label, fields, levelSorts, values, onChange }) {
   );
 }
 
+// "Sort by the field itself" in FieldSortDialog's "by" dropdowns (the other entries are Value fields).
+const SORT_BY_FIELD = "__field__";
+
+// Excel's More Options > "First key sort order" — its own built-in lists, in its dropdown's order
+// and wording (confirmed 2026-10-14 against a screenshot). Values match the backend's SortCustomList.
+const FIRST_KEY_SORT_ORDERS = [
+  { value: "", label: "No Calculation" },
+  { value: "DaysShort", label: "Sun, Mon, Tue, Wed, Thu, Fri, Sat" },
+  { value: "DaysLong", label: "Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday" },
+  { value: "MonthsShort", label: "Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec" },
+  { value: "MonthsLong", label: "January, February, March, April, May, June, July, August, September, October, November, December" },
+];
+
+// A Value field's display name, as Excel lists it in "Ascending (A to Z) by:" ("Count of name").
+function valueFieldLabel(v) {
+  if (v.customLabel) return v.customLabel;
+  return v.field.startsWith("[") ? `${v.dimensionAggregation ?? "Count"} of ${formatDimensionName(v.field)}` : v.field;
+}
+
+// Excel's real per-field "Sort (<field>)" dialog (2026-10-14, against screenshots): Manual /
+// Ascending (A to Z) by / Descending (Z to A) by — each "by" is the field itself or a Value field —
+// a Summary line, and More Options… (AutoSort, First key sort order, Sort By). The field decides the
+// axis, so there's no Rows/Columns choice. Saved as that field's own LevelSort (sorting within each
+// parent group, like Excel); nothing applies until OK.
+//
+// Manual: Excel leaves the items where they are and lets you drag them in the sheet. This grid has no
+// drag, so — when the field is the only one on its axis — the same click-in-order member list the
+// app already had (the axis custom order) stands in for dragging.
+export function FieldSortDialog({ field, axis, level, request, onChange, onBack, onDone }) {
+  const levelSortsKey = axis === "Columns" ? "columnLevelSorts" : "rowLevelSorts";
+  const levelSorts = request[levelSortsKey];
+  const axisFields = axis === "Columns" ? request.columns : request.rows;
+  const singleField = axisFields.filter((f) => f !== MEASURES_PLACEHOLDER).length === 1;
+  const rule = levelSorts.find((s) => s.level === level);
+  const axisSort = request.sort?.axis === axis ? request.sort : null;
+  const fieldName = formatDimensionName(field);
+
+  // Sorting by a value needs Σ Values as the innermost Columns field (the backend's LevelSort rule),
+  // and is offered for Rows fields only — anything else would just be rejected on OK.
+  const measuresInnermost = request.columns[request.columns.length - 1] === MEASURES_PLACEHOLDER;
+  const byOptions = [
+    { value: SORT_BY_FIELD, label: fieldName },
+    ...(axis === "Rows" && measuresInnermost ? request.values.filter((v) => v.field).map((v) => ({ value: v.field, label: valueFieldLabel(v) })) : []),
+  ];
+
+  const [mode, setMode] = useState(() => {
+    if (rule) return rule.direction === "Descending" ? "desc" : "asc";
+    if (axisSort && singleField && !axisSort.customOrder) return axisSort.direction === "Descending" ? "desc" : "asc";
+    return "manual";
+  });
+  const [ascBy, setAscBy] = useState(() => rule?.byMeasureField ?? axisSort?.byMeasureField ?? SORT_BY_FIELD);
+  const [descBy, setDescBy] = useState(() => rule?.byMeasureField ?? axisSort?.byMeasureField ?? SORT_BY_FIELD);
+  const [firstKey, setFirstKey] = useState(() => rule?.firstKeySortOrder ?? "");
+  const [customOrder, setCustomOrder] = useState(() => (singleField ? (axisSort?.customOrder ?? null) : null));
+  const [panel, setPanel] = useState("main");
+  const by = mode === "asc" ? ascBy : mode === "desc" ? descBy : null;
+  const byLabel = byOptions.find((o) => o.value === by)?.label ?? fieldName;
+
+  // Excel's Summary line under the options.
+  const summary =
+    mode === "manual"
+      ? `Drag items of the ${fieldName} field to display them in any order`
+      : `Sort ${fieldName} in ${mode === "asc" ? "ascending" : "descending"} order${by !== SORT_BY_FIELD ? ` by ${byLabel}` : ""}`;
+
+  const apply = () => {
+    const otherRules = levelSorts.filter((s) => s.level !== level);
+    if (mode === "manual") {
+      if (customOrder && customOrder.length > 0) {
+        // The axis custom order can't coexist with any per-level rule (the backend's rule).
+        onChange({ ...request, sort: { direction: "Ascending", byMeasureField: null, axis, customOrder }, rowLevelSorts: [], columnLevelSorts: [] });
+      } else {
+        onChange({ ...request, sort: axisSort ? null : request.sort, [levelSortsKey]: otherRules });
+      }
+    } else {
+      const byField = by === SORT_BY_FIELD;
+      const nextRule = {
+        level,
+        direction: mode === "desc" ? "Descending" : "Ascending",
+        byMeasureField: byField ? null : by,
+        firstKeySortOrder: byField && firstKey ? firstKey : null,
+      };
+      // A per-level rule can't coexist with the axis-wide `sort` (the backend's rule).
+      onChange({ ...request, sort: null, [levelSortsKey]: [...otherRules, nextRule] });
+    }
+    (onDone ?? onBack)();
+  };
+
+  if (panel === "more") {
+    return (
+      <MoreSortOptions
+        fieldName={fieldName}
+        summary={summary}
+        byField={mode !== "manual" && by === SORT_BY_FIELD}
+        byValue={mode !== "manual" && by !== SORT_BY_FIELD}
+        firstKey={firstKey}
+        onOk={(nextFirstKey) => {
+          setFirstKey(nextFirstKey);
+          setPanel("main");
+        }}
+        onCancel={() => setPanel("main")}
+      />
+    );
+  }
+
+  const radio = (key, label) => (
+    <label className="flex cursor-pointer items-center gap-2 text-xs text-ink">
+      <input type="radio" className="h-3.5 w-3.5 accent-gold" checked={mode === key} onChange={() => setMode(key)} />
+      {label}
+    </label>
+  );
+  const byDropdown = (key, value, setValue) => (
+    <select className={`${nativeSelectClass} ml-5 w-[calc(100%-1.25rem)]`} value={value} disabled={mode !== key} onChange={(e) => setValue(e.target.value)}>
+      {byOptions.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm font-semibold text-ink">Sort ({fieldName})</p>
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-ink">Sort options</p>
+        {radio("manual", "Manual (you can drag items to rearrange them)")}
+        {mode === "manual" && singleField && (
+          <div className="ml-5">
+            <CustomOrderEditor field={field} customOrder={customOrder} onChange={setCustomOrder} />
+          </div>
+        )}
+        {radio("asc", "Ascending (A to Z) by:")}
+        {byDropdown("asc", ascBy, setAscBy)}
+        {radio("desc", "Descending (Z to A) by:")}
+        {byDropdown("desc", descBy, setDescBy)}
+      </div>
+      <div>
+        <p className="text-xs font-semibold text-ink">Summary</p>
+        <p className="text-xs text-muted">{summary}</p>
+      </div>
+      <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+        <button type="button" onClick={() => setPanel("more")} className="btn-secondary px-2 py-1 text-xs">
+          More Options…
+        </button>
+        <div className="flex gap-2">
+          <button type="button" onClick={apply} className="btn-primary px-3 py-1 text-xs">
+            OK
+          </button>
+          <button type="button" onClick={onBack} className="btn-secondary px-3 py-1 text-xs">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Excel's "More Sort Options (<field>)" window. AutoSort is always on here (every query re-sorts),
+// so it shows checked and greyed out. First key sort order applies to a sort by the field's own
+// labels only (greyed otherwise, as in Excel). Sort By: the app sorts by a value's Grand Total;
+// "Values in selected column" isn't supported, so it stays greyed out.
+function MoreSortOptions({ fieldName, summary, byField, byValue, firstKey, onOk, onCancel }) {
+  const [draftFirstKey, setDraftFirstKey] = useState(firstKey);
+  return (
+    <div className="space-y-3">
+      <p className="text-sm font-semibold text-ink">More Sort Options ({fieldName})</p>
+      <div>
+        <p className="text-xs font-semibold text-ink">AutoSort</p>
+        <label className="flex items-center gap-2 text-xs text-muted" title="This app always re-sorts when the report is updated">
+          <input type="checkbox" className="h-3.5 w-3.5 accent-gold" checked disabled readOnly />
+          Sort automatically every time the report is updated
+        </label>
+      </div>
+      <div>
+        <p className="mb-1 text-xs font-semibold text-ink">First key sort order</p>
+        <select className={`${nativeSelectClass} w-full`} value={draftFirstKey} disabled={!byField} onChange={(e) => setDraftFirstKey(e.target.value)}>
+          {FIRST_KEY_SORT_ORDERS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className={byValue ? "" : "opacity-60"}>
+        <p className="text-xs font-semibold text-ink">Sort By</p>
+        <label className="flex items-center gap-2 text-xs text-ink">
+          <input type="radio" className="h-3.5 w-3.5 accent-gold" checked={byValue} disabled readOnly />
+          Grand Total
+        </label>
+        <label className="flex items-center gap-2 text-xs text-muted">
+          <input type="radio" className="h-3.5 w-3.5" checked={false} disabled readOnly />
+          Values in selected column
+        </label>
+      </div>
+      <div>
+        <p className="text-xs font-semibold text-ink">Summary</p>
+        <p className="text-xs text-muted">{summary}</p>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-slate-100 pt-2">
+        <button type="button" onClick={() => onOk(draftFirstKey)} className="btn-primary px-3 py-1 text-xs">
+          OK
+        </button>
+        <button type="button" onClick={onCancel} className="btn-secondary px-3 py-1 text-xs">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // onChange here takes the BUNDLED { sort, rowLevelSorts, columnLevelSorts } — all three interact
 // (Sort and *LevelSorts are mutually exclusive, enforced by clearing one when the other is set)
 // so they're easiest to manage together rather than as separate onChange callbacks.
@@ -1444,63 +1655,136 @@ export function SortEditor({ sort, rowLevelSorts, columnLevelSorts, values, rows
   );
 }
 
-// A calculated field is a NEW measure derived from two EXISTING measures with a fixed operator —
-// not a free-text formula. See the backend's CalculatedField for why (avoids accepting arbitrary
-// MDX from the client). Once added, its name becomes selectable in the Values picker below.
-export function CalculatedFieldsEditor({ calculatedFields, measureOptions, onChange }) {
-  const update = (index, patch) => {
-    const copy = [...calculatedFields];
-    copy[index] = { ...copy[index], ...patch };
-    onChange(copy);
+// Excel's real "Insert Calculated Field" dialog (2026-10-14, against a screenshot): Name (a combo of
+// the existing calculated fields — picking one loads its formula and turns Add into Modify), a free
+// Formula box ("= 0" for a new one), Add/Modify and Delete, the Fields list with Insert Field
+// (double-click works too), OK and Close. The formula is parsed safely by the backend
+// (CalculatedFieldFormula.cs), never passed through as MDX. Like Excel, a NEW field is also added to
+// Values. onApply(calculatedFields, addedName) — addedName is the new field to add to Values, if any.
+export function CalculatedFieldDialog({ calculatedFields, measureOptions, onApply, onClose }) {
+  const nextDefaultName = () => {
+    let n = 1;
+    while (calculatedFields.some((f) => f.name === `Field${n}`)) n += 1;
+    return `Field${n}`;
+  };
+  const [name, setName] = useState(nextDefaultName);
+  const [formula, setFormula] = useState("= 0");
+  const [fieldSearch, setFieldSearch] = useState("");
+  const [selectedField, setSelectedField] = useState(null);
+  const formulaRef = useRef(null);
+  const existing = calculatedFields.find((f) => f.name === name.trim()) ?? null;
+
+  // Excel's Fields list: the source fields plus the calculated fields already defined. The cube has
+  // hundreds of measures, so a filter box sits above the list (Excel's list is short enough not to need one).
+  const fieldNames = [...measureOptions.map((m) => m.value), ...calculatedFields.filter(isCompleteCalculatedField).map((f) => f.name)];
+  const visibleFields = fieldNames.filter((f) => f.toLowerCase().includes(fieldSearch.toLowerCase()));
+
+  const pickName = (value) => {
+    setName(value);
+    const match = calculatedFields.find((f) => f.name === value);
+    if (match) setFormula(calculatedFieldFormula(match));
   };
 
-  const remove = (index) => onChange(calculatedFields.filter((_, i) => i !== index));
+  // Inserts the field at the cursor, the way Excel's Insert Field does.
+  const insertField = (field) => {
+    if (!field) return;
+    const reference = formulaFieldReference(field);
+    const input = formulaRef.current;
+    const start = input?.selectionStart ?? formula.length;
+    const end = input?.selectionEnd ?? formula.length;
+    const next = `${formula.slice(0, start)}${reference}${formula.slice(end)}`;
+    setFormula(next);
+    requestAnimationFrame(() => {
+      input?.focus();
+      input?.setSelectionRange(start + reference.length, start + reference.length);
+    });
+  };
 
-  const add = () =>
-    onChange([...calculatedFields, { name: "", leftField: "", operator: "Divide", rightField: "" }]);
+  // Add / Modify: stores the current name + formula (the dialog stays open, like Excel's).
+  const upsert = () => {
+    const trimmed = name.trim();
+    if (!trimmed || !formula.trim()) return null;
+    const entry = { name: trimmed, formula: formula.trim() };
+    const next = existing ? calculatedFields.map((f) => (f.name === trimmed ? entry : f)) : [...calculatedFields, entry];
+    onApply(next, existing ? null : trimmed);
+    return next;
+  };
+
+  const remove = () => {
+    if (!existing) return;
+    onApply(calculatedFields.filter((f) => f.name !== existing.name), null);
+    setName(nextDefaultName());
+    setFormula("= 0");
+  };
 
   return (
-    <>
-      {calculatedFields.map((field, index) => (
-        <div key={index} className="mb-3 flex flex-wrap items-center gap-2">
-          <input
-            type="text"
-            placeholder="New field name…"
-            value={field.name}
-            onChange={(e) => update(index, { name: e.target.value })}
-            className="input-field min-w-[10rem] flex-1 py-2"
-          />
-          <select className={nativeSelectClass} value={field.leftField} onChange={(e) => update(index, { leftField: e.target.value })}>
-            <option value="">Choose measure…</option>
-            {measureOptions.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          <select className={nativeSelectClass} value={field.operator} onChange={(e) => update(index, { operator: e.target.value })}>
-            <option value="Add">+</option>
-            <option value="Subtract">−</option>
-            <option value="Multiply">×</option>
-            <option value="Divide">÷</option>
-          </select>
-          <select className={nativeSelectClass} value={field.rightField} onChange={(e) => update(index, { rightField: e.target.value })}>
-            <option value="">Choose measure…</option>
-            {measureOptions.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          <button type="button" onClick={() => remove(index)} className="text-muted hover:text-ink" aria-label="Remove calculated field">
-            <X className="h-5 w-5" />
+    <div className="w-[26rem] space-y-3">
+      <p className="text-sm font-semibold text-ink">Insert Calculated Field</p>
+      <div className="grid grid-cols-[4.5rem_1fr_5rem] items-center gap-2 text-xs">
+        <label htmlFor="calc-field-name" className="font-medium text-muted">Name:</label>
+        <input
+          id="calc-field-name"
+          list="calc-field-names"
+          className="input-field py-1 text-sm"
+          value={name}
+          onChange={(e) => pickName(e.target.value)}
+        />
+        <datalist id="calc-field-names">
+          {calculatedFields.map((f) => (
+            <option key={f.name} value={f.name} />
+          ))}
+        </datalist>
+        <button type="button" onClick={upsert} disabled={!name.trim() || !formula.trim()} className="btn-secondary px-2 py-1 text-xs disabled:opacity-50">
+          {existing ? "Modify" : "Add"}
+        </button>
+        <label htmlFor="calc-field-formula" className="font-medium text-muted">Formula:</label>
+        <input id="calc-field-formula" ref={formulaRef} className="input-field py-1 font-mono text-sm" value={formula} onChange={(e) => setFormula(e.target.value)} />
+        <button type="button" onClick={remove} disabled={!existing} className="btn-secondary px-2 py-1 text-xs disabled:opacity-50">
+          Delete
+        </button>
+      </div>
+
+      <div>
+        <p className="mb-1 text-xs font-medium text-muted">Fields:</p>
+        <input type="text" value={fieldSearch} onChange={(e) => setFieldSearch(e.target.value)} placeholder="Search…" className="input-field mb-1 w-full py-1 text-xs" />
+        <ul className="h-32 overflow-y-auto rounded-md border border-slate-200 bg-white">
+          {visibleFields.map((f) => (
+            <li key={f}>
+              <button
+                type="button"
+                onClick={() => setSelectedField(f)}
+                onDoubleClick={() => insertField(f)}
+                className={`block w-full truncate px-2 py-0.5 text-left text-xs ${selectedField === f ? "bg-gold text-white" : "text-ink hover:bg-slate-100"}`}
+              >
+                {f}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-1 flex justify-end">
+          <button type="button" onClick={() => insertField(selectedField)} disabled={!selectedField} className="btn-secondary px-2 py-1 text-xs disabled:opacity-50">
+            Insert Field
           </button>
         </div>
-      ))}
-      <button type="button" onClick={add} className="btn-secondary">
-        + Add calculated field
-      </button>
-    </>
+      </div>
+
+      <div className="flex justify-end gap-2 border-t border-slate-100 pt-2">
+        <button
+          type="button"
+          onClick={() => {
+            // OK stores what's in the boxes (unless it's unchanged) and closes.
+            if (!existing || calculatedFieldFormula(existing) !== formula.trim()) upsert();
+            onClose();
+          }}
+          className="btn-primary px-3 py-1 text-xs"
+        >
+          OK
+        </button>
+        <button type="button" onClick={onClose} className="btn-secondary px-3 py-1 text-xs">
+          Close
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2426,7 +2710,7 @@ export default function FieldPicker({
   // never actually declared, since PivotBuilder.jsx drops an incomplete calculated field from the
   // query entirely while the dangling Value reference stayed selected.
   const calculatedFieldOptions = value.calculatedFields
-    .filter((f) => f.name && f.leftField && f.rightField)
+    .filter(isCompleteCalculatedField)
     .map((f) => ({ value: f.name, label: `${f.name} (calculated)` }));
   const valueFieldOptions = [...measureOptions, ...calculatedFieldOptions];
 

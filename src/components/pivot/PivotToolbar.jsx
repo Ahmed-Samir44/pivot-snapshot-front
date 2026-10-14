@@ -1,9 +1,46 @@
 import { useState } from "react";
 import { Sigma, Rows3, Calculator, ListPlus, LayoutGrid, CalendarRange } from "lucide-react";
 import Popover from "../forms/Popover";
-import { CalculatedFieldsEditor, CalculatedItemsEditor } from "./FieldPicker";
+import { CalculatedFieldDialog, CalculatedItemsEditor } from "./FieldPicker";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
 import { applyReportSubtotals } from "../../utils/subtotals";
+import { isCompleteCalculatedField } from "../../utils/calculatedFields";
+
+// Excel's "Insert Slicers" / "Insert Timelines" dialogs (2026-10-14, against screenshots): a checkbox
+// list, so SEVERAL fields can be picked at once; OK stays disabled until one is ticked; Cancel. The
+// cube has thousands of fields, so a search box sits above the list.
+function InsertFieldsDialog({ title, fields, emptyText, onOk, onCancel }) {
+  const [checked, setChecked] = useState([]);
+  const [search, setSearch] = useState("");
+  const visible = fields.filter((d) => d.displayName.toLowerCase().includes(search.toLowerCase()));
+  const toggle = (field) => setChecked((current) => (current.includes(field) ? current.filter((f) => f !== field) : [...current, field]));
+  return (
+    <div className="w-60 space-y-2">
+      <p className="text-sm font-semibold text-ink">{title}</p>
+      <input type="text" autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search fields…" className="input-field w-full py-1.5 text-sm" />
+      <div className="h-56 overflow-y-auto rounded-md border border-slate-200 bg-white p-1">
+        {visible.length === 0 ? (
+          <p className="px-1 py-2 text-xs text-muted">{fields.length === 0 ? emptyText : "No matching fields."}</p>
+        ) : (
+          visible.map((d) => (
+            <label key={d.field} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-gold/10">
+              <input type="checkbox" className="h-3.5 w-3.5 accent-gold" checked={checked.includes(d.field)} onChange={() => toggle(d.field)} />
+              <span className="truncate">{d.displayName}</span>
+            </label>
+          ))
+        )}
+      </div>
+      <div className="flex justify-end gap-2">
+        <button type="button" disabled={checked.length === 0} onClick={() => onOk(checked)} className="btn-primary px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50">
+          OK
+        </button>
+        <button type="button" onClick={onCancel} className="btn-secondary px-3 py-1 text-xs">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // A real Excel RIBBON, not just a toolbar in the ribbon's general spot — a plain restyled button
 // row was tried first and rejected live, 2026-10-04 ("مشكلتي انه مش زي الـ excel"), after an
@@ -72,44 +109,31 @@ function RibbonGroup({ label, children }) {
 
 export default function PivotToolbar({ request, onChange, measureOptions, dimensions = [] }) {
   const [tab, setTab] = useState("analyze");
-  const [slicerSearch, setSlicerSearch] = useState("");
-  const [timelineSearch, setTimelineSearch] = useState("");
 
   // Insert Slicer: adds the field to slicerFields (the Slicer widget renders above the table from
   // there — see PivotGrid.jsx) and, if nothing already filters this field, gives it a fresh "(All)"
   // Members-mode entry in request.filters — same default an empty Report Filter row starts from, so
   // the Slicer opens with every member unselected rather than accidentally inheriting some other
   // mode's leftover state.
-  const addSlicer = (field) => {
-    if (request.slicerFields.includes(field)) return;
-    const filters = request.filters.some((f) => f.field === field)
-      ? request.filters
-      : [...request.filters, { field, mode: "Members", includedMembers: [] }];
-    onChange({ ...request, slicerFields: [...request.slicerFields, field], filters });
-    setSlicerSearch("");
+  //
+  // Several at once since 2026-10-14 (Excel's checkbox dialog) — one onChange for all of them.
+  const withFilterEntries = (filters, fields) =>
+    fields.reduce((acc, field) => (acc.some((f) => f.field === field) ? acc : [...acc, { field, mode: "Members", includedMembers: [] }]), filters);
+  const addSlicers = (fields) => {
+    const added = fields.filter((f) => !request.slicerFields.includes(f));
+    onChange({ ...request, slicerFields: [...request.slicerFields, ...added], filters: withFilterEntries(request.filters, added) });
   };
 
-  // Insert Timeline — same relationship to request.filters as addSlicer above, just for the
-  // date-range widget instead of the button-grid one. No reliable "is this a date field" metadata
-  // is exposed by the cube API this app already calls, so (same honest fallback Timeline.jsx itself
-  // uses) ANY dimension can be picked here — Timeline.jsx simply shows "no date-shaped members" if
-  // the chosen field's captions don't parse as dates, rather than silently failing or pretending to
-  // restrict the list from a classification this app can't actually make reliably.
-  const addTimeline = (field) => {
-    if (request.timelineFields.includes(field)) return;
-    const filters = request.filters.some((f) => f.field === field)
-      ? request.filters
-      : [...request.filters, { field, mode: "Members", includedMembers: [] }];
-    onChange({ ...request, timelineFields: [...request.timelineFields, field], filters });
-    setTimelineSearch("");
+  // Insert Timeline — same relationship to request.filters as addSlicers above, for the date-range
+  // widget. Like Excel's, the list holds DATE fields only — the cube metadata's isDate (its level's
+  // DBTYPE_DATE, see the backend's CubeField.IsDate).
+  const addTimelines = (fields) => {
+    const added = fields.filter((f) => !request.timelineFields.includes(f));
+    onChange({ ...request, timelineFields: [...request.timelineFields, ...added], filters: withFilterEntries(request.filters, added) });
   };
 
-  const availableForSlicer = dimensions.filter(
-    (d) => !request.slicerFields.includes(d.field) && d.displayName.toLowerCase().includes(slicerSearch.toLowerCase()),
-  );
-  const availableForTimeline = dimensions.filter(
-    (d) => !request.timelineFields.includes(d.field) && d.displayName.toLowerCase().includes(timelineSearch.toLowerCase()),
-  );
+  const availableForSlicer = dimensions.filter((d) => !request.slicerFields.includes(d.field));
+  const availableForTimeline = dimensions.filter((d) => d.isDate && !request.timelineFields.includes(d.field));
 
   return (
     <div className="mb-3 overflow-hidden rounded-xl border border-slate-300/70 bg-white shadow-sm">
@@ -210,80 +234,31 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
         {tab === "analyze" && (
           <RibbonGroup label="Filter">
             <RibbonButton icon={LayoutGrid} label="Insert Slicer" badge={0}>
-              {/* Same ignored-close bug as Grand Totals/Subtotals above, fixed the same way —
-                  picking a field here is a one-click action (it immediately adds the Slicer), so
-                  the popover should close right after, matching real Excel. */}
               {(close) => (
-                <div className="w-56">
-                  <input
-                    type="text"
-                    autoFocus
-                    value={slicerSearch}
-                    onChange={(e) => setSlicerSearch(e.target.value)}
-                    placeholder="Search fields…"
-                    className="input-field mb-2 w-full py-1.5 text-sm"
-                  />
-                  <div className="max-h-56 overflow-y-auto">
-                    {availableForSlicer.length === 0 ? (
-                      <p className="px-1 py-2 text-xs text-muted">No matching fields.</p>
-                    ) : (
-                      availableForSlicer.map((d) => (
-                        <button
-                          key={d.field}
-                          type="button"
-                          onClick={() => {
-                            addSlicer(d.field);
-                            close();
-                          }}
-                          className="block w-full rounded-lg px-2 py-1.5 text-left text-sm hover:bg-gold/10"
-                        >
-                          {d.displayName}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
+                <InsertFieldsDialog
+                  title="Insert Slicers"
+                  fields={availableForSlicer}
+                  emptyText="No fields available."
+                  onOk={(fields) => {
+                    addSlicers(fields);
+                    close();
+                  }}
+                  onCancel={close}
+                />
               )}
             </RibbonButton>
             <RibbonButton icon={CalendarRange} label="Insert Timeline" badge={0}>
-              {/* Same ignored-close bug as the dropdowns above, same fix. */}
               {(close) => (
-                <div className="w-56">
-                  {/* Real Excel never lists every raw day for a date field either — it auto-groups
-                      into Year/Quarter/Month/Day instead. Picking a Month/Year-level field here
-                      (if the table has one) gets the same effect safely; picking a day-level field
-                      directly works too, but fetches every distinct day up front — on a field with
-                      years of daily data, that's the same unfiltered-high-cardinality cost as
-                      anywhere else in this app (confirmed live, 2026-10-06, see DECISIONS.md). */}
-                  <p className="mb-2 text-xs text-muted">Prefer a Month/Year-level field over a raw day field if the table has one.</p>
-                  <input
-                    type="text"
-                    autoFocus
-                    value={timelineSearch}
-                    onChange={(e) => setTimelineSearch(e.target.value)}
-                    placeholder="Search fields…"
-                    className="input-field mb-2 w-full py-1.5 text-sm"
-                  />
-                  <div className="max-h-56 overflow-y-auto">
-                    {availableForTimeline.length === 0 ? (
-                      <p className="px-1 py-2 text-xs text-muted">No matching fields.</p>
-                    ) : (
-                      availableForTimeline.map((d) => (
-                        <button
-                          key={d.field}
-                          type="button"
-                          onClick={() => {
-                            addTimeline(d.field);
-                            close();
-                          }}
-                          className="block w-full rounded-lg px-2 py-1.5 text-left text-sm hover:bg-gold/10"
-                        >
-                          {d.displayName}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
+                <InsertFieldsDialog
+                  title="Insert Timelines"
+                  fields={availableForTimeline}
+                  emptyText="No date fields in the selected tables."
+                  onOk={(fields) => {
+                    addTimelines(fields);
+                    close();
+                  }}
+                  onCancel={close}
+                />
               )}
             </RibbonButton>
           </RibbonGroup>
@@ -292,22 +267,19 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
         {tab === "analyze" && (
           <RibbonGroup label="Calculations">
             <RibbonButton icon={Calculator} label="Calculated Field" badge={request.calculatedFields.length}>
-              {() => (
-                <CalculatedFieldsEditor
+              {(close) => (
+                <CalculatedFieldDialog
                   calculatedFields={request.calculatedFields}
                   measureOptions={measureOptions}
-                  onChange={(calculatedFields) => {
-                    // Same dangling-reference guard FieldPicker's Values picker already relies on:
-                    // a Value referencing a calculated field becomes invalid the moment that field
-                    // is removed or edited back to incomplete.
-                    const validFieldNames = new Set(
-                      measureOptions
-                        .map((m) => m.value)
-                        .concat(calculatedFields.filter((f) => f.name && f.leftField && f.rightField).map((f) => f.name)),
-                    );
-                    const values = request.values.filter((v) => validFieldNames.has(v.field));
+                  onApply={(calculatedFields, addedName) => {
+                    // A Value referencing a deleted calculated field becomes invalid; a NEW one is
+                    // added to Values, like Excel does.
+                    const validFieldNames = new Set(measureOptions.map((m) => m.value).concat(calculatedFields.filter(isCompleteCalculatedField).map((f) => f.name)));
+                    const kept = request.values.filter((v) => validFieldNames.has(v.field) || v.field.startsWith("["));
+                    const values = addedName && !kept.some((v) => v.field === addedName) ? [...kept, { field: addedName, showValuesAs: "Normal" }] : kept;
                     onChange({ ...request, calculatedFields, values });
                   }}
+                  onClose={close}
                 />
               )}
             </RibbonButton>

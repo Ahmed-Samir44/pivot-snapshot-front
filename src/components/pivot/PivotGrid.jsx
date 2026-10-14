@@ -5,7 +5,7 @@ import ContextMenu from "../forms/ContextMenu";
 import Modal from "../forms/Modal";
 import Slicer from "./Slicer";
 import Timeline from "./Timeline";
-import { SortEditor, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, ConditionalFormatEditor, SHOW_VALUES_AS_OPTIONS, PERCENT_SHOW_VALUES_AS, DEFAULT_FORMAT } from "./FieldPicker";
+import { SortEditor, FieldSortDialog, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, ConditionalFormatEditor, SHOW_VALUES_AS_OPTIONS, PERCENT_SHOW_VALUES_AS, DEFAULT_FORMAT } from "./FieldPicker";
 import { formatNumber, formatForColumn } from "../../utils/numberFormat";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
@@ -164,7 +164,17 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
     // one, so both must be cleared here, not just this axis's (caught live, 2026-10-06: a plain
     // two-axis pivot defaults BOTH axes' LevelSorts, so the very first click of this header's own
     // Sort shortcut on either axis was throwing "Could not query the cube" otherwise).
-    onChange({ ...request, sort: { direction, byMeasureField: null, axis, customOrder: null }, rowLevelSorts: [], columnLevelSorts: [] });
+    //
+    // Excel sorts the FIELD you clicked (2026-10-14, its per-field Sort dialog): a field on a
+    // multi-field axis gets its own LevelSort — other fields' rules are kept — instead of the
+    // axis-wide sort, which only works with one field on the axis. A drilldown slot (sortOnly) keeps
+    // the axis-wide sort: the hierarchy is the axis's one sortable field there.
+    if (sortOnly) {
+      onChange({ ...request, sort: { direction, byMeasureField: null, axis, customOrder: null }, rowLevelSorts: [], columnLevelSorts: [] });
+      return;
+    }
+    const key = axis === "Columns" ? "columnLevelSorts" : "rowLevelSorts";
+    onChange({ ...request, sort: null, [key]: [...levelSorts.filter((s) => s.level !== level), { level, direction, byMeasureField: null }] });
   };
 
   const clearSort = () => {
@@ -206,7 +216,8 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
     <Popover
       align="right"
       fullWidth
-      panelClassName="min-w-[14rem] max-w-[18rem]"
+      // The Sort dialog needs more room than the shortcut list.
+      panelClassName={panel === "sort" ? "min-w-[20rem] max-w-[22rem]" : "min-w-[14rem] max-w-[18rem]"}
       trigger={(toggle) => (
         <button
           type="button"
@@ -236,22 +247,8 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
       {(close) =>
         panel === "sort" ? (
           <div>
-            <button
-              type="button"
-              onClick={() => setPanel("shortcuts")}
-              className="mb-2 inline-flex items-center gap-1 text-xs font-medium text-muted hover:text-ink"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" /> Back
-            </button>
-            <SortEditor
-              sort={request.sort}
-              rowLevelSorts={request.rowLevelSorts}
-              columnLevelSorts={request.columnLevelSorts}
-              values={request.values}
-              rows={request.rows}
-              columns={request.columns}
-              onChange={(patch) => onChange({ ...request, ...patch })}
-            />
+            {/* Excel's per-field "Sort (<field>)" dialog (see FieldSortDialog). */}
+            <FieldSortDialog field={field} axis={axis} level={level} request={request} onChange={onChange} onBack={() => setPanel("shortcuts")} onDone={close} />
           </div>
         ) : panel === "filter" ? (
           <div>

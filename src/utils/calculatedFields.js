@@ -1,0 +1,25 @@
+// Calculated fields (Excel's Insert Calculated Field) — since 2026-10-14 written as Excel's own free
+// formula ("= 'Total Revenue' / 'Net Volume'"), which the backend parses safely
+// (CalculatedFieldFormula.cs). A field saved before that has leftField/operator/rightField instead.
+
+const OPERATOR_SYMBOLS = { Add: "+", Subtract: "-", Multiply: "*", Divide: "/" };
+
+// A field name as Excel writes it in a formula: bare when it's one plain word, else 'quoted'
+// ('' for a literal quote).
+export function formulaFieldReference(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `'${name.replace(/'/g, "''")}'`;
+}
+
+// The formula a calculated field shows in the dialog — its own, or one built from the older shape.
+export function calculatedFieldFormula(field) {
+  if (field.formula) return field.formula;
+  if (field.leftField && field.rightField) {
+    return `= ${formulaFieldReference(field.leftField)} ${OPERATOR_SYMBOLS[field.operator] ?? "/"} ${formulaFieldReference(field.rightField)}`;
+  }
+  return "= 0";
+}
+
+// Complete enough to send: a name plus a formula (or both measures of the older shape).
+export function isCompleteCalculatedField(field) {
+  return Boolean(field.name) && (Boolean(field.formula?.trim()) || (Boolean(field.leftField) && Boolean(field.rightField)));
+}
