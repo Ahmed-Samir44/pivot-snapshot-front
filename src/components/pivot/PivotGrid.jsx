@@ -520,7 +520,10 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
           const sortField = axis === "Rows" ? realRows[realRows.length - 1] : realColumns[realColumns.length - 1];
           if (!sortField) return <p className="p-2 text-sm text-muted">Add a Row or Column field to sort.</p>;
           const level = (axis === "Rows" ? request.rows : request.columns).indexOf(sortField);
-          return <FieldSortDialog field={sortField} axis={axis} level={level} request={request} onChange={onChange} onBack={() => setPanel("sort")} onDone={onClose} />;
+          // The right-clicked cell's column is Excel's "selected column" for a Rows field (a total
+          // column isn't one of the columns an item can be sorted by, so it offers none).
+          const selectedItem = axis === "Rows" && !column.isTotal ? { labels: column.labels } : null;
+          return <FieldSortDialog field={sortField} axis={axis} level={level} request={request} onChange={onChange} onBack={() => setPanel("sort")} onDone={onClose} selectedItem={selectedItem} />;
         })()
       ) : panel === "numberFormat" ? (
         <NumberFormatEditor format={format} onUpdateFormat={updateFormat} onBack={() => setPanel("root")} onDone={onClose} />

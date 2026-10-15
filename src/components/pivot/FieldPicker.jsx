@@ -1316,7 +1316,11 @@ function valueFieldLabel(v) {
 // Manual: Excel leaves the items where they are and lets you drag them in the sheet. This grid has no
 // drag, so — when the field is the only one on its axis — the same click-in-order member list the
 // app already had (the axis custom order) stands in for dragging.
-export function FieldSortDialog({ field, axis, level, request, onChange, onBack, onDone }) {
+//
+// selectedItem ({ labels, caption }): the column (for a Rows field) of the cell the dialog was opened
+// from — Excel's "Values in selected column" (2026-10-15). Opened from a field header there's none,
+// so that option stays greyed out, like Excel with no value cell selected.
+export function FieldSortDialog({ field, axis, level, request, onChange, onBack, onDone, selectedItem = null }) {
   const levelSortsKey = axis === "Columns" ? "columnLevelSorts" : "rowLevelSorts";
   const levelSorts = request[levelSortsKey];
   const axisFields = axis === "Columns" ? request.columns : request.rows;
@@ -1340,6 +1344,9 @@ export function FieldSortDialog({ field, axis, level, request, onChange, onBack,
   const [ascBy, setAscBy] = useState(() => rule?.byMeasureField ?? axisSort?.byMeasureField ?? SORT_BY_FIELD);
   const [descBy, setDescBy] = useState(() => rule?.byMeasureField ?? axisSort?.byMeasureField ?? SORT_BY_FIELD);
   const [firstKey, setFirstKey] = useState(() => rule?.firstKeySortOrder ?? "");
+  // The column whose values decide the order (null = Grand Total) — the rule's own, else none.
+  const [byItem, setByItem] = useState(() => rule?.byItemLabels ?? null);
+  const byItemCaption = byItem ? byItem.filter((l) => l !== "").join(" | ") : null;
   const [customOrder, setCustomOrder] = useState(() => (singleField ? (axisSort?.customOrder ?? null) : null));
   const [panel, setPanel] = useState("main");
   const by = mode === "asc" ? ascBy : mode === "desc" ? descBy : null;
@@ -1349,7 +1356,7 @@ export function FieldSortDialog({ field, axis, level, request, onChange, onBack,
   const summary =
     mode === "manual"
       ? `Drag items of the ${fieldName} field to display them in any order`
-      : `Sort ${fieldName} in ${mode === "asc" ? "ascending" : "descending"} order${by !== SORT_BY_FIELD ? ` by ${byLabel}` : ""}`;
+      : `Sort ${fieldName} in ${mode === "asc" ? "ascending" : "descending"} order${by !== SORT_BY_FIELD ? ` by ${byLabel}` : ""}${by !== SORT_BY_FIELD && byItemCaption ? ` in ${byItemCaption}` : ""}`;
 
   const apply = () => {
     const otherRules = levelSorts.filter((s) => s.level !== level);
@@ -1367,6 +1374,7 @@ export function FieldSortDialog({ field, axis, level, request, onChange, onBack,
         direction: mode === "desc" ? "Descending" : "Ascending",
         byMeasureField: byField ? null : by,
         firstKeySortOrder: byField && firstKey ? firstKey : null,
+        byItemLabels: byField ? null : byItem,
       };
       // A per-level rule can't coexist with an axis-wide `sort` on the SAME axis (the backend's
       // rule) — a sort on the other axis, a drilldown's included, is kept.
@@ -1383,8 +1391,11 @@ export function FieldSortDialog({ field, axis, level, request, onChange, onBack,
         byField={mode !== "manual" && by === SORT_BY_FIELD}
         byValue={mode !== "manual" && by !== SORT_BY_FIELD}
         firstKey={firstKey}
-        onOk={(nextFirstKey) => {
+        byItem={byItem}
+        selectedItem={selectedItem}
+        onOk={(nextFirstKey, nextByItem) => {
           setFirstKey(nextFirstKey);
+          setByItem(nextByItem);
           setPanel("main");
         }}
         onCancel={() => setPanel("main")}
@@ -1447,10 +1458,14 @@ export function FieldSortDialog({ field, axis, level, request, onChange, onBack,
 
 // Excel's "More Sort Options (<field>)" window. AutoSort is always on here (every query re-sorts),
 // so it shows checked and greyed out. First key sort order applies to a sort by the field's own
-// labels only (greyed otherwise, as in Excel). Sort By: the app sorts by a value's Grand Total;
-// "Values in selected column" isn't supported, so it stays greyed out.
-function MoreSortOptions({ fieldName, summary, byField, byValue, firstKey, onOk, onCancel }) {
+// labels only (greyed otherwise, as in Excel). Sort By: a value's Grand Total, or (2026-10-15) the
+// values in ONE column — the selected cell's (shown by name rather than Excel's "$E$13"), or the one
+// a rule already uses; greyed out when there's neither, or for a sort by label.
+function MoreSortOptions({ fieldName, summary, byField, byValue, firstKey, byItem, selectedItem, onOk, onCancel }) {
   const [draftFirstKey, setDraftFirstKey] = useState(firstKey);
+  const [draftByItem, setDraftByItem] = useState(byItem);
+  const columnChoice = selectedItem?.labels ?? byItem;
+  const columnCaption = columnChoice ? columnChoice.filter((l) => l !== "").join(" | ") : null;
   return (
     <div className="space-y-3">
       <p className="text-sm font-semibold text-ink">More Sort Options ({fieldName})</p>
@@ -1474,20 +1489,29 @@ function MoreSortOptions({ fieldName, summary, byField, byValue, firstKey, onOk,
       <div className={byValue ? "" : "opacity-60"}>
         <p className="text-xs font-semibold text-ink">Sort By</p>
         <label className="flex items-center gap-2 text-xs text-ink">
-          <input type="radio" className="h-3.5 w-3.5 accent-gold" checked={byValue} disabled readOnly />
+          <input type="radio" className="h-3.5 w-3.5 accent-gold" checked={byValue && !draftByItem} disabled={!byValue} onChange={() => setDraftByItem(null)} />
           Grand Total
         </label>
-        <label className="flex items-center gap-2 text-xs text-muted">
-          <input type="radio" className="h-3.5 w-3.5" checked={false} disabled readOnly />
-          Values in selected column
+        <label className={`flex items-center gap-2 text-xs ${byValue && columnChoice ? "text-ink" : "text-muted"}`}>
+          <input
+            type="radio"
+            className="h-3.5 w-3.5 accent-gold"
+            checked={byValue && Boolean(draftByItem)}
+            disabled={!byValue || !columnChoice}
+            onChange={() => setDraftByItem(columnChoice)}
+          />
+          Values in selected column:
         </label>
+        <p className="ml-5 truncate rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-ink" title={columnCaption ?? ""}>
+          {columnCaption ?? "—"}
+        </p>
       </div>
       <div>
         <p className="text-xs font-semibold text-ink">Summary</p>
         <p className="text-xs text-muted">{summary}</p>
       </div>
       <div className="flex justify-end gap-2 border-t border-slate-100 pt-2">
-        <button type="button" onClick={() => onOk(draftFirstKey)} className="btn-primary px-3 py-1 text-xs">
+        <button type="button" onClick={() => onOk(draftFirstKey, byValue ? draftByItem : null)} className="btn-primary px-3 py-1 text-xs">
           OK
         </button>
         <button type="button" onClick={onCancel} className="btn-secondary px-3 py-1 text-xs">
