@@ -9,6 +9,7 @@ import { parseCubeBracketSegments, formatCubeBracketLabel, formatDimensionName }
 import { setFieldDragPayload, readFieldDragPayload } from "../../utils/dragDrop";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
 import { effectiveSubtotalPosition } from "../../utils/subtotals";
+import { SUMMARY_FUNCTIONS, aggregationLabel } from "../../utils/aggregations";
 
 // One placed field pill (Rows or Columns) — its own component, not inlined in the .map() below,
 // for the same reason it always was (hooks can't live inside a loop whose length changes).
@@ -96,7 +97,8 @@ function PlacedFieldPill({
   const currentFunctions = currentSubtotal?.functions ?? null;
   const effectivePosition = effectiveSubtotalPosition(currentOverride, fieldSettings?.reportDefault ?? "Off");
   const currentLayout = fieldLayout?.overrides?.find((f) => f.field === fullPath) ?? {};
-  const SUBTOTAL_FUNCTIONS = ["Sum", "Count", "Average", "Max", "Min"];
+  // Excel's Custom subtotal functions — the same 11 as "Summarize value field by" (2026-10-15).
+  const SUBTOTAL_FUNCTIONS = SUMMARY_FUNCTIONS;
 
   return (
     <li
@@ -218,7 +220,7 @@ function PlacedFieldPill({
                               fieldSettings.onChange(fullPath, { functions: next });
                             }}
                           />
-                          {fn}
+                          {aggregationLabel(fn)}
                         </label>
                       ))}
                     </div>

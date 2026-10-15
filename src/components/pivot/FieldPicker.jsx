@@ -19,6 +19,7 @@ import {
 } from "../../utils/dragDrop";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
 import { calculatedFieldFormula, calculatedItemFormula, formulaFieldReference, isCompleteCalculatedField } from "../../utils/calculatedFields";
+import { SUMMARY_FUNCTIONS, aggregationLabel } from "../../utils/aggregations";
 import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "../../utils/conditionalFormat";
 
 // Real Excel's own "Show values as" list — its exact order and wording (confirmed 2026-10-14 against
@@ -100,7 +101,7 @@ const nativeSelectClass =
 function effectiveValueCaption(v) {
   if (v.customLabel) return v.customLabel;
   if (!v.field.startsWith("[")) return v.field;
-  return `${v.dimensionAggregation ?? "Count"} of ${formatDimensionName(v.field)}`;
+  return `${aggregationLabel(v.dimensionAggregation ?? "Count")} of ${formatDimensionName(v.field)}`;
 }
 
 // See moveField's own WHY comment on why every Values entry needs a unique caption — real Excel's
@@ -1303,7 +1304,7 @@ const FIRST_KEY_SORT_ORDERS = [
 // A Value field's display name, as Excel lists it in "Ascending (A to Z) by:" ("Count of name").
 function valueFieldLabel(v) {
   if (v.customLabel) return v.customLabel;
-  return v.field.startsWith("[") ? `${v.dimensionAggregation ?? "Count"} of ${formatDimensionName(v.field)}` : v.field;
+  return v.field.startsWith("[") ? `${aggregationLabel(v.dimensionAggregation ?? "Count")} of ${formatDimensionName(v.field)}` : v.field;
 }
 
 // Excel's real per-field "Sort (<field>)" dialog (2026-10-14, against screenshots): Manual /
@@ -2163,7 +2164,7 @@ function ValuePill({
   // <field>" — Sum for a numeric field, Count otherwise (see moveField's own WHY comment) — and
   // can be changed via "Summarize Values By" below. Mirrors the backend's own naming exactly (see
   // MdxPivotQueryBuilder.BuildMeasureExpression).
-  const computedLabel = isDimensionField ? `${dimensionAggregation} of ${sourceName}` : sourceName;
+  const computedLabel = isDimensionField ? `${aggregationLabel(dimensionAggregation)} of ${sourceName}` : sourceName;
   const label = v.customLabel || computedLabel;
   // Real Excel's own pill only responds to a LEFT click on its dropdown arrow for this menu —
   // there's no separate right-click path at all (confirmed live, 2026-10-05: "هل في الإكسل بندوس
@@ -2353,7 +2354,7 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
   const isDimensionField = v.field.startsWith("[");
   const dimensionAggregation = draft.dimensionAggregation ?? "Count";
   const sourceName = isDimensionField ? formatDimensionName(v.field) : v.field;
-  const computedLabel = isDimensionField ? `${dimensionAggregation} of ${sourceName}` : sourceName;
+  const computedLabel = isDimensionField ? `${aggregationLabel(dimensionAggregation)} of ${sourceName}` : sourceName;
   const [panel, setPanel] = useState("settings");
   // Excel's real Value Field Settings dialog is two TABS ("Summarize Values By" / "Show Values
   // As"), not one flat stacked panel — flagged live, 2026-10-05, against screenshots of that real
@@ -2463,11 +2464,10 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
           <p className="mb-1 text-xs font-semibold text-ink">Summarize value field by</p>
           <p className="mb-2 text-xs text-muted">Choose the type of calculation that you want to use to summarize data from the selected field</p>
           {isDimensionField ? (
-            // Excel's list order (Sum, Count, Average, Max, Min, …) — only the calculations the
-            // backend can run are listed (Product/StdDev/Var aren't supported yet).
+            // Excel's full list, in its order (Product … Varp since 2026-10-15).
             <ListBox
               className="max-h-28"
-              options={["Sum", "Count", "Average", "Max", "Min"].map((opt) => ({ value: opt, label: opt }))}
+              options={SUMMARY_FUNCTIONS.map((opt) => ({ value: opt, label: aggregationLabel(opt) }))}
               value={dimensionAggregation}
               onSelect={(opt) => patchDraft({ dimensionAggregation: opt })}
             />
