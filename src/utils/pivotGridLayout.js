@@ -314,13 +314,19 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
   return out;
 }
 
-// Excel's +/- on an OUTERMOST item: collapsing it replaces all of that item's rows with ONE row
-// carrying the item's own level-0 subtotal values. Only items that have such a subtotal can
-// collapse (there's no value to show otherwise) — same rule as before this rewrite.
+// Excel's +/- on an item of ANY field but the innermost (2026-10-15 — it used to be the outermost
+// field only): collapsing it replaces all of that item's rows with ONE row carrying the item's own
+// subtotal values. Only items that have such a subtotal can collapse (there's no value to show
+// otherwise). An item is keyed by its field level and its path down to that level, so "Egypt › ER"
+// and "KSA › ER" are different items.
+export function collapseKey(level, path) {
+  return `${level}\u0002${path.slice(0, level + 1).join("\u0001")}`;
+}
+
 export function collapsibleKeys(displayRows) {
   const keys = new Set();
   displayRows.forEach((r) => {
-    if (r.level === 0 && r.sourceIndex !== null && (r.kind === "subtotal" || r.kind === "header")) keys.add(r.path[0]);
+    if (r.level >= 0 && r.sourceIndex !== null && (r.kind === "subtotal" || r.kind === "header")) keys.add(collapseKey(r.level, r.path));
   });
   return keys;
 }
@@ -328,27 +334,51 @@ export function collapsibleKeys(displayRows) {
 export function applyCollapse(displayRows, collapsedKeys, rowHeaderGroups) {
   if (collapsedKeys.size === 0) return displayRows;
   const out = [];
+  let prevPath = null;
   for (let i = 0; i < displayRows.length; i++) {
-    const key = displayRows[i].path[0];
-    if (displayRows[i].path.length === 0 || !collapsedKeys.has(key)) {
-      out.push(displayRows[i]);
+    const row = displayRows[i];
+    // The OUTERMOST collapsed item this row belongs to (an inner collapse inside it doesn't matter).
+    let level = -1;
+    for (let l = 0; l < row.path.length; l++) {
+      if (collapsedKeys.has(collapseKey(l, row.path))) {
+        level = l;
+        break;
+      }
+    }
+    if (level < 0) {
+      out.push(row);
+      if (row.path.length > 0) prevPath = row.path;
       continue;
     }
+
+    const itemPath = row.path.slice(0, level + 1);
+    const inItem = (r) => r.path.length > level && itemPath.every((p, k) => r.path[k] === p);
     let j = i;
     let totalRow = null;
-    while (j < displayRows.length && displayRows[j].path.length > 0 && displayRows[j].path[0] === key) {
+    while (j < displayRows.length && inItem(displayRows[j])) {
       const r = displayRows[j];
-      if (!totalRow && r.level === 0 && r.sourceIndex !== null && (r.kind === "subtotal" || r.kind === "header")) totalRow = r;
+      if (!totalRow && r.level === level && r.sourceIndex !== null && (r.kind === "subtotal" || r.kind === "header")) totalRow = r;
       j += 1;
     }
+
+    // Its own label, plus any outer label not already shown on a row above (tabular form, where an
+    // outer item has no header row of its own).
+    const visible = computeVisibleLevels(itemPath, prevPath);
     out.push({
       kind: "collapsed",
       sourceIndex: totalRow?.sourceIndex ?? null,
-      level: 0,
-      path: [key],
-      groupCells: rowHeaderGroups.map((g) => ({ lines: g.start === 0 ? [{ text: key === "" ? "(blank)" : key, indent: 0, level: 0 }] : [] })),
+      level,
+      path: itemPath,
+      groupCells: rowHeaderGroups.map((g) => {
+        const lines = [];
+        for (let l = g.start; l <= Math.min(g.end, level); l++) {
+          if (l === level || visible[l]) lines.push({ text: itemPath[l] === "" ? "(blank)" : itemPath[l], indent: g.start < g.end ? l - g.start : 0, level: l });
+        }
+        return { lines };
+      }),
       blankLineAfter: displayRows[j - 1].blankLineAfter,
     });
+    prevPath = itemPath;
     i = j - 1;
   }
   return out;

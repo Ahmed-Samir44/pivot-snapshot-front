@@ -9,7 +9,7 @@ import { FieldSortDialog, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel
 import { formatNumber, formatForColumn } from "../../utils/numberFormat";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
-import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys, buildColumnHeaderRows } from "../../utils/pivotGridLayout";
+import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys, collapseKey, buildColumnHeaderRows } from "../../utils/pivotGridLayout";
 import { MEASURES_PLACEHOLDER, measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "../../utils/measuresPlacement";
 import { applyReportSubtotals } from "../../utils/subtotals";
 import { drillthroughPivot } from "../../services/pivotApi";
@@ -1204,21 +1204,24 @@ export default function PivotGrid({
                 ? "bg-gold/10 hover:bg-gold/15 border-t-2 border-gold/40"
                 : `${displayIndex % 2 === 1 ? "bg-slate-50/50" : "bg-white"} hover:bg-gold-soft/60`;
 
-              // Excel's +/- sits right next to an OUTERMOST item's own label — on its item row in
-              // compact form, on its first row in tabular form, and on the collapsed row itself.
-              const itemKey = displayRow.path[0];
-              const showsItemLabel =
-                displayRow.kind !== "subtotal" && displayRow.kind !== "grand" && (displayRow.groupCells[0]?.lines ?? []).some((l) => l.level === 0);
-              const collapseToggle = showsItemLabel && collapsible.has(itemKey) && (
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(itemKey)}
-                  className="text-muted hover:text-ink"
-                  aria-label={collapsed.has(itemKey) ? "Expand group" : "Collapse group"}
-                >
-                  {collapsed.has(itemKey) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                </button>
-              );
+              // Excel's +/- sits right next to an item's own label, for every field but the
+              // innermost (2026-10-15 — it used to be the outermost field only): on its item row in
+              // compact/outline form, on its first row in tabular form, and on the collapsed row.
+              const collapseToggleFor = (line) => {
+                if (displayRow.kind === "subtotal" || displayRow.kind === "grand" || displayRow.path.length <= line.level) return null;
+                const key = collapseKey(line.level, displayRow.path);
+                if (!collapsible.has(key)) return null;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(key)}
+                    className="text-muted hover:text-ink"
+                    aria-label={collapsed.has(key) ? "Expand group" : "Collapse group"}
+                  >
+                    {collapsed.has(key) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
+                );
+              };
 
               return (
                 <Fragment key={displayIndex}>
@@ -1237,7 +1240,7 @@ export default function PivotGrid({
                         // Left-aligned like Excel's own row labels in every layout (was centered).
                         <td key={group.start} className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-left ${labelWeight}`}>
                           <span className="inline-flex items-center gap-1.5">
-                            {groupIndex === 0 && collapseToggle}
+                            {lines[0] && collapseToggleFor(lines[0])}
                             {lines[0]?.text ?? ""}
                           </span>
                         </td>
@@ -1249,7 +1252,6 @@ export default function PivotGrid({
                     return (
                       <td key={group.start} className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-left ${labelWeight}`}>
                         <span className="inline-flex items-center gap-1.5">
-                          {groupIndex === 0 && collapseToggle}
                           <span>
                             {lines.map((line) => {
                               const level = line.level;
@@ -1299,6 +1301,8 @@ export default function PivotGrid({
                                       )}
                                     </button>
                                   )}
+                                  {/* An outer item's own collapse +/- (none on a drilldown member, which has its own). */}
+                                  {!uniqueName && collapseToggleFor(line)}
                                   {label}
                                 </div>
                               );
