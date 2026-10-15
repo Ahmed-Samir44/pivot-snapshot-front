@@ -1322,12 +1322,11 @@ export function FieldSortDialog({ field, axis, level, request, onChange, onBack,
   const axisSort = request.sort?.axis === axis ? request.sort : null;
   const fieldName = formatDimensionName(field);
 
-  // Sorting by a value needs Σ Values as the innermost Columns field (the backend's LevelSort rule),
-  // and is offered for Rows fields only — anything else would just be rejected on OK.
-  const measuresInnermost = request.columns[request.columns.length - 1] === MEASURES_PLACEHOLDER;
+  // Every Value field, for a field on either axis, wherever Σ Values sits — the backend matches a
+  // measure's cells by caption since 2026-10-15 (it used to need Σ innermost in Columns, Rows only).
   const byOptions = [
     { value: SORT_BY_FIELD, label: fieldName },
-    ...(axis === "Rows" && measuresInnermost ? request.values.filter((v) => v.field).map((v) => ({ value: v.field, label: valueFieldLabel(v) })) : []),
+    ...request.values.filter((v) => v.field).map((v) => ({ value: v.field, label: valueFieldLabel(v) })),
   ];
 
   const [mode, setMode] = useState(() => {
