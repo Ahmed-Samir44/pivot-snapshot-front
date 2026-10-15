@@ -358,18 +358,21 @@ export function applyCollapse(displayRows, collapsedKeys, rowHeaderGroups) {
 // mirrors the backend's ColumnHeaderLayout.Build exactly (keep both in sync). Returns one array per
 // header row of { text, span, isTotal, sourceIndex, memberUniqueName }.
 //
-// Without a Columns drilldown (drillSlot -1) it's the old shape: one row per Columns field, one cell
-// per column, a Grand Total caption once in the top row. With one, the slot's field becomes one row
+// Without a Columns drilldown (drillSlot -1): one row per Columns field, a Grand Total caption once in
+// the top row. Since 2026-10-15 adjacent columns with the same path merge here too ("2024" drawn once,
+// centered, over its months and its "2024 Total" column, like Excel), and a subtotal column
+// (ColumnSubtotalsProcessor, captionLevel = its field's level) shows "2024 Total" on that field's row,
+// blank below except the Σ Values row (measuresIndex, -1 when Σ isn't in Columns). With one, the slot's field becomes one row
 // PER MEMBER DEPTH: ancestors above, the member at its own depth, blank below (a collapsed member or
 // a total column). Adjacent columns with the same path down to a row merge into one cell there — an
 // expanded parent spans its children, and its "Egypt Total" column (moved right of them by the
 // backend's ColumnDrilldownLayoutProcessor) starts a new path at its depth.
-export function buildColumnHeaderRows(columnHeaders, drillSlot = -1) {
+export function buildColumnHeaderRows(columnHeaders, drillSlot = -1, measuresIndex = -1) {
   if (columnHeaders.length === 0) return [];
   const labelCount = columnHeaders[0].labels.length;
   const maxDepth = drillSlot >= 0 ? Math.max(...columnHeaders.map((c) => c.drill?.depth ?? 0)) : 0;
   const rowCount = labelCount + maxDepth;
-  const entries = columnHeaders.map((column, c) => columnHeaderEntries(column, c, drillSlot, maxDepth, rowCount));
+  const entries = columnHeaders.map((column, c) => columnHeaderEntries(column, c, drillSlot, maxDepth, rowCount, measuresIndex));
 
   const rows = [];
   for (let r = 0; r < rowCount; r++) {
@@ -387,14 +390,29 @@ export function buildColumnHeaderRows(columnHeaders, drillSlot = -1) {
   return rows;
 }
 
-function columnHeaderEntries(column, c, drillSlot, maxDepth, rowCount) {
+function columnHeaderEntries(column, c, drillSlot, maxDepth, rowCount, measuresIndex) {
   const entries = [];
   if (column.captionLevel === -1 && column.caption) {
     for (let r = 0; r < rowCount; r++) entries.push({ text: r === 0 ? column.caption : "", key: `grand:${c}:${r}`, isTotal: true, member: null });
     return entries;
   }
   if (drillSlot < 0) {
-    for (let r = 0; r < rowCount; r++) entries.push({ text: column.labels[r], key: `col:${c}:${r}`, isTotal: Boolean(column.isTotal), member: null });
+    // A subtotal column's level (ColumnSubtotalsProcessor); -1 for a detail column.
+    const totalLevel = column.isTotal && typeof column.captionLevel === "number" && column.captionLevel >= 0 ? column.captionLevel : -1;
+    let columnPath = "";
+    for (let r = 0; r < rowCount; r++) {
+      if (totalLevel < 0 || r < totalLevel) {
+        columnPath += "\u0001" + column.labels[r];
+        entries.push({ text: column.labels[r], key: columnPath, isTotal: Boolean(column.isTotal) && totalLevel < 0, member: null });
+      } else if (r === totalLevel) {
+        columnPath += "\u0001total:" + column.labels[r];
+        entries.push({ text: column.caption ?? column.labels[r], key: columnPath, isTotal: true, member: null });
+      } else {
+        const label = r === measuresIndex ? column.labels[r] : "";
+        columnPath += "\u0001" + label;
+        entries.push({ text: label, key: columnPath, isTotal: true, member: null });
+      }
+    }
     return entries;
   }
 

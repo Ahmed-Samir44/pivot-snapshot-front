@@ -94,14 +94,16 @@ function FilterHeaderRow({ filter, index, request, onChange, dimensionOptions, s
 // actually reads as a PivotTable field header: tinted background, bold text, real borders on every
 // edge (see the <th>/<td> className strings below for the gridlines themselves), requested live
 // 2026-09-28 ("نفس الشكل نفس الـ behaviours" — look AND behave like Excel's own PivotTable).
-function HeaderCell({ children, muted = false, isTotal = false }) {
+// alignLeft: an outer column header spanning its children ("2024" over its months) is left-aligned,
+// like Excel's Compact layout (2026-10-15, the user's call) — single-column cells stay centered.
+function HeaderCell({ children, muted = false, isTotal = false, alignLeft = false }) {
   // Header band is the app's own gold gradient now (see headerBg's own WHY comment) — white text
   // throughout reads cleanly on it; muted (field-name labels, not real member captions) dims to
   // white/75 instead of switching hue, and isTotal stays white but gets its own underline accent so
   // a Grand Total column still stands out even though the whole band is already one strong color.
   return (
     <span
-      className={`flex items-center justify-center gap-1 text-sm font-semibold text-white ${
+      className={`flex items-center ${alignLeft ? "justify-start" : "justify-center"} gap-1 text-sm font-semibold text-white ${
         muted ? "opacity-75" : isTotal ? "underline decoration-2 underline-offset-2" : ""
       }`}
     >
@@ -788,7 +790,7 @@ export default function PivotGrid({
   // 2026-10-05, the first time this zero-Values case became reachable at all.
   // Columns drilldown (C2): a drilldown slot adds one header row per member depth — the shared
   // buildColumnHeaderRows (mirrored by the backend's ColumnHeaderLayout) decides rows and spans.
-  const columnHeaderRows = buildColumnHeaderRows(columnHeaders, columnsDrillSlot);
+  const columnHeaderRows = buildColumnHeaderRows(columnHeaders, columnsDrillSlot, columnsMeasuresIndex);
   const columnDepth = columnHeaders.length > 0 ? columnHeaderRows.length : rowHeaders.length > 0 ? 1 : 0;
 
   const toggleGroup = (key) => {
@@ -1155,7 +1157,7 @@ export default function PivotGrid({
                   return (
                     <th key={cell.sourceIndex} colSpan={cell.span > 1 ? cell.span : undefined} className={`${headerCellBorder} ${headerBg} px-2 py-2`}>
                       {toggle ? (
-                        <span className="inline-flex items-center gap-1">
+                        <span className={`flex items-center gap-1 ${cell.span > 1 ? "justify-start" : "justify-center"}`}>
                           <button
                             type="button"
                             onClick={() => onToggleColumnDrilldownMember(uniqueName, column, ancestors)}
@@ -1164,10 +1166,10 @@ export default function PivotGrid({
                           >
                             {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                           </button>
-                          <HeaderCell isTotal={cell.isTotal}>{cell.text}</HeaderCell>
+                          <HeaderCell isTotal={cell.isTotal} alignLeft={cell.span > 1}>{cell.text}</HeaderCell>
                         </span>
                       ) : (
-                        <HeaderCell isTotal={cell.isTotal}>{cell.text}</HeaderCell>
+                        <HeaderCell isTotal={cell.isTotal} alignLeft={cell.span > 1}>{cell.text}</HeaderCell>
                       )}
                     </th>
                   );

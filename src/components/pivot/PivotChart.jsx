@@ -30,13 +30,14 @@ function extractSeries(result, valueCount) {
 
   const categories = categoryRows.map(({ row }) => row.labels[0]);
 
-  const hasGrandTotalColumns =
-    result.columnHeaders.length >= valueCount && result.columnHeaders.slice(-valueCount).every((h) => h.isTotal);
-  const detailColumnCount = hasGrandTotalColumns ? result.columnHeaders.length - valueCount : result.columnHeaders.length;
-  const seriesCount = Math.max(Math.floor(detailColumnCount / valueCount), 1);
+  // Detail columns only — every total column (Grand Total, and since 2026-10-15 the "2024 Total"
+  // column subtotals) is left out, same as PivotChartRenderer.ExtractSeries.
+  const detailColumns = result.columnHeaders.map((h, c) => (h.isTotal ? null : c)).filter((c) => c !== null);
+  if (detailColumns.length === 0) return null;
+  const seriesCount = Math.max(Math.floor(detailColumns.length / valueCount), 1);
 
   const series = Array.from({ length: seriesCount }, (_, s) => {
-    const colIndex = s * valueCount;
+    const colIndex = detailColumns[s * valueCount];
     const label = seriesCount === 1 ? "" : result.columnHeaders[colIndex].labels.slice(0, -1).join(" / ");
     const values = categoryRows.map(({ r }) => result.cells[r][colIndex] ?? 0);
     return { label, values };

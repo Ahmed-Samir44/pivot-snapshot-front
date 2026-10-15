@@ -193,7 +193,7 @@ export async function exportPivotToExcel({
   // `for (let level = 0; level < columnDepth; level++)` loop to render at all. Missing here meant
   // the exported .xlsx silently dropped the row headers' own title row for a Values-less pivot,
   // even though the live grid correctly showed it (caught 2026-10-06, full codebase review).
-  const columnHeaderRows = buildColumnHeaderRows(columnHeaders, columnsDrillSlot);
+  const columnHeaderRows = buildColumnHeaderRows(columnHeaders, columnsDrillSlot, measuresIndexOf(columns));
   const columnDepth = columnHeaders.length > 0 ? columnHeaderRows.length : rowHeaders.length > 0 ? 1 : 0;
   // Where (if either) Σ Values sits — rowFieldLabels/columnFieldLabels already carry "Σ Values" at
   // that same position (PivotBuilder.jsx's fieldLabels helper maps the sentinel to that label), so
@@ -240,11 +240,9 @@ export async function exportPivotToExcel({
     }
     // A Grand Total column shows its caption once, in the top header row, like Excel.
     const levelLabels = columnHeaders.map((c) => (c.captionLevel === -1 && c.caption ? (level === 0 ? c.caption : "") : c.labels[level]));
-    // With a Columns drilldown, the runs are the spans from buildColumnHeaderRows (a parent over its
-    // children, blanks under a collapsed member) instead of runs of equal labels.
-    const runs = columnsDrillSlot >= 0
-      ? columnHeaderRows[level].map((cell) => ({ start: cell.sourceIndex, end: cell.sourceIndex + cell.span, label: cell.text }))
-      : mergeRuns(levelLabels);
+    // The same spans as the live grid (buildColumnHeaderRows: an outer item over its children, a
+    // "2024 Total" caption, blanks under it), since 2026-10-15 for ordinary Columns fields too.
+    const runs = columnHeaderRows[level]?.map((cell) => ({ start: cell.sourceIndex, end: cell.sourceIndex + cell.span, label: cell.text })) ?? mergeRuns(levelLabels);
     for (const run of runs) {
       const startCol = rowDepth + run.start + 1;
       const endCol = rowDepth + run.end;
@@ -252,7 +250,8 @@ export async function exportPivotToExcel({
       cell.value = run.label;
       cell.font = { bold: true };
       cell.fill = HEADER_FILL;
-      cell.alignment = { horizontal: "center" };
+      // An outer header spanning its children is left-aligned (Excel's Compact layout); a single column stays centered.
+      cell.alignment = { horizontal: endCol > startCol ? "left" : "center" };
       if (endCol > startCol) sheet.mergeCells(currentRow, startCol, currentRow, endCol);
     }
     currentRow += 1;

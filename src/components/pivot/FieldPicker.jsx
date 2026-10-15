@@ -3130,15 +3130,20 @@ export default function FieldPicker({
                 { zoneKey: "rows", label: "Move to Row Labels" },
                 { zoneKey: "values", label: "Move to Values" },
               ]}
-              // Columns drilldown (2026-10-14): its own Field Settings > Subtotals (Automatic/None)
-              // decides the "Egypt Total" columns independently of the Rows subtotals — stored in the
-              // same fieldSubtotals list (see ColumnDrilldownLayoutProcessor). Only that one field.
+              // Field Settings > Subtotals (Automatic/None) on Columns: a drilldown's "Egypt Total"
+              // columns (2026-10-14), or an ordinary OUTER field's "2024 Total" columns (2026-10-15 —
+              // every real Columns field but the innermost, see ColumnSubtotalsProcessor). Same
+              // fieldSubtotals list as Rows; columns have no Top/Bottom, so no Custom either.
               fieldSettings={
-                value.columnsHierarchyDrilldown
+                value.columnsHierarchyDrilldown || value.columns.filter((f) => f !== MEASURES_PLACEHOLDER).length >= 2
                   ? {
                       reportDefault: value.subtotals,
                       overrides: value.fieldSubtotals,
-                      appliesTo: (field) => field === value.columnsHierarchyDrilldown.topLevelField,
+                      appliesTo: (field) => {
+                        if (value.columnsHierarchyDrilldown) return field === value.columnsHierarchyDrilldown.topLevelField;
+                        const real = value.columns.filter((f) => f !== MEASURES_PLACEHOLDER);
+                        return real.includes(field) && field !== real[real.length - 1];
+                      },
                       noCustom: true,
                       onChange: (field, patch) => {
                         const existing = value.fieldSubtotals.find((f) => f.field === field);
@@ -3176,8 +3181,8 @@ export default function FieldPicker({
                 // A field's own Field Settings Subtotals override is meaningless once it's left
                 // Rows — same orphaned-per-field-config cleanup as dateGroupings/numericGroupings/
                 // calculatedItems above, just for fieldSubtotals (added 2026-10-13).
-                // (A Columns drilldown's own override stays — it isn't a Rows setting.)
-                const fieldSubtotals = value.fieldSubtotals.filter((f) => rows.includes(f.field) || f.field === value.columnsHierarchyDrilldown?.topLevelField);
+                // (A Columns field's own override stays — it isn't a Rows setting.)
+                const fieldSubtotals = value.fieldSubtotals.filter((f) => rows.includes(f.field) || columns.includes(f.field));
                 // Same orphaned-per-field cleanup, for Show Items With No Data (PLAN 7, 2026-10-13).
                 const fieldsShowingItemsWithNoData = value.fieldsShowingItemsWithNoData.filter((f) => rows.includes(f));
                 // Drilldown v3: the drilldown keeps its slot among these Rows fields unless it was

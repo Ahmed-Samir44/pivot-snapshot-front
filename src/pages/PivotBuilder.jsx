@@ -572,7 +572,7 @@ export default function PivotBuilder() {
         // for a Rows drilldown slot (the backend rejects an override there).
         fieldSubtotals: request.fieldSubtotals
           .filter((f) =>
-            request.columnsHierarchyDrilldown?.topLevelField === f.field ||
+            request.columns.includes(f.field) ||
             (request.rows.includes(f.field) && request.rowsHierarchyDrilldown?.topLevelField !== f.field))
           .map((f) => ({ ...f, position: f.position ?? request.subtotals })),
         calculatedFields: request.calculatedFields.filter(isCompleteCalculatedField),

@@ -205,7 +205,11 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                 // gate (caught 2026-10-06, full codebase review: Rows = [Hospital, "[Measures]"]
                 // enabled this with only ONE real field).
                 // A drilldown hierarchy has subtotals of its own levels (Drilldown v2, 2026-10-14).
-                const needsMoreRowFields = request.rows.filter((f) => f !== MEASURES_PLACEHOLDER).length < 2 && !request.rowsHierarchyDrilldown;
+                // Since 2026-10-15 two Columns fields count too (their "2024 Total" columns).
+                const needsMoreRowFields =
+                  request.rows.filter((f) => f !== MEASURES_PLACEHOLDER).length < 2 &&
+                  !request.rowsHierarchyDrilldown &&
+                  request.columns.filter((f) => f !== MEASURES_PLACEHOLDER).length < 2;
                 return (
                   <div className="flex flex-col gap-1 text-sm">
                     {[
@@ -228,7 +232,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                         {opt.label}
                       </button>
                     ))}
-                    {needsMoreRowFields && <p className="px-2 pt-1 text-xs text-muted">Needs 2+ Row fields.</p>}
+                    {needsMoreRowFields && <p className="px-2 pt-1 text-xs text-muted">Needs 2+ Row or Column fields.</p>}
                   </div>
                 );
               }}
