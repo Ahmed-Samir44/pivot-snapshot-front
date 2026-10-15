@@ -33,6 +33,7 @@ export const SHOW_VALUES_AS_OPTIONS = [
   { value: "PercentOf", label: "% Of" },
   { value: "PercentOfParentRow", label: "% of Parent Row Total" },
   { value: "PercentOfParentColumn", label: "% of Parent Column Total" },
+  { value: "PercentOfParentTotal", label: "% of Parent Total" },
   { value: "DifferenceFrom", label: "Difference From" },
   { value: "PercentDifferenceFrom", label: "% Difference From" },
   { value: "RunningTotal", label: "Running Total In" },
@@ -57,6 +58,7 @@ export const PERCENT_SHOW_VALUES_AS = new Set([
   "PercentDifferenceFrom",
   "PercentRunningTotal",
   "PercentOf",
+  "PercentOfParentTotal",
 ]);
 
 // currencySymbol: "" (not any specific currency) — which symbol to show, if any, is a per-report
@@ -2297,9 +2299,16 @@ function ValuePill({
 // panel-switching the CALLER uses around it (ValuePill's own "menu"/"settings"/"conditionalFormat",
 // or PivotGrid's context menu's own root/showValuesAs) — `onBack` is the only thing the caller
 // controls, fired when this dialog's own top-level Back button is pressed.
-// Excel's "(previous)" Base item for Difference From / % Difference From — stored as baseField null
-// (the backend's own default for those two, see MdxPivotQueryBuilder.ValidateShowValuesAs).
-const PREVIOUS_BASE_ITEM = "__previous__";
+// Excel's "(previous)" / "(next)" Base items (Difference From, % Difference From, % Of) — sent as-is
+// with the base field since 2026-10-15: the neighbouring item WITHIN that field (the backend's
+// ShowValuesAsProcessor.RelativeBaseValues). Before, "(previous)" was sent as "no base field", which
+// meant the previous row of the whole table.
+const PREVIOUS_BASE_ITEM = "(previous)";
+const NEXT_BASE_ITEM = "(next)";
+const RELATIVE_BASE_ITEMS = [PREVIOUS_BASE_ITEM, NEXT_BASE_ITEM];
+// The modes that use a Base field; all but % of Parent Total also need a Base item.
+const BASE_FIELD_MODES = ["PercentOf", "DifferenceFrom", "PercentDifferenceFrom", "PercentOfParentTotal"];
+const RELATIVE_ITEM_MODES = ["PercentOf", "DifferenceFrom", "PercentDifferenceFrom"];
 
 // A plain bordered list box, Excel's own control for these choices (not a dropdown) — one row per
 // option, the selected one highlighted, greyed out and inert when `disabled`.
@@ -2336,10 +2345,11 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
   );
   const patchDraft = (patch) => setDraft((current) => ({ ...current, ...patch }));
   const format = draft.format ?? DEFAULT_FORMAT;
-  // Base field/item only mean something for these three; Excel keeps both lists on screen anyway,
-  // just greyed out.
-  const usesBase = draft.showValuesAs === "PercentOf" || draft.showValuesAs === "DifferenceFrom" || draft.showValuesAs === "PercentDifferenceFrom";
-  const allowsPrevious = draft.showValuesAs === "DifferenceFrom" || draft.showValuesAs === "PercentDifferenceFrom";
+  // Base field/item only mean something for these modes; Excel keeps both lists on screen anyway,
+  // just greyed out. % of Parent Total uses a Base field only (its Base item list stays greyed).
+  const usesBase = BASE_FIELD_MODES.includes(draft.showValuesAs);
+  const usesBaseItem = RELATIVE_ITEM_MODES.includes(draft.showValuesAs);
+  const allowsPrevious = usesBaseItem;
   const isDimensionField = v.field.startsWith("[");
   const dimensionAggregation = draft.dimensionAggregation ?? "Count";
   const sourceName = isDimensionField ? formatDimensionName(v.field) : v.field;
@@ -2358,7 +2368,7 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
   // Base item options come from the SAME member-search endpoint FilterRow uses — only fetched once
   // a Base field is actually chosen, and re-fetched whenever it changes.
   useEffect(() => {
-    if (!usesBase || !draft.baseField) {
+    if (!usesBaseItem || !draft.baseField) {
       setBaseItemOptions([]);
       return;
     }
@@ -2380,7 +2390,7 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
       cancelled = true;
       controller.abort();
     };
-  }, [usesBase, draft.baseField, baseItemsRetryToken]);
+  }, [usesBaseItem, draft.baseField, baseItemsRetryToken]);
 
   if (panel === "numberFormat") {
     // Format Cells opens over this dialog; its OK only updates the draft (Excel applies both on
@@ -2389,12 +2399,11 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
   }
 
   const apply = () => {
-    const previous = draft.baseItem === PREVIOUS_BASE_ITEM;
     const patch = {
       customLabel: draft.customLabel || null,
       showValuesAs: draft.showValuesAs,
-      baseField: usesBase && !previous ? draft.baseField : null,
-      baseItem: usesBase && !previous ? (draft.baseItem ?? "") : "",
+      baseField: usesBase ? draft.baseField : null,
+      baseItem: usesBaseItem ? (draft.baseItem ?? "") : "",
       ...(isDimensionField ? { dimensionAggregation } : {}),
       ...(draft.format ? { format: draft.format } : {}),
     };
@@ -2405,8 +2414,9 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
     onUpdate(patch, { requireGrandTotals });
     (onDone ?? onBack)();
   };
-  // % Of needs a real base item before OK can apply (the backend rejects it otherwise).
-  const canApply = !(draft.showValuesAs === "PercentOf" && (!draft.baseField || !draft.baseItem || draft.baseItem === PREVIOUS_BASE_ITEM));
+  // A mode with a Base field needs one picked, and one with a Base item needs that too (the backend
+  // rejects them otherwise).
+  const canApply = !(usesBase && !draft.baseField) && !(usesBaseItem && !draft.baseItem);
 
   return (
     <div className="space-y-3">
@@ -2484,11 +2494,10 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
                 patch.format = { ...format, type: "Percentage" };
               }
               // Excel pre-selects the first base field and, where it exists, "(previous)".
-              const nextUsesBase = next === "PercentOf" || next === "DifferenceFrom" || next === "PercentDifferenceFrom";
-              if (nextUsesBase && !draft.baseField) patch.baseField = rows[0] ?? null;
-              if (next === "DifferenceFrom" || next === "PercentDifferenceFrom") {
+              if (BASE_FIELD_MODES.includes(next) && !draft.baseField) patch.baseField = rows.find((f) => f !== MEASURES_PLACEHOLDER) ?? null;
+              if (RELATIVE_ITEM_MODES.includes(next)) {
                 if (!draft.baseItem) patch.baseItem = PREVIOUS_BASE_ITEM;
-              } else if (draft.baseItem === PREVIOUS_BASE_ITEM) {
+              } else if (RELATIVE_BASE_ITEMS.includes(draft.baseItem)) {
                 patch.baseItem = "";
               }
               patchDraft(patch);
@@ -2514,8 +2523,8 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
               />
             </div>
             <div className="min-w-0">
-              <span className={`mb-1 block text-xs font-medium ${usesBase ? "text-muted" : "text-muted/60"}`}>Base item:</span>
-              {usesBase && draft.baseField && baseItemsFailed ? (
+              <span className={`mb-1 block text-xs font-medium ${usesBaseItem ? "text-muted" : "text-muted/60"}`}>Base item:</span>
+              {usesBaseItem && draft.baseField && baseItemsFailed ? (
                 <div className="flex h-28 flex-col items-start justify-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 text-xs text-rose-700">
                   <span>Couldn&apos;t load values — the cube may be busy.</span>
                   <button type="button" onClick={() => setBaseItemsRetryToken((t) => t + 1)} className="rounded border border-rose-300 px-2 py-0.5 font-medium hover:bg-rose-100">
@@ -2525,9 +2534,9 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
               ) : (
                 <ListBox
                   className="h-28"
-                  disabled={!usesBase || loadingBaseItems}
+                  disabled={!usesBaseItem || loadingBaseItems}
                   options={[
-                    ...(allowsPrevious ? [{ value: PREVIOUS_BASE_ITEM, label: "(previous)" }] : []),
+                    ...(allowsPrevious ? [{ value: PREVIOUS_BASE_ITEM, label: "(previous)" }, { value: NEXT_BASE_ITEM, label: "(next)" }] : []),
                     ...(loadingBaseItems ? [{ value: "__loading__", label: "Loading…" }] : baseItemOptions.map((m) => ({ value: m, label: m === "" ? "(blank)" : m }))),
                   ]}
                   value={draft.baseItem}

@@ -594,6 +594,13 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
                 // would each build off the same stale `request` closure, so the second would
                 // silently discard the first (caught during implementation, not live).
                 const valuePatch = { showValuesAs: opt.value };
+                // Modes that need a Base field get Excel's own defaults — the first Rows field and,
+                // where there's a Base item, "(previous)" — instead of being sent without one (the
+                // backend rejects that). Value Field Settings changes them.
+                if (["PercentOf", "DifferenceFrom", "PercentDifferenceFrom", "PercentOfParentTotal"].includes(opt.value)) {
+                  valuePatch.baseField = request.rows.find((f) => f !== MEASURES_PLACEHOLDER) ?? null;
+                  valuePatch.baseItem = opt.value === "PercentOfParentTotal" ? "" : "(previous)";
+                }
                 if (PERCENT_SHOW_VALUES_AS.has(opt.value) && format.type === "General") {
                   valuePatch.format = { ...format, type: "Percentage" };
                 }
