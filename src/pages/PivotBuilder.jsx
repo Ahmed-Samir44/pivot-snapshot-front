@@ -274,20 +274,22 @@ export default function PivotBuilder() {
       // axis's own genuine empty→non-empty transition, and only when nothing already claims sorting
       // for the WHOLE request (`sort` still null) and that axis's own LevelSorts are still empty — an
       // explicit "Clear sort"/LevelSortEditor rule, on either axis, is left untouched.
+      // Per axis since 2026-10-15: a `sort` only blocks the default on its OWN axis (the backend now
+      // lets a Sort and LevelSorts coexist on different axes).
       let withDefaultSort = next;
-      if (!withDefaultSort.sort) {
+      {
         const rowsJustGotFirstField = prev.rows.length === 0 && withDefaultSort.rows.length > 0;
         // Not for a drilldown slot (Drilldown v3: starting a drilldown on empty Rows makes it the
         // first Rows field) — a per-level sort can't apply to a drilldown axis (the backend rejects
         // it); the hierarchy keeps its own natural order unless sorted from its header.
-        if (rowsJustGotFirstField && withDefaultSort.rowLevelSorts.length === 0 && !withDefaultSort.rowsHierarchyDrilldown) {
+        if (rowsJustGotFirstField && withDefaultSort.sort?.axis !== "Rows" && withDefaultSort.rowLevelSorts.length === 0 && !withDefaultSort.rowsHierarchyDrilldown) {
           withDefaultSort = { ...withDefaultSort, rowLevelSorts: [{ level: 0, direction: "Ascending", byMeasureField: null }] };
         }
         const prevColumnFieldCount = prev.columns.filter((f) => f !== MEASURES_PLACEHOLDER).length;
         const nextColumnFieldCount = withDefaultSort.columns.filter((f) => f !== MEASURES_PLACEHOLDER).length;
         const columnsJustGotFirstField = prevColumnFieldCount === 0 && nextColumnFieldCount > 0;
         // Same exception as Rows for a Columns drilldown slot (C4).
-        if (columnsJustGotFirstField && withDefaultSort.columnLevelSorts.length === 0 && !withDefaultSort.columnsHierarchyDrilldown) {
+        if (columnsJustGotFirstField && withDefaultSort.sort?.axis !== "Columns" && withDefaultSort.columnLevelSorts.length === 0 && !withDefaultSort.columnsHierarchyDrilldown) {
           withDefaultSort = { ...withDefaultSort, columnLevelSorts: [{ level: 0, direction: "Ascending", byMeasureField: null }] };
         }
       }

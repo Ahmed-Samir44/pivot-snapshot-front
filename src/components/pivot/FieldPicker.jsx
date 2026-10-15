@@ -1352,8 +1352,8 @@ export function FieldSortDialog({ field, axis, level, request, onChange, onBack,
     const otherRules = levelSorts.filter((s) => s.level !== level);
     if (mode === "manual") {
       if (customOrder && customOrder.length > 0) {
-        // The axis custom order can't coexist with any per-level rule (the backend's rule).
-        onChange({ ...request, sort: { direction: "Ascending", byMeasureField: null, axis, customOrder }, rowLevelSorts: [], columnLevelSorts: [] });
+        // The axis custom order can't coexist with a per-level rule on the SAME axis (the backend's rule).
+        onChange({ ...request, sort: { direction: "Ascending", byMeasureField: null, axis, customOrder }, [levelSortsKey]: [] });
       } else {
         onChange({ ...request, sort: axisSort ? null : request.sort, [levelSortsKey]: otherRules });
       }
@@ -1365,8 +1365,9 @@ export function FieldSortDialog({ field, axis, level, request, onChange, onBack,
         byMeasureField: byField ? null : by,
         firstKeySortOrder: byField && firstKey ? firstKey : null,
       };
-      // A per-level rule can't coexist with the axis-wide `sort` (the backend's rule).
-      onChange({ ...request, sort: null, [levelSortsKey]: [...otherRules, nextRule] });
+      // A per-level rule can't coexist with an axis-wide `sort` on the SAME axis (the backend's
+      // rule) — a sort on the other axis, a drilldown's included, is kept.
+      onChange({ ...request, sort: axisSort ? null : request.sort, [levelSortsKey]: [...otherRules, nextRule] });
     }
     (onDone ?? onBack)();
   };

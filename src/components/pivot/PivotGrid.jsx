@@ -159,24 +159,20 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
   const showsNoDataItems = request.showItemsWithNoData.includes(noDataKey);
 
   const setSort = (direction) => {
-    // `sort` is mutually exclusive with RowLevelSorts/ColumnLevelSorts GLOBALLY, not just on this
-    // axis (MdxPivotQueryBuilder.ValidateLevelSorts rejects `sort` whenever EITHER array is
-    // non-empty) — both PivotBuilder's own per-axis default-sort-on-first-field and the
-    // LevelSortEditor can leave the OTHER axis's LevelSorts populated even while sorting on this
-    // one, so both must be cleared here, not just this axis's (caught live, 2026-10-06: a plain
-    // two-axis pivot defaults BOTH axes' LevelSorts, so the very first click of this header's own
-    // Sort shortcut on either axis was throwing "Could not query the cube" otherwise).
+    // `sort` and the per-field LevelSorts only conflict on the SAME axis (MdxPivotQueryBuilder.
+    // ValidateLevelSorts, since 2026-10-15 — it used to be global, so a sort on one axis wiped the
+    // other axis's rules, a drilldown's sort included). Each path below clears this axis only.
     //
     // Excel sorts the FIELD you clicked (2026-10-14, its per-field Sort dialog): a field on a
     // multi-field axis gets its own LevelSort — other fields' rules are kept — instead of the
     // axis-wide sort, which only works with one field on the axis. A drilldown slot (sortOnly) keeps
     // the axis-wide sort: the hierarchy is the axis's one sortable field there.
     if (sortOnly) {
-      onChange({ ...request, sort: { direction, byMeasureField: null, axis, customOrder: null }, rowLevelSorts: [], columnLevelSorts: [] });
+      onChange({ ...request, sort: { direction, byMeasureField: null, axis, customOrder: null }, [axis === "Columns" ? "columnLevelSorts" : "rowLevelSorts"]: [] });
       return;
     }
     const key = axis === "Columns" ? "columnLevelSorts" : "rowLevelSorts";
-    onChange({ ...request, sort: null, [key]: [...levelSorts.filter((s) => s.level !== level), { level, direction, byMeasureField: null }] });
+    onChange({ ...request, sort: request.sort?.axis === axis ? null : request.sort, [key]: [...levelSorts.filter((s) => s.level !== level), { level, direction, byMeasureField: null }] });
   };
 
   const clearSort = () => {
@@ -381,7 +377,7 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
   // Same global-exclusivity clear as FieldHeaderMenu's own setSort above — this menu's Sort
   // shortcut hits the identical "both axes default-sorted, this throws otherwise" case.
   const setSort = (direction) =>
-    onChange({ ...request, sort: { direction, byMeasureField: valueField.field, axis: sortAxis, customOrder: null }, rowLevelSorts: [], columnLevelSorts: [] });
+    onChange({ ...request, sort: { direction, byMeasureField: valueField.field, axis: sortAxis, customOrder: null }, [sortAxis === "Columns" ? "columnLevelSorts" : "rowLevelSorts"]: [] });
   const removeValue = () => onChange({ ...request, values: request.values.filter((_, i) => i !== measureIndex) });
 
   const isCalculatedField = request.calculatedFields.some((cf) => cf.name === valueField.field);
