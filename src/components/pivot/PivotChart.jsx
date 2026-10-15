@@ -17,14 +17,11 @@ const BAR_GAP = 8;
 // Must stay in sync with PivotChartRenderer.cs's identical array (saved snapshot vs. live preview).
 const SLICE_COLORS = ["#AE8C67", "#6a7380", "#63BE7B", "#F8696B", "#FFEB84", "#638EC6", "#9a7b57", "#1f2430", "#c9a876", "#8a94a3"];
 
-// One CATEGORY per detail row (labels[0]). One SERIES per detail column GROUP of the FIRST value
-// field only — with no Columns field, columnHeaders has exactly one column per measure, so
-// there's exactly 1 series (unlabeled, no legend needed). With a Columns field, each distinct
-// dim-combo (e.g. each month) becomes its own series — see PivotChartRenderer.ExtractSeries for
-// the full WHY (this fixes the bug caught live 2026-09-24: charting only column 0 silently showed
-// just the FIRST column's values). A Grand Total column group is excluded the same way
-// GrandTotalsProcessor/ShowValuesAsProcessor exclude it from their own sums.
-function extractSeries(result, valueCount) {
+// One CATEGORY per detail row (labels[0]). One SERIES per detail COLUMN — every value field and
+// every Columns item (2026-10-15: it used to chart the FIRST value field only, and needed Σ Values
+// innermost in Columns), named by its labels ("2024 / Revenue"); a lone series needs no name.
+// Total columns are left out the same way total rows are. Mirrors PivotChartRenderer.ExtractSeries.
+function extractSeries(result) {
   const categoryRows = result.rowHeaders.map((row, r) => (row.isTotal ? null : { row, r })).filter(Boolean);
   if (categoryRows.length === 0) return null;
 
@@ -34,14 +31,10 @@ function extractSeries(result, valueCount) {
   // column subtotals) is left out, same as PivotChartRenderer.ExtractSeries.
   const detailColumns = result.columnHeaders.map((h, c) => (h.isTotal ? null : c)).filter((c) => c !== null);
   if (detailColumns.length === 0) return null;
-  const seriesCount = Math.max(Math.floor(detailColumns.length / valueCount), 1);
-
-  const series = Array.from({ length: seriesCount }, (_, s) => {
-    const colIndex = detailColumns[s * valueCount];
-    const label = seriesCount === 1 ? "" : result.columnHeaders[colIndex].labels.slice(0, -1).join(" / ");
-    const values = categoryRows.map(({ r }) => result.cells[r][colIndex] ?? 0);
-    return { label, values };
-  });
+  const series = detailColumns.map((colIndex) => ({
+    label: detailColumns.length === 1 ? "" : result.columnHeaders[colIndex].labels.filter((l) => l !== "").join(" / "),
+    values: categoryRows.map(({ r }) => result.cells[r][colIndex] ?? 0),
+  }));
 
   return { categories, series };
 }
@@ -62,22 +55,33 @@ function ValueLabel({ x, y, value, format }) {
   );
 }
 
-// One row, left to right, swatch + label per series — mirrors PivotChartRenderer.AppendSeriesLegend.
-// Each series' x position is computed from the widths of every series before it, rather than a
-// mutated accumulator variable (same "derive, don't mutate" approach PieChart's startAngles uses).
-function SeriesLegend({ series }) {
-  const y = 10;
-  const xPositions = series.reduce(
-    (acc, s) => [...acc, acc[acc.length - 1] + 13 + s.label.length * 6 + 14],
-    [PADDING_LEFT],
-  );
+// Swatch + label per series, left to right, WRAPPING onto a new row when the next one would run
+// past the right edge (2026-10-15 — every value field is a series now, so legends got long enough to
+// be cut off). Mirrors PivotChartRenderer.LegendLayout exactly. Returns each entry's { x, row }.
+function legendLayout(series) {
+  const items = [];
+  let x = PADDING_LEFT;
+  let row = 0;
+  series.forEach((s) => {
+    const width = 13 + s.label.length * 6 + 14;
+    if (x > PADDING_LEFT && x + width > WIDTH - 10) {
+      x = PADDING_LEFT;
+      row += 1;
+    }
+    items.push({ x, row });
+    x += width;
+  });
+  return { items, rows: series.length > 1 ? row + 1 : 0 };
+}
 
+function SeriesLegend({ series }) {
+  const { items } = legendLayout(series);
   return (
     <>
       {series.map((s, i) => (
         <g key={i}>
-          <rect x={xPositions[i]} y={y - 8} width={9} height={9} fill={SLICE_COLORS[i % SLICE_COLORS.length]} />
-          <text x={xPositions[i] + 13} y={y} fill="#1f2430">
+          <rect x={items[i].x} y={10 + items[i].row * LEGEND_ROW_HEIGHT - 8} width={9} height={9} fill={SLICE_COLORS[i % SLICE_COLORS.length]} />
+          <text x={items[i].x + 13} y={10 + items[i].row * LEGEND_ROW_HEIGHT} fill="#1f2430">
             {s.label}
           </text>
         </g>
@@ -90,7 +94,7 @@ function BarChart({ data, format }) {
   const max = Math.max(...data.series.flatMap((s) => s.values));
   if (max <= 0) return null;
 
-  const paddingTop = data.series.length > 1 ? PADDING_TOP + LEGEND_ROW_HEIGHT : PADDING_TOP;
+  const paddingTop = PADDING_TOP + legendLayout(data.series).rows * LEGEND_ROW_HEIGHT;
   const chartWidth = WIDTH - PADDING_LEFT - 10;
   const chartHeight = HEIGHT - paddingTop - PADDING_BOTTOM;
   const slotWidth = chartWidth / data.categories.length;
@@ -128,7 +132,7 @@ function LineChart({ data, format }) {
   const max = Math.max(...data.series.flatMap((s) => s.values));
   if (max <= 0) return null;
 
-  const paddingTop = data.series.length > 1 ? PADDING_TOP + LEGEND_ROW_HEIGHT : PADDING_TOP;
+  const paddingTop = PADDING_TOP + legendLayout(data.series).rows * LEGEND_ROW_HEIGHT;
   const chartWidth = WIDTH - PADDING_LEFT - 10;
   const chartHeight = HEIGHT - paddingTop - PADDING_BOTTOM;
   const slotWidth = chartWidth / data.categories.length;
@@ -224,16 +228,14 @@ function PieChart({ data }) {
   );
 }
 
-export default function PivotChart({ result, valueFields, chartType = "Bar", rows, columns }) {
-  // v1 scope cut, mirrors the backend's PivotChartRenderer.Render exactly: extractSeries assumes
-  // categories are ROWS and series are COLUMN groups of a fixed, contiguous stride — correct only
-  // when Σ Values is in Columns AND innermost there. Anywhere else, no chart is drawn rather than
-  // a meaningless mixed one.
-  if (!result || !valueFields?.length || result.columnHeaders.length === 0 || !measuresPlacementSupportsChart(rows, columns)) {
+export default function PivotChart({ result, valueFields, chartType = "Bar", rows }) {
+  // Mirrors the backend's PivotChartRenderer.Render: categories are rows and every detail column is a
+  // series, wherever Σ Values sits in Columns — with Σ Values in Rows (each row a measure) there's no chart.
+  if (!result || !valueFields?.length || result.columnHeaders.length === 0 || !measuresPlacementSupportsChart(rows)) {
     return null;
   }
 
-  const data = extractSeries(result, valueFields.length);
+  const data = extractSeries(result);
   if (!data) {
     return null;
   }

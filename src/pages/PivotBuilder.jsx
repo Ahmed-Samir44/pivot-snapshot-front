@@ -1013,7 +1013,7 @@ export default function PivotBuilder() {
               <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-muted">{chartUnavailableReason(result, lastQuery)}</p>
             )}
           {includeChart && (
-            <PivotChart result={result} valueFields={displayValues} chartType={chartType} rows={lastQuery?.rows} columns={lastQuery?.columns} />
+            <PivotChart result={result} valueFields={displayValues} chartType={chartType} rows={lastQuery?.rows} />
           )}
 
         </div>

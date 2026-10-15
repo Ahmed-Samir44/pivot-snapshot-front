@@ -3,14 +3,11 @@
 // component and non-component exports in one file breaks React Fast Refresh.
 import { measuresIndexOf } from "./measuresPlacement";
 
-// Mirrors the backend's HtmlSnapshotRenderer/PivotChartRenderer exactly: a chart needs Σ Values to
-// be in Columns AND innermost there (a fixed, contiguous stride — see PivotChartRenderer.Render's
-// own WHY comment for why that's narrower than the general positional model everything else now
-// supports).
-export function measuresPlacementSupportsChart(rows, columns) {
-  const rowsMeasuresIndex = measuresIndexOf(rows ?? []);
-  const columnsMeasuresIndex = measuresIndexOf(columns ?? []);
-  return rowsMeasuresIndex < 0 && columnsMeasuresIndex === (columns?.length ?? 0) - 1;
+// Mirrors the backend's HtmlSnapshotRenderer/PivotChartRenderer exactly: every detail column is a
+// series, so Σ Values can sit anywhere in Columns (2026-10-15 — it used to have to be innermost).
+// With Σ Values in ROWS each row is a measure, not a category, so there's no chart.
+export function measuresPlacementSupportsChart(rows) {
+  return measuresIndexOf(rows ?? []) < 0;
 }
 
 // Only covers the one condition that's simple, common, and worth a specific message; rarer edge
@@ -21,8 +18,8 @@ export function chartUnavailableReason(result, lastQuery) {
     return null;
   }
 
-  if (!measuresPlacementSupportsChart(lastQuery.rows, lastQuery.columns)) {
-    return "No chart is drawn unless Σ Values is the innermost field in Columns.";
+  if (!measuresPlacementSupportsChart(lastQuery.rows)) {
+    return "No chart is drawn while Σ Values is in Rows.";
   }
 
   return null;
