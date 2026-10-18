@@ -384,17 +384,20 @@ export function applyCollapse(displayRows, collapsedKeys, rowHeaderGroups) {
   return out;
 }
 
-// Excel's "Merge and center cells with labels" (PivotTable Options, 2026-10-18): in a column that
-// holds ONE field's labels, an item's label cell spans every following row of that same item —
-// stopping at a Total row (it has its own caption there) and at an inserted blank line (a separate
-// full-width row). Returns spans[row][group]: 1 = a plain cell, >1 = the first cell of a merge, 0 =
-// covered by a merge above (no cell drawn). Merged columns (compact form) and a drilldown's own
-// column are never merged. Mirrors the backend's HtmlSnapshotRenderer.LabelSpans exactly.
+// Excel's "Merge and center cells with labels" (PivotTable Options, 2026-10-18): only OUTER items'
+// labels merge and center (the user confirmed against Excel) — in a column holding one OUTER field's
+// labels, an item's label cell spans every following row of that same item, stopping at a Total row
+// and at an inserted blank line (a separate full-width row). The innermost field and every Total row
+// keep their normal cell and alignment. Returns spans[row][group]: -1 = a normal cell, >=1 = an outer
+// item's merged-and-centered label spanning that many rows, 0 = covered by a merge above (no cell
+// drawn). Merged columns (compact form) and a drilldown's own column are never merged. Mirrors the
+// backend's HtmlSnapshotRenderer.LabelSpans exactly.
 export function computeLabelSpans(displayRows, rowHeaderGroups, { drillSlot = -1, drilldown = false } = {}) {
-  const spans = displayRows.map(() => rowHeaderGroups.map(() => 1));
+  const spans = displayRows.map(() => rowHeaderGroups.map(() => -1));
+  const innermost = rowHeaderGroups.length > 0 ? rowHeaderGroups[rowHeaderGroups.length - 1].end : -1;
   rowHeaderGroups.forEach((group, g) => {
     const level = group.start;
-    if (drilldown || group.end !== level || level === drillSlot) return;
+    if (drilldown || group.end !== level || level === drillSlot || level >= innermost) return;
     const mergeable = (row) => row.kind !== "subtotal" && row.kind !== "grand" && row.path.length > level;
     const sameItem = (a, b) => a.path.slice(0, level + 1).every((p, k) => b.path[k] === p);
     let i = 0;

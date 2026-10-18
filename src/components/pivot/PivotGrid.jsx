@@ -1247,15 +1247,16 @@ export default function PivotGrid({
                     // A combined drilldown slot's own column (Drilldown v3) goes through the line
                     // renderer below too — it's where the depth indent and the +/- toggle live.
                     if (group.start === group.end && !drilldownAlone && group.start !== combinedDrillSlot) {
-                      const labelSpan = labelSpans?.[displayIndex][groupIndex] ?? 1;
+                      const labelSpan = labelSpans?.[displayIndex][groupIndex] ?? -1;
                       if (labelSpan === 0) return null; // covered by the merged label above
                       return (
-                        // Left-aligned like Excel's own row labels in every layout (was centered) —
-                        // centered both ways when "Merge and center cells with labels" is on.
+                        // Left-aligned like Excel's own row labels in every layout (was centered) — an
+                        // outer item's label is merged and centered both ways with "Merge and center
+                        // cells with labels" (labelSpan >= 1).
                         <td
                           key={group.start}
                           rowSpan={labelSpan > 1 ? labelSpan : undefined}
-                          className={`${cellBorder} whitespace-nowrap px-3 py-1.5 ${labelSpans ? "bg-white text-center align-middle" : "text-left"} ${labelWeight}`}
+                          className={`${cellBorder} whitespace-nowrap px-3 py-1.5 ${labelSpan >= 1 ? "bg-white text-center align-middle" : "text-left"} ${labelWeight}`}
                         >
                           <span className="inline-flex items-center gap-1.5">
                             {lines[0] && collapseToggleFor(lines[0])}

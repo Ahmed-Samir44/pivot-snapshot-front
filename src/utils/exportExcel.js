@@ -295,13 +295,14 @@ export async function exportPivotToExcel({
     const excelRow = currentRow;
     const isTotalRow = displayRow.kind === "subtotal" || displayRow.kind === "grand" || (displayRow.kind === "header" && displayRow.sourceIndex !== null);
     rowHeaderGroups.forEach((_, gi) => {
-      const span = labelSpans?.[displayIndex][gi] ?? 1;
+      const span = labelSpans?.[displayIndex][gi] ?? -1;
       if (span === 0) return; // inside the merged cell above
       const cell = sheet.getRow(excelRow).getCell(gi + 1);
       const lines = displayRow.groupCells[gi]?.lines ?? [];
       cell.value = lines.map((l) => l.text).join(" › ");
       if (lines[0]?.indent) cell.alignment = { indent: lines[0].indent };
-      if (labelSpans && rowHeaderGroups[gi].start === rowHeaderGroups[gi].end) cell.alignment = { horizontal: "center", vertical: "middle" };
+      // An outer item's label (span >= 1) is merged and centered; everything else keeps its alignment.
+      if (span >= 1) cell.alignment = { horizontal: "center", vertical: "middle" };
       if (span > 1) sheet.mergeCells(excelRow, gi + 1, excelRow + span - 1, gi + 1);
       cell.font = { bold: isTotalRow || displayRow.kind === "header" };
       if (isTotalRow) cell.fill = SUBTOTAL_FILL;
