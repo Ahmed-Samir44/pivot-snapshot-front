@@ -115,9 +115,11 @@ const EMPTY_REQUEST = {
   grandTotals: "RowsAndColumns",
   // Real Excel's own Design tab "Subtotals" is a 3-way choice (Do Not Show / Show all Subtotals at
   // Bottom of Group / Show all Subtotals at Top of Group) — same gap as grandTotals above, same fix.
-  // Defaults to Off, preserving this app's existing behavior (no live-Excel confirmation yet of
-  // what Excel's own default position actually is — see EXCEL_PARITY_AUDIT.md).
-  subtotals: "Off",
+  // Defaults to Top: Excel shows subtotals at the top of each group as soon as a second Rows field
+  // is added (confirmed by the user against Excel, 2026-10-18 — it used to default to Off). With
+  // one field there are no groups, so nothing shows (the backend doesn't block Running Total/Rank
+  // then either). A pivot saved with its own choice keeps it.
+  subtotals: "Top",
   // Real Excel's own per-field "Field Settings…" → Subtotals (2026-10-13) — overrides `subtotals`
   // above for ONE specific Rows field, falling back to it when a field has no entry here. Each entry
   // is `{ field, position }` (position: "Off"/"Bottom"/"Top", matching `subtotals`' own string
