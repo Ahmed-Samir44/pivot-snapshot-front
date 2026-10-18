@@ -14,10 +14,15 @@ const PADDING_TOP = 20;
 // PivotChartRenderer.cs's own comment on the same constant.
 const LEGEND_ROW_HEIGHT = 16;
 const BAR_GAP = 8;
+// Value labels on bars/points only up to this many categories — past it they overlap into an
+// unreadable band (caught 2026-10-18 with 30 bars). Excel shows none by default. Same constant in
+// PivotChartRenderer.cs.
+const MAX_VALUE_LABELS = 12;
 // Must stay in sync with PivotChartRenderer.cs's identical array (saved snapshot vs. live preview).
 const SLICE_COLORS = ["#AE8C67", "#6a7380", "#63BE7B", "#F8696B", "#FFEB84", "#638EC6", "#9a7b57", "#1f2430", "#c9a876", "#8a94a3"];
 
-// One CATEGORY per detail row (labels[0]). One SERIES per detail COLUMN — every value field and
+// One CATEGORY per detail row, named by its whole path ("Egypt / ER" — 2026-10-18: it used to be
+// labels[0] alone, so with 2+ Rows fields every bar read "Egypt"). One SERIES per detail COLUMN — every value field and
 // every Columns item (2026-10-15: it used to chart the FIRST value field only, and needed Σ Values
 // innermost in Columns), named by its labels ("2024 / Revenue"); a lone series needs no name.
 // Total columns are left out the same way total rows are. Mirrors PivotChartRenderer.ExtractSeries.
@@ -25,7 +30,7 @@ function extractSeries(result) {
   const categoryRows = result.rowHeaders.map((row, r) => (row.isTotal ? null : { row, r })).filter(Boolean);
   if (categoryRows.length === 0) return null;
 
-  const categories = categoryRows.map(({ row }) => row.labels[0]);
+  const categories = categoryRows.map(({ row }) => row.labels.filter((l) => l !== "").join(" / "));
 
   // Detail columns only — every total column (Grand Total, and since 2026-10-15 the "2024 Total"
   // column subtotals) is left out, same as PivotChartRenderer.ExtractSeries.
@@ -116,7 +121,7 @@ function BarChart({ data, format }) {
               return (
                 <g key={si}>
                   <rect x={x} y={y} width={Math.max(barWidth, 1)} height={barHeight} fill={SLICE_COLORS[si % SLICE_COLORS.length]} />
-                  {data.series.length === 1 && <ValueLabel x={x + barWidth / 2} y={y} value={value} format={format} />}
+                  {data.series.length === 1 && data.categories.length <= MAX_VALUE_LABELS && <ValueLabel x={x + barWidth / 2} y={y} value={value} format={format} />}
                 </g>
               );
             })}
@@ -154,7 +159,7 @@ function LineChart({ data, format }) {
             {points.map((p, i) => (
               <g key={i}>
                 <circle cx={p.x} cy={p.y} r={3} fill={color} />
-                {data.series.length === 1 && <ValueLabel x={p.x} y={p.y} value={p.value} format={format} />}
+                {data.series.length === 1 && data.categories.length <= MAX_VALUE_LABELS && <ValueLabel x={p.x} y={p.y} value={p.value} format={format} />}
               </g>
             ))}
           </g>

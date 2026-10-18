@@ -182,7 +182,8 @@ function hierarchyGroupLabel(hierarchyUniqueName) {
 // indented by `depth`), then its sub-folders (each its own collapsed-by-default expand/collapse
 // row), recursing one level deeper per nested folder — mirrors real Excel's own indentation for a
 // multi-level Display Folder.
-function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleFolder, isPlaced, onFieldCheckToggle, onAddHierarchy, onStartDrilldown }) {
+// forceOpen: every folder open (a search match must be visible without hunting through folders).
+function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleFolder, isPlaced, onFieldCheckToggle, onAddHierarchy, onStartDrilldown, forceOpen = false }) {
   const indent = 28 + depth * 16;
   const renderFieldRow = ({ field, label }, rowIndent) => (
     <li
@@ -204,7 +205,10 @@ function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleF
         onClick={(e) => e.stopPropagation()}
         className="h-3 w-3 shrink-0 accent-gold"
       />
-      <span className="truncate">{label}</span>
+      {/* Clicking the name ticks the field too, like Excel's own Field List. */}
+      <span className="cursor-pointer truncate" onClick={() => onFieldCheckToggle(field, !isPlaced(field))}>
+        {label}
+      </span>
     </li>
   );
   return (
@@ -266,7 +270,7 @@ function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleF
         .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
         .map((folderName) => {
           const key = `${folderKeyPrefix}\u0001${folderName}`;
-          const isOpen = expandedFolders.has(key);
+          const isOpen = forceOpen || expandedFolders.has(key);
           const child = node.folders.get(folderName);
           return (
             <li key={key}>
@@ -296,6 +300,7 @@ function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleF
                     onFieldCheckToggle={onFieldCheckToggle}
                     onAddHierarchy={onAddHierarchy}
                     onStartDrilldown={onStartDrilldown}
+                    forceOpen={forceOpen}
                   />
                 </ul>
               )}
@@ -306,7 +311,7 @@ function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleF
   );
 }
 
-function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tables, tablesLoading, enabledTableNames, onEnabledTableNamesChange, fieldsLoading, onFieldDropped, onAddHierarchy, onStartDrilldown }) {
+function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tables, tablesLoading, enabledTableNames, onEnabledTableNamesChange, fieldsLoading, allDimensions = null, onFieldDropped, onAddHierarchy, onStartDrilldown }) {
   // Real Excel's own Field List shows EVERY table immediately, collapsed, with its own ▸/▾ arrow —
   // no prior "search and pick a table" step at all (confirmed live, 2026-10-05, against real
   // Excel's own PivotTable Fields pane screenshots: ~300 tables, all listed, none pre-selected).
@@ -380,24 +385,28 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
     measuresByGroup.get(groupName).push({ field: m.field, label: m.displayName, displayFolder: m.displayFolder ?? null });
   });
 
-  const dimensionFieldsByTable = new Map();
   // `dimensions` only ever holds columns for tables PivotBuilder has already fetched (i.e. every
   // currently-EXPANDED table — enabledTableNames now means "expanded", see this component's own
   // top-of-function WHY comment) — so a table not yet in this map just hasn't loaded its columns
   // yet (or has none).
-  dimensions.forEach((d) => {
-    const dotIndex = d.displayName.indexOf(".");
-    const groupName = dotIndex === -1 ? d.displayName : d.displayName.slice(0, dotIndex);
-    const label = dotIndex === -1 ? d.displayName : d.displayName.slice(dotIndex + 1);
-    if (!dimensionFieldsByTable.has(groupName)) dimensionFieldsByTable.set(groupName, []);
-    dimensionFieldsByTable.get(groupName).push({
-      field: d.field,
-      label,
-      displayFolder: d.displayFolder ?? null,
-      hierarchyUniqueName: d.hierarchyUniqueName ?? null,
-      levelNumber: d.levelNumber ?? null,
+  const groupByTable = (list) => {
+    const byTable = new Map();
+    list.forEach((d) => {
+      const dotIndex = d.displayName.indexOf(".");
+      const groupName = dotIndex === -1 ? d.displayName : d.displayName.slice(0, dotIndex);
+      const label = dotIndex === -1 ? d.displayName : d.displayName.slice(dotIndex + 1);
+      if (!byTable.has(groupName)) byTable.set(groupName, []);
+      byTable.get(groupName).push({
+        field: d.field,
+        label,
+        displayFolder: d.displayFolder ?? null,
+        hierarchyUniqueName: d.hierarchyUniqueName ?? null,
+        levelNumber: d.levelNumber ?? null,
+      });
     });
-  });
+    return byTable;
+  };
+  const dimensionFieldsByTable = groupByTable(dimensions);
 
   const fieldsFor = (name) => [...(dimensionFieldsByTable.get(name) ?? []), ...(measuresByGroup.get(name) ?? [])];
 
@@ -414,7 +423,27 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
     (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }),
   );
   const query = tableSearch.trim().toLowerCase();
-  const visibleTableNames = query ? allTableNames.filter((name) => name.toLowerCase().includes(query)) : allTableNames;
+  // Excel's search matches FIELD names too (2026-10-18, full-app test: "Country" or "Total Revenue"
+  // found nothing). A table whose NAME matches is listed as before (expand it to see everything);
+  // a table with matching FIELDS is listed already open, showing just those fields. Fields come from
+  // the whole-cube list (allDimensions, loaded in the background) or, until it arrives, from the
+  // tables already loaded; measures are always loaded.
+  const fieldMatchesByTable = new Map();
+  if (query) {
+    const dimensionMatches = groupByTable((allDimensions ?? dimensions).filter((d) => {
+      const dotIndex = d.displayName.indexOf(".");
+      return (dotIndex === -1 ? d.displayName : d.displayName.slice(dotIndex + 1)).toLowerCase().includes(query);
+    }));
+    const names = new Set([...dimensionMatches.keys(), ...measuresByGroup.keys()]);
+    names.forEach((name) => {
+      const matched = [...(dimensionMatches.get(name) ?? []), ...(measuresByGroup.get(name) ?? []).filter((m) => m.label.toLowerCase().includes(query))];
+      if (matched.length > 0) fieldMatchesByTable.set(name, matched);
+    });
+  }
+  const tableNameMatches = (name) => name.toLowerCase().includes(query);
+  const visibleTableNames = query
+    ? Array.from(new Set([...allTableNames.filter(tableNameMatches), ...fieldMatchesByTable.keys()])).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+    : allTableNames;
 
   // Real Excel's own "Σ Values" pseudo-field — a single field (not a table with children),
   // draggable into Rows or Columns to choose where the values axis appears. Only listed once there
@@ -473,9 +502,16 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
         onDragLeave={() => setDragOverRemove(false)}
         onDrop={handleRemoveDrop}
       >
+        {query && !allDimensions && (
+          <p className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-muted">
+            <Loader2 className="h-3 w-3 animate-spin" /> Loading every field name to search…
+          </p>
+        )}
         {visibleTableNames.map((name, tableIndex) => {
-          const isExpanded = enabledTableNames.includes(name);
-          const fields = fieldsFor(name);
+          // Listed only because some of its FIELDS match the search: open, showing just those.
+          const fieldMatchOnly = Boolean(query) && !tableNameMatches(name) && fieldMatchesByTable.has(name);
+          const isExpanded = fieldMatchOnly || enabledTableNames.includes(name);
+          const fields = fieldMatchOnly ? fieldMatchesByTable.get(name) : fieldsFor(name);
           // A table only has a dimension-fetch in flight if it's a REAL dimension table (present in
           // `tables`) — a pure measure group (no matching fact-dimension) has nothing to fetch, its
           // measures are already loaded eagerly, so it's never "loading". fieldsLoading itself is
@@ -483,7 +519,7 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
           // enough to show "Loading…" under whichever real table(s) don't have columns back yet,
           // without tracking per-table in-flight state separately.
           const isRealTable = tables.some((t) => t.displayName === name);
-          const isLoadingThisTable = isExpanded && fields.length === 0 && isRealTable && fieldsLoading;
+          const isLoadingThisTable = !fieldMatchOnly && isExpanded && fields.length === 0 && isRealTable && fieldsLoading;
           const tree = buildFolderTree(fields);
           return (
             <div key={name} className={tableIndex > 0 ? "border-t border-slate-100" : ""}>
@@ -524,6 +560,7 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
                     onFieldCheckToggle={onFieldCheckToggle}
                     onAddHierarchy={onAddHierarchy}
                     onStartDrilldown={onStartDrilldown}
+                    forceOpen={fieldMatchOnly}
                   />
                   {fields.length === 0 && <li className="py-1 pl-7 text-[11px] text-muted">No fields</li>}
                 </ul>
@@ -2600,6 +2637,8 @@ export default function FieldPicker({
   enabledTableNames,
   onEnabledTableNamesChange,
   fieldsLoading,
+  // Every field of every table (null until it loads) — the Field List search matches field names.
+  allDimensions = null,
   onReset,
   // Real Excel's per-field "Field Settings…" > Custom Name / Layout & Print (PLAN 6 Phase 2) — see
   // PivotBuilder.jsx's own fieldLayouts state WHY comment for why this is a sibling pair of props,
@@ -3009,6 +3048,7 @@ export default function FieldPicker({
           enabledTableNames={enabledTableNames}
           onEnabledTableNamesChange={onEnabledTableNamesChange}
           fieldsLoading={fieldsLoading}
+          allDimensions={allDimensions}
           onFieldDropped={moveField}
           onAddHierarchy={addHierarchyToAxis}
           onStartDrilldown={startDrilldown}

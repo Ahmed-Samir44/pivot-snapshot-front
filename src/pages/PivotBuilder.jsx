@@ -9,7 +9,7 @@ import { DEFAULT_PIVOT_OPTIONS } from "../utils/pivotOptions";
 import PivotChart from "../components/pivot/PivotChart";
 import { chartUnavailableReason } from "../utils/chartLayout";
 import { queryPivot } from "../services/pivotApi";
-import { getTables, getDimensionsForTable, getMeasures } from "../services/cubeMetaApi";
+import { getTables, getDimensions, getDimensionsForTable, getMeasures } from "../services/cubeMetaApi";
 import { saveSnapshot, listDefinitions } from "../services/snapshotApi";
 import { MEASURES_PLACEHOLDER, normalizeMeasuresPlacement, hideMeasuresLabelIfSingleValue } from "../utils/measuresPlacement";
 import { readFieldDragPayload, FIELD_DRAG_MIME, removeFieldEverywhere } from "../utils/dragDrop";
@@ -460,6 +460,17 @@ export default function PivotBuilder() {
   const [saveError, setSaveError] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
+
+  // Every field of every table, for the Field List's search (Excel's search matches FIELD names,
+  // not just table names — found by the full-app test 2026-10-18). Fetched once in the background:
+  // the first read takes ~40 s on this cube, after which the backend serves it from its cache. Until
+  // it arrives (or if it fails), search still matches table names and already-loaded fields.
+  const [allDimensions, setAllDimensions] = useState(null);
+  useEffect(() => {
+    getDimensions()
+      .then(setAllDimensions)
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     Promise.all([getTables(), getMeasures()])
@@ -1078,6 +1089,7 @@ export default function PivotBuilder() {
               enabledTableNames={enabledTableNames}
               onEnabledTableNamesChange={updateEnabledTables}
               fieldsLoading={fieldsLoading}
+              allDimensions={allDimensions}
               onReset={handleReset}
               fieldLayouts={fieldLayouts}
               reportLayout={reportLayout}
