@@ -122,7 +122,10 @@ function HeaderCell({ children, muted = false, isTotal = false, alignLeft = fals
 // Filter — filtering the same hierarchy that's on the axis would put it in WHERE too, which SSAS
 // rejects — and no More Sort Options (its per-level editor needs real Rows fields); sorting by a
 // value works from a value cell's right-click menu.
-function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false, isTotal = false, level = 0, sortOnly = false }) {
+// fieldChoices ([{ field, label, level }], 2026-10-18): Excel's Compact-form "Row Labels" header —
+// one arrow for several fields, with a "Select field:" box on top of its menu choosing which field
+// every item below applies to (found missing by the full-app test). Replaces `field`/`level`.
+function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, muted = false, isTotal = false, level: fixedLevel = 0, sortOnly = false, fieldChoices = null }) {
   // "More Sort Options…"/"Field Settings…" open the SAME panel in place of the plain shortcut
   // list, same back-and-forth pattern as Excel's own header dropdown (its "More Sort Options..."
   // item opens a bigger dialog from the same arrow) — relocated here from FieldPicker's toolbar
@@ -130,6 +133,10 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
   // only on the field's own dropdown arrow or its right-click menu (moved 2026-10-04, "المفروض
   // تبقى في نفس مكان الـ excel").
   const [panel, setPanel] = useState("shortcuts");
+  const [choiceIndex, setChoiceIndex] = useState(0);
+  const choice = fieldChoices?.length ? fieldChoices[Math.min(choiceIndex, fieldChoices.length - 1)] : null;
+  const field = choice ? choice.field : fixedField;
+  const level = choice ? choice.level : fixedLevel;
 
   // Σ Values has no members/label of its own to sort or filter by — same restriction the backend
   // enforces for LevelSort (see MdxPivotQueryBuilder.ValidateAxisLevelSorts) — so it renders as a
@@ -230,11 +237,31 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
         </button>
       )}
     >
-      {(close) =>
-        panel === "sort" ? (
+      {(close) => (
+        <>
+        {fieldChoices?.length > 1 && (
+          <label className="mb-2 flex items-center gap-2 border-b border-slate-100 pb-2 text-xs font-medium text-ink">
+            Select field:
+            <select
+              className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-gold"
+              value={Math.min(choiceIndex, fieldChoices.length - 1)}
+              onChange={(e) => {
+                setChoiceIndex(Number(e.target.value));
+                setPanel("shortcuts");
+              }}
+            >
+              {fieldChoices.map((c, i) => (
+                <option key={c.field} value={i}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {panel === "sort" ? (
           <div>
             {/* Excel's per-field "Sort (<field>)" dialog (see FieldSortDialog). */}
-            <FieldSortDialog field={field} axis={axis} level={level} request={request} onChange={onChange} onBack={() => setPanel("shortcuts")} onDone={close} />
+            <FieldSortDialog key={field} field={field} axis={axis} level={level} request={request} onChange={onChange} onBack={() => setPanel("shortcuts")} onDone={close} />
           </div>
         ) : panel === "filter" ? (
           <div>
@@ -250,6 +277,7 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
                 real Excel's own Row/Column field dropdown (confirmed live 2026-10-12) — see
                 FilterRow's own WHY comment for the full Report-Filter-vs-field-dropdown story. */}
             <FilterRow
+              key={field}
               filter={existingFilter ?? { field, mode: "Members", includedMembers: [] }}
               dimensionOptions={[]}
               selectedValueOptions={selectedValueOptions}
@@ -328,8 +356,9 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
               </>
             )}
           </div>
-        )
-      }
+        )}
+        </>
+      )}
     </Popover>
   );
 }
@@ -1153,7 +1182,19 @@ export default function PivotGrid({
                               sortOnly
                             />
                           ) : (
-                            <HeaderCell muted>Row Labels</HeaderCell>
+                            // Excel's Compact "Row Labels" arrow: sort/filter any of the fields
+                            // sharing this column, picked from its "Select field:" box (Σ Values
+                            // and a drilldown slot have no menu of their own, so they're left out).
+                            <FieldHeaderMenu
+                              label="Row Labels"
+                              axis="Rows"
+                              request={request}
+                              onChange={onChange}
+                              muted
+                              fieldChoices={Array.from({ length: group.end - group.start + 1 }, (_, i) => group.start + i)
+                                .filter((l) => rows[l] && rows[l] !== MEASURES_PLACEHOLDER && l !== combinedDrillSlot)
+                                .map((l) => ({ field: rows[l], level: l, label: rowFieldLayouts[l]?.customName || rowFieldLabels[l] || rows[l] }))}
+                            />
                           )}
                         </th>
                       ),
