@@ -21,6 +21,7 @@ import {
 } from "../services/snapshotApi";
 import { formatDimensionName } from "../utils/cubeMeta";
 import { hideMeasuresLabelIfSingleValue } from "../utils/measuresPlacement";
+import { DEFAULT_PIVOT_OPTIONS } from "../utils/pivotOptions";
 import { BUILDER_STATE_STORAGE_KEY } from "./PivotBuilder";
 
 // BuilderStateJson is null for any version saved BEFORE this existed (2026-10-07) — parsed once
@@ -346,6 +347,11 @@ export default function SnapshotHistory() {
         drillSlot: combinedDrillSlot(previewVersion),
         columnsDrillSlot: columnsDrillSlot(previewVersion),
         drilldownSubtotals: parseBuilderState(previewVersion.builderStateJson)?.request?.subtotals ?? "Top",
+        // PivotTable Options and the Report Filter area, from the saved builder state (versions
+        // saved before 2026-10-18 have no options — Excel's defaults).
+        pivotOptions: { ...DEFAULT_PIVOT_OPTIONS, ...(parseBuilderState(previewVersion.builderStateJson)?.pivotOptions ?? {}) },
+        filters: (parseBuilderState(previewVersion.builderStateJson)?.request?.filters ?? []).filter((f) => f.field),
+        filterFieldLabels: Object.fromEntries((parseBuilderState(previewVersion.builderStateJson)?.request?.filters ?? []).map((f) => [f.field, formatDimensionName(f.field)])),
       });
     } catch (err) {
       setExportError(err.message);
@@ -694,6 +700,7 @@ export default function SnapshotHistory() {
               // Older versions (no builder state) predate drilldown subtotals — Top = how they looked.
               drilldownSubtotals={builderState?.request?.subtotals ?? "Top"}
               boundedHeight={false}
+              pivotOptions={{ ...DEFAULT_PIVOT_OPTIONS, ...(builderState?.pivotOptions ?? {}) }}
             />
           </Modal>
         );

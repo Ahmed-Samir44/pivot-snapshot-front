@@ -265,11 +265,8 @@ function formatAsCustom(value, code) {
 }
 
 export function formatNumber(value, format) {
-  // The backend already converts a genuine NaN/Infinity cell (e.g. a Calculated Field's divide by
-  // zero) to null before this ever runs (see CubeQueryService.ParseCellValue's own WHY comment) —
-  // this is defense in depth for any OTHER path that might hand this a non-finite number directly
-  // (the mock service, a future caller, ...), so it renders the same blank a null cell already does
-  // instead of the literal text "NaN"/"∞" — caught during a full audit pass, 2026-10-05.
+  // Never the literal text "NaN"/"∞". A value cell's error (NaN, since 2026-10-18) is shown by
+  // pivotOptions.js's cellText before this runs; anything else non-finite stays blank.
   if (value === null || value === undefined || typeof value === "number" && !Number.isFinite(value)) {
     return "";
   }

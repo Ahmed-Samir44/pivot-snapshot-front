@@ -1,6 +1,8 @@
 import ExcelJS from "exceljs";
 import { formatForColumn } from "./numberFormat";
-import { buildRowHeaderGroups, buildDisplayRows, buildColumnHeaderRows } from "./pivotGridLayout";
+import { buildRowHeaderGroups, buildDisplayRows, buildColumnHeaderRows, computeLabelSpans } from "./pivotGridLayout";
+import { DEFAULT_PIVOT_OPTIONS, ERROR_TOKEN, filterAreaSlot, filterValueSummary } from "./pivotOptions";
+import { isErrorValue } from "./errorCells";
 import { measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "./measuresPlacement";
 import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "./conditionalFormat";
 
@@ -177,6 +179,13 @@ export async function exportPivotToExcel({
   // Columns drilldown (C4): its slot in `columns` (-1 = none) — header rows and spans come from
   // buildColumnHeaderRows, the same as the live grid and the saved snapshot.
   columnsDrillSlot = -1,
+  // PivotTable Options > Layout & Format (2026-10-18): empty/error cell text, merged labels, and
+  // the report filter area's layout — same as the live grid and the saved snapshot.
+  pivotOptions = DEFAULT_PIVOT_OPTIONS,
+  // The report filters, written above the table like Excel's Report Filter area, captioned by
+  // filterFieldLabels[field].
+  filters = [],
+  filterFieldLabels = {},
 }) {
   const { rowHeaders, columnHeaders, cells } = result;
   // MAX across every row — a drilldown's rows have different depths.
@@ -205,11 +214,25 @@ export async function exportPivotToExcel({
     ? buildCaptionToIndex(measuresInRows ? rowHeaders : columnHeaders, measuresInRows ? rowsMeasuresIndex : columnsMeasuresIndex, valueFields.length)
     : new Map();
 
+  // Report Filter area: each field is a caption cell + a selection cell, placed by filterAreaSlot
+  // (a blank column between the pairs, like Excel), then one blank row before the table.
+  const filterSlots = filters.map((f, i) => filterAreaSlot(i, filters.length, pivotOptions));
+  const filterAreaRows = filters.length > 0 ? Math.max(...filterSlots.map((s) => s.row)) + 2 : 0;
+
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Pivot", { views: [{ state: "frozen", xSplit: rowDepth, ySplit: columnDepth + (columnFieldLabels.length > 0 ? 1 : 0) }] });
+  const sheet = workbook.addWorksheet("Pivot", { views: [{ state: "frozen", xSplit: rowDepth, ySplit: filterAreaRows + columnDepth + (columnFieldLabels.length > 0 ? 1 : 0) }] });
+
+  filters.forEach((filter, i) => {
+    const { column, row } = filterSlots[i];
+    const caption = sheet.getRow(row + 1).getCell(column * 3 + 1);
+    caption.value = filterFieldLabels[filter.field] ?? filter.field;
+    caption.font = { bold: true };
+    caption.fill = HEADER_FILL;
+    sheet.getRow(row + 1).getCell(column * 3 + 2).value = filterValueSummary(filter);
+  });
 
   const totalCols = rowDepth + columnHeaders.length;
-  let currentRow = 1;
+  let currentRow = 1 + filterAreaRows;
 
   // Row 1: the crossed field label (e.g. "Doctor.Doctor Name"), merged across the data columns —
   // mirrors PivotGrid's own muted pill row above the column headers.
@@ -250,8 +273,9 @@ export async function exportPivotToExcel({
       cell.value = run.label;
       cell.font = { bold: true };
       cell.fill = HEADER_FILL;
-      // An outer header spanning its children is left-aligned (Excel's Compact layout); a single column stays centered.
-      cell.alignment = { horizontal: endCol > startCol ? "left" : "center" };
+      // An outer header spanning its children is left-aligned (Excel's Compact layout) — centered with
+      // "Merge and center cells with labels"; a single column stays centered.
+      cell.alignment = { horizontal: endCol > startCol && !pivotOptions.mergeLabels ? "left" : "center" };
       if (endCol > startCol) sheet.mergeCells(currentRow, startCol, currentRow, endCol);
     }
     currentRow += 1;
@@ -262,16 +286,23 @@ export async function exportPivotToExcel({
   // "Grand Total" captions, each label shown once (Excel doesn't merge label cells by default).
   const displayRows = buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts, repeatItemLabels, measuresLevel: rowsMeasuresIndex, outline: layout !== "Tabular", drilldown, drilldownSubtotals, drillSlot });
   const firstDataRow = currentRow;
+  // "Merge and center cells with labels": a real merged cell per item (computeLabelSpans). A merge
+  // never crosses a blank line, so its rows are consecutive sheet rows.
+  const labelSpans = pivotOptions.mergeLabels ? computeLabelSpans(displayRows, rowHeaderGroups, { drillSlot, drilldown }) : null;
   // Sheet row of every display row that shows a result row's values: [excelRow, rowIndex, kind].
   const placedRows = [];
-  displayRows.forEach((displayRow) => {
+  displayRows.forEach((displayRow, displayIndex) => {
     const excelRow = currentRow;
     const isTotalRow = displayRow.kind === "subtotal" || displayRow.kind === "grand" || (displayRow.kind === "header" && displayRow.sourceIndex !== null);
     rowHeaderGroups.forEach((_, gi) => {
+      const span = labelSpans?.[displayIndex][gi] ?? 1;
+      if (span === 0) return; // inside the merged cell above
       const cell = sheet.getRow(excelRow).getCell(gi + 1);
       const lines = displayRow.groupCells[gi]?.lines ?? [];
       cell.value = lines.map((l) => l.text).join(" › ");
       if (lines[0]?.indent) cell.alignment = { indent: lines[0].indent };
+      if (labelSpans && rowHeaderGroups[gi].start === rowHeaderGroups[gi].end) cell.alignment = { horizontal: "center", vertical: "middle" };
+      if (span > 1) sheet.mergeCells(excelRow, gi + 1, excelRow + span - 1, gi + 1);
       cell.font = { bold: isTotalRow || displayRow.kind === "header" };
       if (isTotalRow) cell.fill = SUBTOTAL_FILL;
     });
@@ -291,7 +322,15 @@ export async function exportPivotToExcel({
       const value = cells[rowIndex][colIndex];
       const isTotalCell = rowHeader.isTotal || colHeader.isTotal;
       const cell = sheet.getRow(excelRow).getCell(rowDepth + colIndex + 1);
-      cell.value = value ?? null;
+      // An error cell is a real Excel #DIV/0! (or the "For error values show" text); an empty one
+      // stays empty unless "For empty cells show" has text.
+      if (isErrorValue(value)) {
+        cell.value = pivotOptions.showErrorText ? pivotOptions.errorText : { error: ERROR_TOKEN };
+      } else if (value === null || value === undefined) {
+        cell.value = pivotOptions.showEmptyText && pivotOptions.emptyText ? pivotOptions.emptyText : null;
+      } else {
+        cell.value = value;
+      }
       cell.numFmt = excelNumberFormat(formatForColumn(measureIndex, valueFields));
       cell.font = { bold: isTotalCell };
       cell.alignment = { horizontal: "center" };
@@ -339,10 +378,12 @@ export async function exportPivotToExcel({
   // Reasonable auto-width per column instead of Excel's cramped default — based on the widest
   // header/label text actually placed in that column, capped so one long outlier doesn't blow out
   // the whole sheet.
-  for (let col = 1; col <= totalCols; col++) {
+  // (The report filter area can reach past the table's own columns.)
+  const filterAreaCols = filters.length > 0 ? Math.max(...filterSlots.map((s) => s.column)) * 3 + 2 : 0;
+  for (let col = 1; col <= Math.max(totalCols, filterAreaCols); col++) {
     let maxLen = 8;
     sheet.getColumn(col).eachCell({ includeEmpty: false }, (cell) => {
-      const text = cell.value?.toString() ?? "";
+      const text = cell.value?.error ?? cell.value?.toString() ?? "";
       if (text.length > maxLen) maxLen = text.length;
     });
     sheet.getColumn(col).width = Math.min(maxLen + 2, 40);

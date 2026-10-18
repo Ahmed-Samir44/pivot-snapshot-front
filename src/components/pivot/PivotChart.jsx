@@ -33,7 +33,8 @@ function extractSeries(result) {
   if (detailColumns.length === 0) return null;
   const series = detailColumns.map((colIndex) => ({
     label: detailColumns.length === 1 ? "" : result.columnHeaders[colIndex].labels.filter((l) => l !== "").join(" / "),
-    values: categoryRows.map(({ r }) => result.cells[r][colIndex] ?? 0),
+    // An error cell (NaN) plots as 0, like Excel's charts do for #DIV/0! (mirrors PivotChartRenderer).
+    values: categoryRows.map(({ r }) => (Number.isNaN(result.cells[r][colIndex]) ? 0 : (result.cells[r][colIndex] ?? 0))),
   }));
 
   return { categories, series };

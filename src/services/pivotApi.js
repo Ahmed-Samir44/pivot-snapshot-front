@@ -1,4 +1,5 @@
 import { getDataverseAccessToken } from "./dataverseAuth";
+import { reviveResultCells } from "../utils/errorCells";
 
 // Falls back to the local dev API port when VITE_API_BASE_URL isn't set. Production builds must
 // set it explicitly via .env.production (not .env.local, which should never affect a build).
@@ -27,7 +28,8 @@ export async function queryPivot(request, { signal } = {}) {
     throw new Error(data.error || "An unexpected error occurred.");
   }
 
-  return data;
+  // Error cells arrive as "NaN" (see utils/errorCells.js).
+  return reviveResultCells(data);
 }
 
 // Excel's "Show Details" on one value cell — mirrors queryPivot exactly (same auth/error handling),

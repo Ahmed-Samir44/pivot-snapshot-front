@@ -1,4 +1,5 @@
 import { getDataverseAccessToken } from "./dataverseAuth";
+import { reviveResultCells, serializeResultCells } from "../utils/errorCells";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5191";
 
@@ -38,6 +39,8 @@ export function saveSnapshot(
   fieldLayouts = [],
   builderStateJson = null,
   versionName = null,
+  // PivotTable Options > Layout & Format (empty/error text, merged labels, filter area layout).
+  pivotOptions = null,
 ) {
   return request("/api/snapshots", {
     method: "POST",
@@ -45,7 +48,9 @@ export function saveSnapshot(
     body: JSON.stringify({
       name,
       request: pivotRequest,
-      result: pivotResult,
+      // Error cells (NaN) go back as "NaN" — JSON.stringify would make them null.
+      result: serializeResultCells(pivotResult),
+      options: pivotOptions,
       tableStyle,
       includeChart,
       chartType,
@@ -91,8 +96,9 @@ export function getDeactivatedVersions(definitionId) {
   return request(`/api/snapshots/${definitionId}/versions/deactivated`);
 }
 
-export function getVersion(versionId) {
-  return request(`/api/snapshots/versions/${versionId}`);
+export async function getVersion(versionId) {
+  const version = await request(`/api/snapshots/versions/${versionId}`);
+  return version ? { ...version, result: reviveResultCells(version.result) } : version;
 }
 
 // Deactivates (not deletes) a version — see DataverseSnapshotStorageService.DeactivateVersionAsync

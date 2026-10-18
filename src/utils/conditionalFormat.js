@@ -36,7 +36,8 @@ function colorScaleHex(t, format) {
 
 // Returns a React inline-style object (or null) — the caller spreads it into the cell's `style`.
 export function conditionalStyleFor(value, format, min, max) {
-  if (!format || format.type === "None" || value === null || value === undefined) {
+  // An error cell (NaN) gets no formatting, like Excel.
+  if (!format || format.type === "None" || value === null || value === undefined || Number.isNaN(value)) {
     return null;
   }
 
@@ -63,7 +64,7 @@ export function conditionalStyleFor(value, format, min, max) {
 // the same way), mirrors the backend's ConditionalFormatting.IconColorFor exactly. Returns just the
 // hex color; the caller renders the actual dot (see PivotGrid.jsx).
 export function iconColorFor(value, format, min, max) {
-  if (!format || format.type !== "IconSet" || value === null || value === undefined) {
+  if (!format || format.type !== "IconSet" || value === null || value === undefined || Number.isNaN(value)) {
     return null;
   }
 
@@ -80,7 +81,7 @@ export function iconColorFor(value, format, min, max) {
 export function detailRangeForColumn(result, columnIndex) {
   const values = result.rowHeaders
     .map((row, r) => (row.isTotal ? null : result.cells[r][columnIndex]))
-    .filter((v) => v !== null && v !== undefined);
+    .filter((v) => v !== null && v !== undefined && !Number.isNaN(v)); // error cells don't count
 
   if (values.length === 0) {
     return { min: 0, max: 0 };
@@ -93,7 +94,7 @@ export function detailRangeForColumn(result, columnIndex) {
 export function detailRangeForRow(result, rowIndex) {
   const values = result.columnHeaders
     .map((col, c) => (col.isTotal ? null : result.cells[rowIndex][c]))
-    .filter((v) => v !== null && v !== undefined);
+    .filter((v) => v !== null && v !== undefined && !Number.isNaN(v)); // error cells don't count
 
   if (values.length === 0) {
     return { min: 0, max: 0 };

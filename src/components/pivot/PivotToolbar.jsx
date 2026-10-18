@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Sigma, Rows3, Calculator, ListPlus, LayoutGrid, CalendarRange } from "lucide-react";
+import { Sigma, Rows3, Calculator, ListPlus, LayoutGrid, CalendarRange, Settings2 } from "lucide-react";
 import Popover from "../forms/Popover";
 import { CalculatedFieldDialog, CalculatedItemDialog } from "./FieldPicker";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
@@ -112,8 +112,12 @@ function RibbonGroup({ label, children }) {
   );
 }
 
-export default function PivotToolbar({ request, onChange, measureOptions, dimensions = [] }) {
+// pivotOptions/onPivotOptionsChange/onOpenPivotTableOptions: the PivotTable group (name + Options);
+// omitted, that group isn't drawn.
+export default function PivotToolbar({ request, onChange, measureOptions, dimensions = [], pivotOptions = null, onPivotOptionsChange = null, onOpenPivotTableOptions = null }) {
   const [tab, setTab] = useState("analyze");
+  // The name box's text while it's being typed (null = show the saved name); applied on blur/Enter.
+  const [nameDraft, setNameDraft] = useState(null);
 
   // Insert Slicer: adds the field to slicerFields (the Slicer widget renders above the table from
   // there — see PivotGrid.jsx) and, if nothing already filters this field, gives it a fresh "(All)"
@@ -237,6 +241,38 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                 );
               }}
             </RibbonButton>
+          </RibbonGroup>
+        )}
+
+        {/* Excel's first Analyze group: the PivotTable's name (editable in place) and the Options
+            button that opens the PivotTable Options dialog (2026-10-18). */}
+        {tab === "analyze" && pivotOptions && (
+          <RibbonGroup label="PivotTable">
+            <div className="flex h-16 w-40 flex-col justify-center gap-1 px-1">
+              <label className="text-[11px] text-muted" htmlFor="pivot-table-name">
+                PivotTable Name:
+              </label>
+              <input
+                id="pivot-table-name"
+                type="text"
+                value={nameDraft ?? pivotOptions.name}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={() => {
+                  if (nameDraft !== null) onPivotOptionsChange({ ...pivotOptions, name: nameDraft.trim() || pivotOptions.name });
+                  setNameDraft(null);
+                }}
+                onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-gold"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={onOpenPivotTableOptions}
+              className="relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded px-1 text-ink hover:bg-black/5"
+            >
+              <Settings2 className="h-5 w-5 text-ink/70" />
+              <span className="text-center text-[11px] leading-tight">Options</span>
+            </button>
           </RibbonGroup>
         )}
 

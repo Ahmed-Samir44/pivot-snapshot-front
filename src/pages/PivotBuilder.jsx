@@ -4,6 +4,8 @@ import AppShell from "../components/layout/AppShell";
 import FieldPicker from "../components/pivot/FieldPicker";
 import PivotToolbar from "../components/pivot/PivotToolbar";
 import PivotGrid from "../components/pivot/PivotGrid";
+import PivotTableOptionsDialog from "../components/pivot/PivotTableOptionsDialog";
+import { DEFAULT_PIVOT_OPTIONS } from "../utils/pivotOptions";
 import PivotChart from "../components/pivot/PivotChart";
 import { chartUnavailableReason } from "../utils/chartLayout";
 import { queryPivot } from "../services/pivotApi";
@@ -442,6 +444,12 @@ export default function PivotBuilder() {
   // displayed, so (like reportLayout/repeatItemLabels) they must stay out of structuralSignature or
   // every per-field display toggle would needlessly re-query the live cube.
   const [fieldLayouts, setFieldLayouts] = useState(() => readPersistedBuilderState()?.fieldLayouts ?? []);
+  // Excel's PivotTable Options > Layout & Format (2026-10-18): name, merged labels, empty/error cell
+  // text, report filter area layout. Display-only, so — like fieldLayouts — a sibling of `request`,
+  // never part of structuralSignature (a change never re-queries the cube). Merged with the
+  // defaults so a state saved before a newer option existed still gets it.
+  const [pivotOptions, setPivotOptions] = useState(() => ({ ...DEFAULT_PIVOT_OPTIONS, ...(readPersistedBuilderState()?.pivotOptions ?? {}) }));
+  const [showPivotOptions, setShowPivotOptions] = useState(false);
   // Excel's value-cell context menu has "Hide Field List" — toggles the FIELDS sidebar's own
   // visibility, with a small floating button to bring it back (Excel keeps the same toggle on the
   // PivotTable Analyze ribbon too, not just the context menu, but there's no ribbon button for it
@@ -685,13 +693,13 @@ export default function PivotBuilder() {
     try {
       localStorage.setItem(
         BUILDER_STATE_STORAGE_KEY,
-        JSON.stringify({ request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts }),
+        JSON.stringify({ request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts, pivotOptions }),
       );
     } catch {
       // Per-browser convenience only — same no-op-on-failure as every other localStorage write in
       // this file; worst case, the next visit just starts blank again.
     }
-  }, [request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts]);
+  }, [request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts, pivotOptions]);
 
   // Orphaned-entry cleanup for fieldLayouts, same reasoning as request.fieldSubtotals' own cleanup
   // in FieldPicker.jsx (moveField/addHierarchyToAxis) — a field that leaves Rows should take its
@@ -742,6 +750,7 @@ export default function PivotBuilder() {
     setChartType("Bar");
     setReportLayout("Compact");
     setRepeatItemLabels(false);
+    setPivotOptions(DEFAULT_PIVOT_OPTIONS);
     setSaveMessage(null);
     setSaveError(null);
     setExportError(null);
@@ -778,7 +787,7 @@ export default function PivotBuilder() {
       // sends) the persistence effect above already writes to localStorage — reused as-is here so
       // Edit later restores this exactly as it looked while being edited, not just a filtered/
       // query-ready subset of it. See BUILDER_STATE_STORAGE_KEY's own WHY comment.
-      const builderStateJson = JSON.stringify({ request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts });
+      const builderStateJson = JSON.stringify({ request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts, pivotOptions });
       const saved = await saveSnapshot(
         snapshotName.trim(),
         { ...lastQuery, values: displayValues },
@@ -791,6 +800,7 @@ export default function PivotBuilder() {
         fieldLayouts,
         builderStateJson,
         versionName.trim() || null,
+        pivotOptions,
       );
       setSaveMessage(`Saved as version ${saved.versionNumber}.`);
       // A successful save means this snapshot name now definitely exists — refreshed so the NEXT
@@ -831,6 +841,12 @@ export default function PivotBuilder() {
         layout: reportLayout,
         repeatItemLabels,
         fieldLayouts,
+        // PivotTable Options (empty/error text, merged labels) and the Report Filter area above the
+        // table. Every applied filter is listed, slicer/timeline ones too — the file has no slicer
+        // widget to show them (same as the saved snapshot).
+        pivotOptions,
+        filters: lastQuery.filters,
+        filterFieldLabels: Object.fromEntries(lastQuery.filters.map((f) => [f.field, fieldLabels([f.field], dimensions)[0]])),
         // A drilldown alone keeps its single ragged column; combined with other Rows fields
         // (Drilldown v3) it's a normal field slot, indented by member depth.
         ...(() => {
@@ -909,7 +925,21 @@ export default function PivotBuilder() {
               onChange={setRequest}
               measureOptions={measures.map((m) => ({ value: m.field, label: m.displayName }))}
               dimensions={dimensions}
+              pivotOptions={pivotOptions}
+              onPivotOptionsChange={setPivotOptions}
+              onOpenPivotTableOptions={() => setShowPivotOptions(true)}
             />
+            {showPivotOptions && (
+              <PivotTableOptionsDialog
+                options={pivotOptions}
+                request={request}
+                onApply={(options, grandTotals) => {
+                  setPivotOptions(options);
+                  if (grandTotals !== request.grandTotals) setRequest({ ...request, grandTotals });
+                }}
+                onClose={() => setShowPivotOptions(false)}
+              />
+            )}
             <PivotGrid
               result={result}
               rows={lastQuery?.rows}
@@ -1005,6 +1035,8 @@ export default function PivotBuilder() {
               onChange={setRequest}
               onRefresh={runQuery}
               onHideFieldList={() => setShowFieldList(false)}
+              pivotOptions={pivotOptions}
+              onOpenPivotTableOptions={() => setShowPivotOptions(true)}
             />
           </div>
 

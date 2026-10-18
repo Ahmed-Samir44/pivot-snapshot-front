@@ -6,10 +6,11 @@ import Modal from "../forms/Modal";
 import Slicer from "./Slicer";
 import Timeline from "./Timeline";
 import { FieldSortDialog, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, ConditionalFormatEditor, SHOW_VALUES_AS_OPTIONS, PERCENT_SHOW_VALUES_AS, DEFAULT_FORMAT } from "./FieldPicker";
-import { formatNumber, formatForColumn } from "../../utils/numberFormat";
+import { formatForColumn } from "../../utils/numberFormat";
+import { DEFAULT_PIVOT_OPTIONS, cellText, filterAreaSlot, filterValueSummary } from "../../utils/pivotOptions";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
-import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys, collapseKey, buildColumnHeaderRows } from "../../utils/pivotGridLayout";
+import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys, collapseKey, buildColumnHeaderRows, computeLabelSpans } from "../../utils/pivotGridLayout";
 import { MEASURES_PLACEHOLDER, measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "../../utils/measuresPlacement";
 import { applyReportSubtotals } from "../../utils/subtotals";
 import { drillthroughPivot } from "../../services/pivotApi";
@@ -20,23 +21,10 @@ import { drillthroughPivot } from "../../services/pivotApi";
 // from the separate Filters box in the field-picker sidebar; Excel shows (and lets you re-filter
 // from) it right here too, which this app didn't have at all.
 //
-// "(All)" when nothing is actually narrowing the field yet (e.g. Members mode with no members
-// picked), the single member's own name when exactly one is picked, "(Multiple Items)" for more
-// than one or for any of the other filter modes (label/TopN/range) — same convention real Excel
-// itself uses for a Report Filter whose selection isn't a single plain value.
-function filterValueSummary(filter) {
-  if (filter.mode === "Members" || filter.mode === "Exclude") {
-    if (filter.includedMembers.length === 0) return "(All)";
-    if (filter.includedMembers.length === 1) return filter.includedMembers[0];
-    return "(Multiple Items)";
-  }
-  if (filter.mode === "LabelContains" || filter.mode === "LabelBeginsWith" || filter.mode === "LabelEndsWith") {
-    return filter.labelText ? "(Multiple Items)" : "(All)";
-  }
-  return "(Multiple Items)";
-}
-
-function FilterHeaderRow({ filter, index, request, onChange, dimensionOptions, selectedValueOptions }) {
+// The selection caption ("(All)", the member, "(Multiple Items)") is pivotOptions.js's
+// filterValueSummary, shared with the export and mirrored by the saved snapshot. `style` places the
+// row in the filter area's grid (PivotTable Options > Layout & Format, filterAreaSlot).
+function FilterHeaderRow({ filter, index, request, onChange, dimensionOptions, selectedValueOptions, style }) {
   const updateFilter = (patch) => {
     const next = [...request.filters];
     next[index] = { ...next[index], ...patch };
@@ -47,7 +35,7 @@ function FilterHeaderRow({ filter, index, request, onChange, dimensionOptions, s
   };
 
   return (
-    <div className="flex items-stretch border-b border-slate-100 last:border-b-0">
+    <div className="flex items-stretch overflow-hidden rounded-lg border border-slate-200 bg-white" style={style}>
       <div className="flex w-40 shrink-0 items-center border-r border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-ink">
         <span className="truncate">{formatDimensionName(filter.field)}</span>
       </div>
@@ -357,7 +345,7 @@ function FieldHeaderMenu({ label, field, axis, request, onChange, muted = false,
 // value isn't a calculated field, a dimension-aggregation value, or ShowValuesAs-transformed (none
 // of those are a single stored fact-level quantity DRILLTHROUGH can meaningfully target — see
 // MdxPivotQueryBuilder.BuildDrillthrough's own WHY comment on the backend).
-function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, measureIndex, sortAxis, row, column, onShowDetails, onRefresh, displayValue, onHideFieldList }) {
+function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, measureIndex, sortAxis, row, column, onShowDetails, onRefresh, displayValue, onHideFieldList, onOpenPivotTableOptions }) {
   const [panel, setPanel] = useState("root");
   const format = valueField.format ?? DEFAULT_FORMAT;
   const isDimensionField = valueField.field.startsWith("[");
@@ -480,7 +468,13 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
           <button type="button" onClick={() => setPanel("conditionalFormat")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
             Conditional Formatting…
           </button>
-          <button type="button" onClick={() => setPanel("pivotTableOptions")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+          {/* The full PivotTable Options dialog when the page provides one (2026-10-18); the small
+              Totals-only panel below is the fallback. */}
+          <button
+            type="button"
+            onClick={() => (onOpenPivotTableOptions ? (onClose(), onOpenPivotTableOptions()) : setPanel("pivotTableOptions"))}
+            className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+          >
             PivotTable Options…
           </button>
           <button
@@ -671,6 +665,11 @@ export default function PivotGrid({
   // still needs its OWN bounded box — see this div's own WHY comment below — so this defaults to
   // true there and is only turned off by the Modal-embedded caller.
   boundedHeight = true,
+  // Excel's PivotTable Options > Layout & Format (2026-10-18) — empty/error cell text, merged labels,
+  // report filter area layout. See utils/pivotOptions.js.
+  pivotOptions = DEFAULT_PIVOT_OPTIONS,
+  // Opens the PivotTable Options dialog (the value-cell menu's "PivotTable Options…"); null = none.
+  onOpenPivotTableOptions = null,
 }) {
   const [collapsed, setCollapsed] = useState(() => new Set());
   // The right-clicked value cell's context menu ({x, y, row, column, valueField, measureIndex}) and
@@ -829,6 +828,8 @@ export default function PivotGrid({
   // collapse would be a second, conflicting toggle on the same rows.
   const collapsible = rowsHierarchyDrilldown ? new Set() : collapsibleKeys(allDisplayRows);
   const displayRows = applyCollapse(allDisplayRows, new Set([...collapsed].filter((k) => collapsible.has(k))), rowHeaderGroups);
+  // "Merge and center cells with labels": an item's label cell spans its rows (computeLabelSpans).
+  const labelSpans = pivotOptions.mergeLabels ? computeLabelSpans(displayRows, rowHeaderGroups, { drillSlot: combinedDrillSlot, drilldown: drilldownAlone }) : null;
   // Value-carrying rows in display order — what arrow-key navigation steps through (an item row
   // with no subtotal has no value cells to select).
   const navigableRows = displayRows.filter((d) => d.sourceIndex !== null).map((d) => d.sourceIndex);
@@ -971,23 +972,33 @@ export default function PivotGrid({
           still needs Run query to take effect, not a special case. A field already shown as a
           Slicer or Timeline widget above is excluded here — Excel never shows the same field as
           both a dedicated widget AND a Report Filter row at once. */}
-      {request && onChange && request.filters.some((f) => !request.slicerFields.includes(f.field) && !request.timelineFields.includes(f.field)) && (
-        <div className="card mb-2 w-fit max-w-full overflow-hidden p-0">
-          {request.filters.map((filter, index) =>
-            request.slicerFields.includes(filter.field) || request.timelineFields.includes(filter.field) ? null : (
-              <FilterHeaderRow
-                key={index}
-                filter={filter}
-                index={index}
-                request={request}
-                onChange={onChange}
-                dimensionOptions={dimensionOptions}
-                selectedValueOptions={selectedValueOptions}
-              />
-            ),
-          )}
-        </div>
-      )}
+      {/* Laid out by PivotTable Options > Layout & Format: Down, Then Over / Over, Then Down with N
+          fields per column/row (filterAreaSlot — the same placement as the snapshot and export). */}
+      {request && onChange && (() => {
+        const shown = request.filters
+          .map((filter, index) => ({ filter, index }))
+          .filter(({ filter }) => !request.slicerFields.includes(filter.field) && !request.timelineFields.includes(filter.field));
+        if (shown.length === 0) return null;
+        return (
+          <div className="mb-2 grid w-fit max-w-full gap-x-3 gap-y-1">
+            {shown.map(({ filter, index }, position) => {
+              const slot = filterAreaSlot(position, shown.length, pivotOptions);
+              return (
+                <FilterHeaderRow
+                  key={index}
+                  filter={filter}
+                  index={index}
+                  request={request}
+                  onChange={onChange}
+                  dimensionOptions={dimensionOptions}
+                  selectedValueOptions={selectedValueOptions}
+                  style={{ gridColumn: slot.column + 1, gridRow: slot.row + 1 }}
+                />
+              );
+            })}
+          </div>
+        );
+      })()}
       {/* ONE element now does both the "card" chrome AND the scrolling — previously these were two
           nested divs (a decorative outer `card` with no overflow set, wrapping this scrolling box),
           which is exactly why the table had no visible border-radius ("الجدول مالهوش border radius",
@@ -1163,7 +1174,7 @@ export default function PivotGrid({
                   return (
                     <th key={cell.sourceIndex} colSpan={cell.span > 1 ? cell.span : undefined} className={`${headerCellBorder} ${headerBg} px-2 py-2`}>
                       {toggle ? (
-                        <span className={`flex items-center gap-1 ${cell.span > 1 ? "justify-start" : "justify-center"}`}>
+                        <span className={`flex items-center gap-1 ${cell.span > 1 && !pivotOptions.mergeLabels ? "justify-start" : "justify-center"}`}>
                           <button
                             type="button"
                             onClick={() => onToggleColumnDrilldownMember(uniqueName, column, ancestors)}
@@ -1172,10 +1183,10 @@ export default function PivotGrid({
                           >
                             {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                           </button>
-                          <HeaderCell isTotal={cell.isTotal} alignLeft={cell.span > 1}>{cell.text}</HeaderCell>
+                          <HeaderCell isTotal={cell.isTotal} alignLeft={cell.span > 1 && !pivotOptions.mergeLabels}>{cell.text}</HeaderCell>
                         </span>
                       ) : (
-                        <HeaderCell isTotal={cell.isTotal} alignLeft={cell.span > 1}>{cell.text}</HeaderCell>
+                        <HeaderCell isTotal={cell.isTotal} alignLeft={cell.span > 1 && !pivotOptions.mergeLabels}>{cell.text}</HeaderCell>
                       )}
                     </th>
                   );
@@ -1236,9 +1247,16 @@ export default function PivotGrid({
                     // A combined drilldown slot's own column (Drilldown v3) goes through the line
                     // renderer below too — it's where the depth indent and the +/- toggle live.
                     if (group.start === group.end && !drilldownAlone && group.start !== combinedDrillSlot) {
+                      const labelSpan = labelSpans?.[displayIndex][groupIndex] ?? 1;
+                      if (labelSpan === 0) return null; // covered by the merged label above
                       return (
-                        // Left-aligned like Excel's own row labels in every layout (was centered).
-                        <td key={group.start} className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-left ${labelWeight}`}>
+                        // Left-aligned like Excel's own row labels in every layout (was centered) —
+                        // centered both ways when "Merge and center cells with labels" is on.
+                        <td
+                          key={group.start}
+                          rowSpan={labelSpan > 1 ? labelSpan : undefined}
+                          className={`${cellBorder} whitespace-nowrap px-3 py-1.5 ${labelSpans ? "bg-white text-center align-middle" : "text-left"} ${labelWeight}`}
+                        >
                           <span className="inline-flex items-center gap-1.5">
                             {lines[0] && collapseToggleFor(lines[0])}
                             {lines[0]?.text ?? ""}
@@ -1366,7 +1384,7 @@ export default function PivotGrid({
                           });
                         }}
                       >
-                        {iconColor && <span style={{ color: iconColor }}>●</span>} {formatNumber(cell, formatForColumn(measureIndex, valueFields))}
+                        {iconColor && <span style={{ color: iconColor }}>●</span>} {cellText(cell, formatForColumn(measureIndex, valueFields), pivotOptions)}
                       </td>
                     );
                   })}
@@ -1411,8 +1429,9 @@ export default function PivotGrid({
           // pre-edit value (e.g. "120,000.00") after changing Decimal Places inside this still-open
           // menu to something that should display as "120,000" (caught 2026-10-06, full codebase
           // review).
-          displayValue={formatNumber(cellMenu.rawValue, (request.values[cellMenu.measureIndex] ?? cellMenu.valueField)?.format)}
+          displayValue={cellText(cellMenu.rawValue, (request.values[cellMenu.measureIndex] ?? cellMenu.valueField)?.format, pivotOptions)}
           onHideFieldList={() => onHideFieldList?.()}
+          onOpenPivotTableOptions={onOpenPivotTableOptions}
         />
       )}
       {drillthrough && (
