@@ -429,17 +429,23 @@ export function createWorkbook() {
   return new ExcelJS.Workbook();
 }
 
+// Saves the workbook as "<filename>.xlsx". The blob URL is released only after a delay — revoking
+// it right after click() let Chrome start the download from a URL that was already gone, and the
+// file landed with the blob's GUID as its name and no extension (caught live 2026-10-20: Export
+// from Snapshot History saved "5ea6bf54-…" instead of "<pivot>_v1.xlsx"). Characters Windows
+// doesn't allow in a file name are replaced too, so the name is never rejected.
 export async function downloadWorkbook(workbook, filename) {
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const safeName = String(filename ?? "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "Pivot";
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${filename}.xlsx`;
+  link.download = `${safeName}.xlsx`;
   document.body.appendChild(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 // Show Details → Excel (2026-10-20): what Excel's own Show Details produces — the underlying rows on
@@ -473,14 +479,5 @@ export async function exportDetailsToExcel({ columns, rows, filename, sheetName 
     sheet.getColumn(i + 1).width = Math.min(longest + 3, 50);
   });
 
-  const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${filename}.xlsx`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  await downloadWorkbook(workbook, filename);
 }
