@@ -5,6 +5,7 @@ import ContextMenu from "../forms/ContextMenu";
 import Modal from "../forms/Modal";
 import Slicer from "./Slicer";
 import Timeline from "./Timeline";
+import GroupItemsPanel from "./GroupItemsPanel";
 import { FieldSortDialog, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, ConditionalFormatEditor, SHOW_VALUES_AS_OPTIONS, PERCENT_SHOW_VALUES_AS, DEFAULT_FORMAT } from "./FieldPicker";
 import { formatForColumn } from "../../utils/numberFormat";
 import { DEFAULT_PIVOT_OPTIONS, cellText, filterAreaSlot, filterValueSummary } from "../../utils/pivotOptions";
@@ -167,6 +168,7 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
   const isLevelSortedHere = Boolean(levelSort) && levelSort.byMeasureField == null;
   const isSortedHere = (request.sort?.axis === axis && !request.sort?.byMeasureField && !request.sort?.customOrder) || isLevelSortedHere;
   const hasFilter = request.filters.some((f) => f.field === field);
+  const hasGroups = (request.itemGroups ?? []).some((g) => g.field === field);
   const noDataKey = axis === "Columns" ? "Columns" : "Rows";
   const showsNoDataItems = request.showItemsWithNoData.includes(noDataKey);
 
@@ -234,7 +236,7 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
       align="right"
       fullWidth
       // The Sort dialog needs more room than the shortcut list.
-      panelClassName={panel === "sort" ? "min-w-[20rem] max-w-[22rem]" : "min-w-[14rem] max-w-[18rem]"}
+      panelClassName={panel === "sort" || panel === "group" ? "min-w-[20rem] max-w-[22rem]" : "min-w-[14rem] max-w-[18rem]"}
       trigger={(toggle) => (
         <button
           type="button"
@@ -287,6 +289,8 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
             {/* Excel's per-field "Sort (<field>)" dialog (see FieldSortDialog). */}
             <FieldSortDialog key={field} field={field} axis={axis} level={level} request={request} onChange={onChange} onBack={() => setPanel("shortcuts")} onDone={close} />
           </div>
+        ) : panel === "group" ? (
+          <GroupItemsPanel key={field} field={field} request={request} onChange={onChange} onBack={() => setPanel("shortcuts")} onDone={close} />
         ) : panel === "filter" ? (
           <div>
             <button
@@ -387,6 +391,10 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
             )}
             <button type="button" onClick={() => setPanel("filter")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
               Filter…
+            </button>
+            {/* Excel's Group Selection / Ungroup (2026-10-20) — see GroupItemsPanel. */}
+            <button type="button" onClick={() => setPanel("group")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+              {hasGroups ? "Groups…" : "Group Items…"}
             </button>
             <div className="my-1 border-t border-slate-100" />
             <label className="flex items-center gap-2 px-2 py-1.5 font-medium text-ink">

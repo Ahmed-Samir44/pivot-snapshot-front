@@ -1222,22 +1222,33 @@ function AxisGroupingEditor({ label, fields, dimensions, dateGroupings, numericG
   };
 
   const setMode = (field, mode) => {
+    const previousDate = dateGroupings.find((g) => g.field === field);
     const nextDate = dateGroupings.filter((g) => g.field !== field);
     const nextNumeric = numericGroupings.filter((g) => g.field !== field);
-    if (mode === "Month" || mode === "Quarter" || mode === "Year") {
-      nextDate.push({ field, unit: mode });
+    if (mode === "Day" || mode === "Month" || mode === "Quarter" || mode === "Year") {
+      // Switching unit keeps Starting at / Ending at, like Excel's dialog.
+      nextDate.push({ field, unit: mode, start: previousDate?.start ?? null, end: previousDate?.end ?? null });
     } else if (mode === "Numeric") {
-      nextNumeric.push({ field, binSize: 10 });
+      nextNumeric.push({ field, binSize: 10, start: null, end: null });
     }
     onChange(nextDate, nextNumeric);
   };
 
-  const setBinSize = (field, binSize) => {
+  const patchNumeric = (field, patch) => {
     onChange(
       dateGroupings,
-      numericGroupings.map((g) => (g.field === field ? { ...g, binSize } : g)),
+      numericGroupings.map((g) => (g.field === field ? { ...g, ...patch } : g)),
     );
   };
+  const setBinSize = (field, binSize) => patchNumeric(field, { binSize });
+  const patchDate = (field, patch) => {
+    onChange(
+      dateGroupings.map((g) => (g.field === field ? { ...g, ...patch } : g)),
+      numericGroupings,
+    );
+  };
+  // Excel's "Starting at"/"Ending at" — empty = Auto (no limit).
+  const numberOrNull = (text) => (text === "" || !Number.isFinite(Number(text)) ? null : Number(text));
 
   return (
     <div className="mt-4 space-y-2">
@@ -1254,23 +1265,57 @@ function AxisGroupingEditor({ label, fields, dimensions, dateGroupings, numericG
                 <option value="Numeric">Numeric bins</option>
               ) : (
                 <>
+                  <option value="Day">Group by Days</option>
                   <option value="Month">Group by Month</option>
                   <option value="Quarter">Group by Quarter</option>
                   <option value="Year">Group by Year</option>
                 </>
               )}
             </select>
-            {mode === "Numeric" && (
-              <input
-                type="number"
-                min={0.01}
-                step="any"
-                className="input-field w-24 py-2"
-                value={numericGroupings.find((g) => g.field === field)?.binSize ?? 10}
-                onChange={(e) => setBinSize(field, Number(e.target.value))}
-                title="Bin size"
-              />
-            )}
+            {mode === "Numeric" && (() => {
+              const g = numericGroupings.find((x) => x.field === field) ?? {};
+              return (
+                <>
+                  <label className="flex items-center gap-1 text-xs text-muted">
+                    Starting at
+                    <input type="number" step="any" className="input-field w-20 py-2" placeholder="Auto" value={g.start ?? ""} onChange={(e) => patchNumeric(field, { start: numberOrNull(e.target.value) })} />
+                  </label>
+                  <label className="flex items-center gap-1 text-xs text-muted">
+                    Ending at
+                    <input type="number" step="any" className="input-field w-20 py-2" placeholder="Auto" value={g.end ?? ""} onChange={(e) => patchNumeric(field, { end: numberOrNull(e.target.value) })} />
+                  </label>
+                  <label className="flex items-center gap-1 text-xs text-muted">
+                    By
+                    <input
+                      type="number"
+                      min={0.01}
+                      step="any"
+                      className="input-field w-20 py-2"
+                      value={g.binSize ?? 10}
+                      onChange={(e) => setBinSize(field, Number(e.target.value))}
+                      title="Bin size"
+                    />
+                  </label>
+                </>
+              );
+            })()}
+            {mode !== "None" && mode !== "Numeric" && (() => {
+              const g = dateGroupings.find((x) => x.field === field) ?? {};
+              // Stored as "yyyy-mm-dd" (an ISO date the backend reads as a DateTime).
+              const day = (value) => (value ? String(value).slice(0, 10) : "");
+              return (
+                <>
+                  <label className="flex items-center gap-1 text-xs text-muted">
+                    Starting at
+                    <input type="date" className="input-field py-2" value={day(g.start)} onChange={(e) => patchDate(field, { start: e.target.value || null })} />
+                  </label>
+                  <label className="flex items-center gap-1 text-xs text-muted">
+                    Ending at
+                    <input type="date" className="input-field py-2" value={day(g.end)} onChange={(e) => patchDate(field, { end: e.target.value || null })} />
+                  </label>
+                </>
+              );
+            })()}
           </div>
         );
       })}

@@ -138,6 +138,8 @@ const EMPTY_REQUEST = {
   calculatedItems: [],
   dateGroupings: [],
   numericGroupings: [],
+  // Excel's Group Selection on text items: { field, name, members } (see GroupItemsPanel).
+  itemGroups: [],
   showItemsWithNoData: [],
   // Real Excel's per-field "Show items with no data" (PLAN 7, 2026-10-13, EXPERIMENTAL — see the
   // plan file's own WHY comment on why this needs live-cube verification). Unlike showItemsWithNoData
@@ -615,6 +617,17 @@ export default function PivotBuilder() {
         dateGroupings: request.dateGroupings.filter((g) => request.rows.includes(g.field) || request.columns.includes(g.field)),
         numericGroupings: request.numericGroupings.filter(
           (g) => (request.rows.includes(g.field) || request.columns.includes(g.field)) && g.binSize > 0,
+        ),
+        // Group Selection: only for a field still on an axis, not date/number-grouped or drilled
+        // down (MdxPivotQueryBuilder.ValidateItemGroups) — a stale group is dropped, not an error.
+        itemGroups: (request.itemGroups ?? []).filter(
+          (g) =>
+            (request.rows.includes(g.field) || request.columns.includes(g.field)) &&
+            g.members.length > 0 &&
+            !request.dateGroupings.some((d) => d.field === g.field) &&
+            !request.numericGroupings.some((n) => n.field === g.field) &&
+            request.rowsHierarchyDrilldown?.topLevelField !== g.field &&
+            request.columnsHierarchyDrilldown?.topLevelField !== g.field,
         ),
         showItemsWithNoData: request.showItemsWithNoData,
         fieldsShowingItemsWithNoData: request.fieldsShowingItemsWithNoData.filter((f) => request.rows.includes(f)),
