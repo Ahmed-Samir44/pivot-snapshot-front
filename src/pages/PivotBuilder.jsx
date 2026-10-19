@@ -908,7 +908,10 @@ export default function PivotBuilder() {
           الإكسل"/"الصفحة كلها"), keeping this app's own gold/ink brand colors rather than
           switching to Excel's literal gray/white (confirmed same request). items-start: stops
           flexbox's default align-items:stretch from forcing both columns to the same height. */}
-      <div className="flex items-start gap-6">
+      {/* Responsive (2026-10-19, "it's not responsive"): side by side from the xl breakpoint
+          (1280px) up; below it the field pane drops UNDER the grid at full width, so the grid keeps
+          the whole width instead of being squeezed to ~400px beside a fixed 460px pane. */}
+      <div className="flex flex-col items-stretch gap-6 xl:flex-row xl:items-start">
         {/* min-w-0: without it, a wide pivot grid can force this whole row (and the page) wider
             than the viewport — the classic flexbox min-width:auto trap. PivotGrid scrolls both axes
             internally (max-h-[80vh] overflow-auto on its own grid container, restored 2026-10-06
@@ -952,6 +955,8 @@ export default function PivotBuilder() {
               pivotOptions={pivotOptions}
               onPivotOptionsChange={setPivotOptions}
               onOpenPivotTableOptions={() => setShowPivotOptions(true)}
+              fieldListShown={showFieldList}
+              onToggleFieldList={() => setShowFieldList((v) => !v)}
             />
             {showPivotOptions && (
               <PivotTableOptionsDialog
@@ -1101,7 +1106,7 @@ export default function PivotBuilder() {
             ان المساحة الكبرى تبقى للداتا"). The two-column field-list/zones layout inside
             FieldPicker now just runs tighter in less width instead of getting more room. */}
         {showFieldList ? (
-          <aside className="sticky top-8 w-[460px] shrink-0">
+          <aside className="w-full shrink-0 xl:sticky xl:top-8 xl:w-[460px]">
             <FieldPicker
               value={request}
               onChange={setRequest}
@@ -1263,7 +1268,7 @@ export default function PivotBuilder() {
           <button
             type="button"
             onClick={() => setShowFieldList(true)}
-            className="btn-secondary sticky top-8 h-fit shrink-0 px-3 py-2 text-xs"
+            className="btn-secondary h-fit shrink-0 self-start px-3 py-2 text-xs xl:sticky xl:top-8"
           >
             Show Field List
           </button>

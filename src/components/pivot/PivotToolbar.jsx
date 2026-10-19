@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Sigma, Rows3, Calculator, ListPlus, LayoutGrid, CalendarRange, Settings2, SquarePlus, Heading } from "lucide-react";
+import { Sigma, Rows3, Calculator, ListPlus, LayoutGrid, CalendarRange, Settings2, SquarePlus, Heading, PanelRight } from "lucide-react";
 import Popover from "../forms/Popover";
 import { CalculatedFieldDialog, CalculatedItemDialog } from "./FieldPicker";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
@@ -114,7 +114,8 @@ function RibbonGroup({ label, children }) {
 
 // pivotOptions/onPivotOptionsChange/onOpenPivotTableOptions: the PivotTable group (name + Options);
 // omitted, that group isn't drawn.
-export default function PivotToolbar({ request, onChange, measureOptions, dimensions = [], pivotOptions = null, onPivotOptionsChange = null, onOpenPivotTableOptions = null }) {
+// fieldListShown/onToggleFieldList: Excel's "Field List" toggle in the Show group; omitted, no button.
+export default function PivotToolbar({ request, onChange, measureOptions, dimensions = [], pivotOptions = null, onPivotOptionsChange = null, onOpenPivotTableOptions = null, fieldListShown = true, onToggleFieldList = null }) {
   const [tab, setTab] = useState("analyze");
   // The name box's text while it's being typed (null = show the saved name); applied on blur/Enter.
   const [nameDraft, setNameDraft] = useState(null);
@@ -164,7 +165,10 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
       </div>
 
       {/* Ribbon surface — Excel's light gray ribbon background, not a white card. */}
-      <div className="flex items-stretch gap-0 bg-slate-50 px-2 py-1">
+      {/* overflow-x-auto (2026-10-19): on a narrow window the groups scroll sideways instead of
+          being cut off (the Calculations/Show groups used to vanish). Dropdown panels render in a
+          portal, so this doesn't clip them. */}
+      <div className="custom-scrollbar flex items-stretch gap-0 overflow-x-auto bg-slate-50 px-2 py-1">
         {tab === "design" && (
           <RibbonGroup label="Layout">
             {/* Real Excel's own Design tab "Grand Totals"/"Subtotals" are each a 4-/3-way DROPDOWN,
@@ -346,6 +350,18 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
             pressed/unpressed toggles (2026-10-19). */}
         {tab === "analyze" && pivotOptions && (
           <RibbonGroup label="Show">
+            {/* Excel's "Field List" toggle — hides the field pane so the grid gets the full width. */}
+            {onToggleFieldList && (
+              <button
+                type="button"
+                aria-pressed={fieldListShown}
+                onClick={onToggleFieldList}
+                className={`flex h-16 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded px-1 text-ink ${fieldListShown ? "bg-gold/15 ring-1 ring-gold/40" : "hover:bg-black/5"}`}
+              >
+                <PanelRight className="h-5 w-5 text-ink/70" />
+                <span className="text-center text-[11px] leading-tight">Field List</span>
+              </button>
+            )}
             {[
               { key: "showExpandButtons", label: "+/- Buttons", icon: SquarePlus },
               { key: "showFieldCaptions", label: "Field Headers", icon: Heading },
