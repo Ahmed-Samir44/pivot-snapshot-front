@@ -403,3 +403,46 @@ export async function exportPivotToExcel({
   link.remove();
   URL.revokeObjectURL(url);
 }
+
+// Show Details → Excel (2026-10-20): what Excel's own Show Details produces — the underlying rows on
+// a new sheet as a formatted Excel Table (filter buttons, banded rows). Numeric text from the cube
+// becomes a real number so it sums/sorts in Excel.
+export async function exportDetailsToExcel({ columns, rows, filename, sheetName = "Details" }) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet(sheetName.slice(0, 31).replace(/[\\/?*[\]:]/g, " "));
+
+  // Table column names must be unique and non-empty.
+  const seen = new Map();
+  const names = columns.map((c, i) => {
+    const base = String(c ?? "").trim() || `Column${i + 1}`;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return n === 1 ? base : `${base} (${n})`;
+  });
+  const toCell = (v) => (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : v ?? null);
+
+  sheet.addTable({
+    name: "Details",
+    ref: "A1",
+    headerRow: true,
+    style: { theme: "TableStyleMedium2", showRowStripes: true },
+    columns: names.map((name) => ({ name, filterButton: true })),
+    rows: rows.length > 0 ? rows.map((r) => names.map((_, i) => toCell(r[i]))) : [names.map(() => null)],
+  });
+
+  names.forEach((name, i) => {
+    const longest = Math.max(name.length, ...rows.slice(0, 200).map((r) => String(r[i] ?? "").length));
+    sheet.getColumn(i + 1).width = Math.min(longest + 3, 50);
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${filename}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}

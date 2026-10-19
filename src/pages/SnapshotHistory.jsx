@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronRight, CirclePause, CirclePlay, Eye, FileSpreadsheet, Loader2, Pencil, Trash2, X } from "lucide-react";
+import { ChevronRight, CirclePause, CirclePlay, Columns2, Eye, FileSpreadsheet, Loader2, Pencil, Trash2, X } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import Modal from "../components/forms/Modal";
 import ConfirmModal from "../components/forms/ConfirmModal";
 import PivotGrid from "../components/pivot/PivotGrid";
+import VersionCompare from "../components/history/VersionCompare";
 import {
   listDefinitions,
   getDeactivatedDefinitions,
@@ -18,6 +19,7 @@ import {
   reactivateVersion,
   reactivateAllVersions,
   deleteVersion,
+  compareVersions,
 } from "../services/snapshotApi";
 import { formatDimensionName } from "../utils/cubeMeta";
 import { hideMeasuresLabelIfSingleValue } from "../utils/measuresPlacement";
@@ -146,11 +148,24 @@ function SectionLabel({ color, children, action }) {
 // The toolbar that appears above a list once at least one row is checked — "N selected" plus
 // whichever bulk actions apply to THIS list (an active list only offers Deactivate; a deactivated
 // list offers Reactivate and Delete), so the same component covers all four lists.
-function BulkActionBar({ selection, onDeactivate, onReactivate, onDelete }) {
+function BulkActionBar({ selection, onDeactivate, onReactivate, onDelete, onCompare, comparing = false }) {
   if (selection.ids.size === 0) return null;
   return (
     <div className="mb-2 flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2">
       <span className="text-xs font-semibold text-ink">{selection.ids.size} selected</span>
+      {/* Compare (2026-10-20): any 2+ versions of the pivot, side by side. */}
+      {onCompare && (
+        <button
+          type="button"
+          onClick={onCompare}
+          disabled={selection.ids.size < 2 || comparing}
+          title={selection.ids.size < 2 ? "Check at least 2 versions to compare them" : "Compare the checked versions"}
+          className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-muted disabled:no-underline"
+        >
+          {comparing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Columns2 className="h-3.5 w-3.5" />}
+          Compare
+        </button>
+      )}
       {onDeactivate && (
         <button type="button" onClick={onDeactivate} className="text-xs font-semibold text-orange-600 hover:underline">
           Deactivate
@@ -195,6 +210,9 @@ export default function SnapshotHistory() {
   const [loadingVersionId, setLoadingVersionId] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
+  // { labels, data } for the open Compare modal; `comparing` while the fetch runs.
+  const [comparison, setComparison] = useState(null);
+  const [comparing, setComparing] = useState(false);
 
   // One checkbox selection per list — a checked row in "Active Versions" has nothing to do with
   // one checked in "Deactivated Versions", so these never share state (caught live 2026-09-23:
@@ -321,6 +339,22 @@ export default function SnapshotHistory() {
   };
 
   const countLabel = (count, singular) => (count === 1 ? singular : `${count} ${singular}s`);
+
+  // Oldest first, so each change reads "newer minus older" whatever order they were checked in.
+  const handleCompare = async () => {
+    const chosen = versions.filter((v) => activeVersionSelection.ids.has(v.id)).sort((a, b) => a.versionNumber - b.versionNumber);
+    if (chosen.length < 2) return;
+    setPreviewError(null);
+    setComparing(true);
+    try {
+      const data = await compareVersions(chosen.map((v) => v.id));
+      setComparison({ labels: chosen.map(versionLabel), data });
+    } catch (err) {
+      setPreviewError(err.message);
+    } finally {
+      setComparing(false);
+    }
+  };
 
   const handleExport = async () => {
     if (!previewVersion) return;
@@ -513,6 +547,8 @@ export default function SnapshotHistory() {
           <SectionLabel color="bg-green-500">Active</SectionLabel>
           <BulkActionBar
             selection={activeVersionSelection}
+            onCompare={handleCompare}
+            comparing={comparing}
             onDeactivate={() => {
               const ids = [...activeVersionSelection.ids];
               setPendingConfirm({ action: "deactivate-version", ids, label: countLabel(ids.length, "version") });
@@ -705,6 +741,12 @@ export default function SnapshotHistory() {
           </Modal>
         );
       })()}
+
+      {comparison && (
+        <Modal title={`Compare ${comparison.labels.length} versions`} onClose={() => setComparison(null)}>
+          <VersionCompare comparison={comparison.data} versionLabels={comparison.labels} />
+        </Modal>
+      )}
 
       {/* Rendered AFTER previewVersion's own Modal above (not before) — with both using the
           same z-50 backdrop, DOM order decides which one visually sits on top of the other

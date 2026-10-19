@@ -111,12 +111,25 @@ export function reactivateVersion(versionId) {
   return request(`/api/snapshots/versions/${versionId}/reactivate`, { method: "POST" });
 }
 
-// Reactivates every currently-deactivated version under a pivot in one call — the common gap
-// after deactivating a pivot (which cascades to its versions) and then reactivating just the
-// pivot itself (which deliberately doesn't cascade back — see
-// DataverseSnapshotStorageService.ReactivateDefinitionAsync).
+// Reactivates every currently-deactivated version under a pivot in one call. Reactivating the
+// pivot itself already brings back the versions deactivated WITH it (2026-10-20 — see
+// DataverseSnapshotStorageService.ReactivateDefinitionAsync); this also covers ones deactivated
+// on their own.
 export function reactivateAllVersions(definitionId) {
   return request(`/api/snapshots/${definitionId}/versions/reactivate-all`, { method: "POST" });
+}
+
+// 2+ versions of one pivot, cell by cell, matched by row/column labels (SnapshotComparer). The
+// backend refuses versions whose layout differs (structure hash). Values in the given order —
+// pass them oldest first so each delta reads "newer minus older".
+export async function compareVersions(versionIds) {
+  const query = versionIds.map((id) => `versionIds=${encodeURIComponent(id)}`).join("&");
+  const comparison = await request(`/api/snapshots/compare?${query}`);
+  const revive = (v) => (v === "NaN" || v === "Infinity" || v === "-Infinity" ? NaN : v);
+  return {
+    ...comparison,
+    cells: comparison.cells.map((c) => ({ ...c, values: c.values.map(revive), deltas: c.deltas.map(revive) })),
+  };
 }
 
 // The real, permanent delete — the backend itself refuses this unless the version was already

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronLeft, Filter as FilterIcon, Table2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronLeft, FileSpreadsheet, Filter as FilterIcon, Table2, X } from "lucide-react";
 import Popover from "../forms/Popover";
 import ContextMenu from "../forms/ContextMenu";
 import Modal from "../forms/Modal";
@@ -835,6 +835,22 @@ export default function PivotGrid({
     }
   };
 
+  // Show Details → Excel (2026-10-20). ExcelJS is loaded only when used (see PivotBuilder's export).
+  const [drillthroughExporting, setDrillthroughExporting] = useState(false);
+  const exportDrillthrough = async () => {
+    if (!drillthrough?.data) return;
+    setDrillthroughExporting(true);
+    try {
+      const { exportDetailsToExcel } = await import("../../utils/exportExcel");
+      const safeLabel = drillthrough.label.replace(/[\\/:*?"<>|[\]]/g, " ").trim() || "Details";
+      await exportDetailsToExcel({ columns: drillthrough.data.columns, rows: drillthrough.data.rows, filename: `Details - ${safeLabel}`, sheetName: "Details" });
+    } catch (err) {
+      setDrillthrough((current) => ({ ...current, exportError: err.message }));
+    } finally {
+      setDrillthroughExporting(false);
+    }
+  };
+
   // Excel never leaves the worksheet blank before the first field is placed — it shows this exact
   // placeholder inside the PivotTable's own bounds ("To build a report, choose fields from the
   // PivotTable Field List"). Matching that instead of rendering nothing (flagged live, 2026-10-04,
@@ -1580,6 +1596,19 @@ export default function PivotGrid({
                   Showing only the first {drillthrough.data.rows.length.toLocaleString()} rows — there may be more underlying this cell.
                 </p>
               )}
+              <div className="mb-3 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={exportDrillthrough}
+                  disabled={drillthroughExporting}
+                  className="btn-secondary inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <FileSpreadsheet className="h-4 w-4" style={{ color: "#217346" }} />
+                  {drillthroughExporting ? "Exporting…" : "Export to Excel"}
+                </button>
+                <span className="text-xs text-muted">{drillthrough.data.rows.length.toLocaleString()} rows</span>
+                {drillthrough.exportError && <span className="text-xs font-medium text-red-700">{drillthrough.exportError}</span>}
+              </div>
               <table className="border-collapse text-sm">
               <thead>
                 <tr>
