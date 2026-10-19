@@ -9,25 +9,28 @@ import { FieldSortDialog, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel
 import { formatForColumn } from "../../utils/numberFormat";
 import { DEFAULT_PIVOT_OPTIONS, cellText, filterAreaSlot, filterValueSummary } from "../../utils/pivotOptions";
 import { filterKind, setFieldFilter, FILTER_KIND_LABELS } from "../../utils/filterKinds";
-
-// A one-line description of a filter for the field menu's list of active filters.
-function describeFilter(filter) {
-  const mode = filter.mode ?? "Members";
-  if (mode === "Members") return filter.includedMembers.length === 1 ? filter.includedMembers[0] : `${filter.includedMembers.length} items`;
-  if (mode === "Exclude") return `all but ${filter.includedMembers.length}`;
-  if (mode === "LabelContains") return `contains "${filter.labelText}"`;
-  if (mode === "LabelBeginsWith") return `begins with "${filter.labelText}"`;
-  if (mode === "LabelEndsWith") return `ends with "${filter.labelText}"`;
-  if (mode === "TopN" || mode === "BottomN") return `${mode === "TopN" ? "Top" : "Bottom"} ${filter.n} by ${filter.byMeasureField}`;
-  if (mode === "Between") return `${filter.byMeasureField} between ${filter.value} and ${filter.valueTo}`;
-  return `${filter.byMeasureField} ${mode === "GreaterThan" ? ">" : "<"} ${filter.value}`;
-}
+import { LABEL_FILTERS, VALUE_FILTERS, isLabelMode, isRangeMode, isTop10Mode, top10Parts } from "../../utils/filterModes";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
 import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys, collapseKey, buildColumnHeaderRows, computeLabelSpans } from "../../utils/pivotGridLayout";
 import { MEASURES_PLACEHOLDER, measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "../../utils/measuresPlacement";
 import { applyReportSubtotals } from "../../utils/subtotals";
 import { drillthroughPivot } from "../../services/pivotApi";
+
+// A one-line description of a filter for the field menu's list of active filters, from the same
+// mode names the filter editor uses (utils/filterModes.js).
+function describeFilter(filter) {
+  const mode = filter.mode ?? "Members";
+  if (mode === "Members") return filter.includedMembers.length === 1 ? filter.includedMembers[0] : `${filter.includedMembers.length} items`;
+  if (mode === "Exclude") return `all but ${filter.includedMembers.length}`;
+  const name = (list) => list.find((f) => f.value === mode)?.label.replace("…", "").toLowerCase() ?? mode;
+  if (isLabelMode(mode)) return `${name(LABEL_FILTERS)} "${filter.labelText}"${isRangeMode(mode) ? ` and "${filter.labelTextTo}"` : ""}`;
+  if (isTop10Mode(mode)) {
+    const { direction, unit } = top10Parts(mode);
+    return `${direction} ${unit === "Items" ? filter.n : filter.value}${unit === "Percent" ? "%" : unit === "Sum" ? " (sum)" : ""} by ${filter.byMeasureField}`;
+  }
+  return `${filter.byMeasureField} ${name(VALUE_FILTERS)} ${filter.value}${isRangeMode(mode) ? ` and ${filter.valueTo}` : ""}`;
+}
 
 // Excel's own Report Filter area: every field in Filters gets its own row ABOVE the PivotTable
 // itself — field name on the left, current selection (plus a dropdown to change it) on the right
@@ -445,15 +448,9 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
   const isDimensionField = valueField.field.startsWith("[");
   const displayLabel = valueField.customLabel || (isDimensionField ? formatDimensionName(valueField.field) : valueField.field);
 
-  // `options.requireGrandTotals` rides along in the SAME onChange call as the value patch — see
-  // ValueFieldSettingsPanel's own Show Values As handler for why this can't be a separate call.
-  // Forces the safe universal superset (RowsAndColumns) rather than computing which SPECIFIC axis
-  // this particular ShowValuesAs variant actually needs (PercentOfGrandTotal/PercentOfParentRow:
-  // Rows; PercentOfParentColumn: Columns; Index: both) — simpler, and always satisfies whichever one
-  // applies, at the cost of also turning on the OTHER axis's total even when not strictly required.
-  const updateValue = (patch, options = {}) => {
+  const updateValue = (patch) => {
     const values = request.values.map((v, i) => (i === measureIndex ? { ...v, ...patch } : v));
-    onChange({ ...request, values, ...(options.requireGrandTotals ? { grandTotals: "RowsAndColumns" } : {}) });
+    onChange({ ...request, values });
   };
   const updateFormat = (patch) => updateValue({ format: { ...format, ...patch } });
   // Same global-exclusivity clear as FieldHeaderMenu's own setSort above — this menu's Sort
@@ -611,7 +608,7 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
       ) : panel === "numberFormat" ? (
         <NumberFormatEditor format={format} onUpdateFormat={updateFormat} onBack={() => setPanel("root")} onDone={onClose} />
       ) : panel === "settings" ? (
-        <ValueFieldSettingsPanel v={valueField} onUpdate={updateValue} onBack={() => setPanel("root")} onDone={onClose} rows={request.rows} />
+        <ValueFieldSettingsPanel v={valueField} onUpdate={updateValue} onBack={() => setPanel("root")} onDone={onClose} rows={request.rows} columns={request.columns} />
       ) : panel === "pivotTableOptions" ? (
         <div className="space-y-3">
           <button
@@ -691,12 +688,9 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
                   valuePatch.format = { ...format, type: "Percentage" };
                 }
                 const values = request.values.map((v, i) => (i === measureIndex ? { ...v, ...valuePatch } : v));
-                // One single onChange call for both the value patch AND grandTotals — two
-                // separate calls (even via updateValue + a second onChange) would each build off
-                // the same stale `request` closure, so whichever ran second would silently discard
-                // the other (same race this file has already hit and fixed elsewhere).
-                const requiresGrandTotals = opt.value === "PercentOfGrandTotal" || opt.value === "Index";
-                onChange({ ...request, values, ...(requiresGrandTotals ? { grandTotals: "RowsAndColumns" } : {}) });
+                // Grand Totals stay as they are (2026-10-20): the backend computes hidden ones for
+                // % of Grand Total / Index, like Excel.
+                onChange({ ...request, values });
                 onClose();
               }}
               className={`rounded-lg px-2 py-1.5 text-left ${valueField.showValuesAs === opt.value ? "bg-gold/10 font-semibold" : "hover:bg-gold/10"}`}

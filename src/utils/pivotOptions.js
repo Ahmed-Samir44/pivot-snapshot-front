@@ -1,5 +1,6 @@
 import { formatNumber } from "./numberFormat";
 import { isErrorValue } from "./errorCells";
+import { isLabelMode } from "./filterModes";
 
 // Excel's PivotTable Options > Layout & Format tab (2026-10-18, against a screenshot of the real
 // dialog). Display-only, kept beside `request` like fieldLayouts so a change never re-queries the
@@ -54,7 +55,7 @@ export function filterValueSummary(filter) {
     if (filter.includedMembers.length === 1) return filter.includedMembers[0] === "" ? "(blank)" : filter.includedMembers[0];
     return "(Multiple Items)";
   }
-  if (filter.mode === "LabelContains" || filter.mode === "LabelBeginsWith" || filter.mode === "LabelEndsWith") {
+  if (isLabelMode(filter.mode)) {
     return filter.labelText ? "(Multiple Items)" : "(All)";
   }
   return "(Multiple Items)";

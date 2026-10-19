@@ -7,6 +7,7 @@ import PivotGrid from "../components/pivot/PivotGrid";
 import PivotTableOptionsDialog from "../components/pivot/PivotTableOptionsDialog";
 import { DEFAULT_PIVOT_OPTIONS } from "../utils/pivotOptions";
 import { onePerField } from "../utils/filterKinds";
+import { isRuleFilterComplete } from "../utils/filterModes";
 import { formatDimensionName } from "../utils/cubeMeta";
 import PivotChart from "../components/pivot/PivotChart";
 import { chartUnavailableReason } from "../utils/chartLayout";
@@ -143,8 +144,8 @@ const EMPTY_REQUEST = {
   // above (per-AXIS), this is a plain list of field names — a field in this list keeps its own
   // zero-data members even when the rest of its axis still filters normally. Query-affecting (unlike
   // fieldLayouts' Compact/RepeatItemLabels/CustomName/InsertBlankLine), so it stays inside `request`
-  // and IS sent to queryPivot, not stripped out. Rows-only; v1 supports exactly one field at a time
-  // (MdxPivotQueryBuilder rejects more — see its own WHY comment).
+  // and IS sent to queryPivot, not stripped out. Rows-only; any number of fields (2026-10-20 — each
+  // gets its own orphan branch, see MdxPivotQueryBuilder).
   fieldsShowingItemsWithNoData: [],
   // Real Excel's per-member OLAP drilldown (PLAN 8, 2026-10-13, EXPERIMENTAL) — { topLevelField,
   // expandedMemberUniqueNames } or null. Mutually exclusive with `rows` having any real field (see
@@ -225,18 +226,13 @@ function readEnabledTables() {
 // A filter is only ready to send once whichever fields ITS mode actually needs are filled in —
 // each mode uses a different subset of PivotFilter's optional fields (see the backend's
 // MdxPivotQueryBuilder.ValidateFilters for the authoritative per-mode rules this mirrors).
+// (2026-10-20: GreaterThan/LessThan/Between used to fall through to the member-list check and were
+// silently DROPPED from every query — a value filter has no members. isRuleFilterComplete knows every mode.)
 function isFilterComplete(filter) {
-  switch (filter.mode ?? "Members") {
-    case "LabelContains":
-    case "LabelBeginsWith":
-    case "LabelEndsWith":
-      return Boolean(filter.labelText);
-    case "TopN":
-    case "BottomN":
-      return Boolean(filter.n > 0 && filter.byMeasureField);
-    default:
-      return filter.includedMembers.length > 0;
-  }
+  const mode = filter.mode ?? "Members";
+  if (mode === "Members") return filter.includedMembers.length > 0;
+  if (mode === "Exclude") return true;
+  return isRuleFilterComplete(filter);
 }
 
 // Everything in `request` EXCEPT each value's `format`/`conditionalFormat` — those two are pure

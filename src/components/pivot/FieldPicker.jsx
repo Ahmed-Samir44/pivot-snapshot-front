@@ -7,6 +7,7 @@ import MemberCheckboxList from "../forms/MemberCheckboxList";
 import Popover from "../forms/Popover";
 import { getMembers } from "../../services/cubeMetaApi";
 import { formatNumber } from "../../utils/numberFormat";
+import { LABEL_FILTERS, VALUE_FILTERS, TOP_10_MODES, TOP_10_MODE_SET, isLabelMode, isTop10Mode, isRangeMode, isValueCompareMode, top10Parts } from "../../utils/filterModes";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import {
   setFieldDragPayload,
@@ -652,27 +653,13 @@ function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, empty
 // the RULE-based modes, grouped to match Excel's own Label/Value Filters submenus — Members/Exclude
 // are handled separately below (the checklist is always visible; Exclude is a small toggle beside
 // it, not a dropdown entry — see FilterRow's own WHY comment for why that one stays conservative).
+// The full lists live in utils/filterModes.js (2026-10-20: every Excel label/value filter).
 const MORE_FILTER_GROUPS = [
-  {
-    label: "Label Filters",
-    options: [
-      { value: "LabelContains", label: "Contains…" },
-      { value: "LabelBeginsWith", label: "Begins With…" },
-      { value: "LabelEndsWith", label: "Ends With…" },
-    ],
-  },
-  {
-    label: "Value Filters",
-    options: [
-      { value: "TopN", label: "Top N…" },
-      { value: "BottomN", label: "Bottom N…" },
-      { value: "GreaterThan", label: "Greater Than…" },
-      { value: "LessThan", label: "Less Than…" },
-      { value: "Between", label: "Between…" },
-    ],
-  },
+  { label: "Label Filters", options: LABEL_FILTERS },
+  { label: "Value Filters", options: VALUE_FILTERS },
 ];
-const MORE_FILTER_MODES = new Set(MORE_FILTER_GROUPS.flatMap((g) => g.options.map((o) => o.value)));
+// Every Top 10 variant (Percent/Sum, Bottom…) counts too, though the list shows one "Top 10…".
+const MORE_FILTER_MODES = new Set([...MORE_FILTER_GROUPS.flatMap((g) => g.options.map((o) => o.value)), ...TOP_10_MODE_SET]);
 
 // One filter's member list is only fetched once its field is chosen (and only needed for
 // Mode "Members"/"Exclude" — the rule-based modes below never show a member list, they describe a
@@ -856,7 +843,7 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
           {showAdvancedFilters && (
             <select
               className={`${nativeSelectClass} w-full`}
-              value={isMoreFilterMode ? mode : ""}
+              value={isMoreFilterMode ? (isTop10Mode(mode) ? "TopN" : mode) : ""}
               onChange={(e) => (e.target.value ? handleModeChange(e.target.value) : handleModeChange("Members"))}
             >
               <option value="">{isMoreFilterMode ? "Back to member list" : "More Filters…"}</option>
@@ -965,50 +952,84 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
             </label>
           )}
 
-          {(mode === "LabelContains" || mode === "LabelBeginsWith" || mode === "LabelEndsWith") && (
-            <input
-              type="text"
-              className="input-field"
-              placeholder="Text to match…"
-              value={draft.labelText ?? ""}
-              onChange={(e) => setDraft((prev) => ({ ...prev, labelText: e.target.value }))}
-            />
-          )}
-
-          {(mode === "TopN" || mode === "BottomN") && (
-            <div className="flex flex-wrap items-center gap-3">
+          {/* Label filters (2026-10-20: every one Excel has): one text, or two for Between/Not Between. */}
+          {isLabelMode(mode) && (
+            <div className="flex flex-wrap items-center gap-2">
               <input
-                type="number"
-                min={1}
-                className="input-field w-24"
-                value={draft.n ?? 10}
-                onChange={(e) => setDraft((prev) => ({ ...prev, n: Number(e.target.value) }))}
+                type="text"
+                className="input-field min-w-0 flex-1"
+                placeholder={isRangeMode(mode) ? "From…" : "Text to match…"}
+                value={draft.labelText ?? ""}
+                onChange={(e) => setDraft((prev) => ({ ...prev, labelText: e.target.value }))}
               />
-              <select
-                className={nativeSelectClass}
-                value={draft.byMeasureField ?? ""}
-                onChange={(e) => setDraft((prev) => ({ ...prev, byMeasureField: e.target.value || null }))}
-              >
-                <option value="">Choose a measure…</option>
-                {selectedValueOptions.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
+              {isRangeMode(mode) && (
+                <input
+                  type="text"
+                  className="input-field min-w-0 flex-1"
+                  placeholder="To…"
+                  value={draft.labelTextTo ?? ""}
+                  onChange={(e) => setDraft((prev) => ({ ...prev, labelTextTo: e.target.value }))}
+                />
+              )}
             </div>
           )}
 
-          {(mode === "GreaterThan" || mode === "LessThan" || mode === "Between") && (
+          {/* Excel's "Top 10" dialog: [Top|Bottom] [n] [Items|Percent|Sum] by [measure] — the
+              direction and unit pick the mode (TOP_10_MODES); Items uses n, Percent/Sum use value. */}
+          {isTop10Mode(mode) && (() => {
+            const { direction, unit } = top10Parts(mode);
+            const setParts = (nextDirection, nextUnit) => setDraft((prev) => ({ ...prev, mode: TOP_10_MODES[nextDirection][nextUnit] }));
+            return (
+              <div className="flex flex-wrap items-center gap-2">
+                <select className={nativeSelectClass} value={direction} onChange={(e) => setParts(e.target.value, unit)}>
+                  <option value="Top">Top</option>
+                  <option value="Bottom">Bottom</option>
+                </select>
+                {unit === "Items" ? (
+                  <input type="number" min={1} className="input-field w-20" value={draft.n ?? 10} onChange={(e) => setDraft((prev) => ({ ...prev, n: Number(e.target.value) }))} />
+                ) : (
+                  <input
+                    type="number"
+                    min={0}
+                    max={unit === "Percent" ? 100 : undefined}
+                    className="input-field w-24"
+                    value={draft.value ?? ""}
+                    onChange={(e) => setDraft((prev) => ({ ...prev, value: e.target.value === "" ? null : Number(e.target.value) }))}
+                  />
+                )}
+                <select className={nativeSelectClass} value={unit} onChange={(e) => setParts(direction, e.target.value)}>
+                  <option value="Items">Items</option>
+                  <option value="Percent">Percent</option>
+                  <option value="Sum">Sum</option>
+                </select>
+                <span className="text-xs text-muted">by</span>
+                <select
+                  className={nativeSelectClass}
+                  value={draft.byMeasureField ?? ""}
+                  onChange={(e) => setDraft((prev) => ({ ...prev, byMeasureField: e.target.value || null }))}
+                >
+                  <option value="">Choose a measure…</option>
+                  {selectedValueOptions.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          })()}
+
+          {/* Value filters comparing the measure with a number: one value, or two for Between/Not Between. */}
+          {isValueCompareMode(mode) && (
             <div className="flex flex-wrap items-center gap-3">
               <input
                 type="number"
                 className="input-field w-28"
-                placeholder={mode === "Between" ? "From…" : "Value…"}
+                placeholder={isRangeMode(mode) ? "From…" : "Value…"}
                 value={draft.value ?? ""}
                 onChange={(e) => setDraft((prev) => ({ ...prev, value: e.target.value === "" ? null : Number(e.target.value) }))}
               />
-              {mode === "Between" && (
+              {isRangeMode(mode) && (
                 <input
                   type="number"
                   className="input-field w-28"
@@ -1027,8 +1048,7 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
                   <option key={m.value} value={m.value}>
                     {m.label}
                   </option>
-                ))}
-              </select>
+                ))}              </select>
             </div>
           )}
         </div>
@@ -2207,6 +2227,7 @@ function ValuePill({
   onRemove,
   onDropReorder,
   rows,
+  columns,
   onMoveTo,
   onMoveUp,
   onMoveDown,
@@ -2345,7 +2366,7 @@ function ValuePill({
               onBack={() => setPanel("menu")}
             />
           ) : (
-            <ValueFieldSettingsPanel v={v} onUpdate={onUpdate} onBack={() => setPanel("menu")} onDone={close} rows={rows} />
+            <ValueFieldSettingsPanel v={v} onUpdate={onUpdate} onBack={() => setPanel("menu")} onDone={close} rows={rows} columns={columns} />
           )
         }
       </Popover>
@@ -2395,7 +2416,7 @@ function ListBox({ options, value, onSelect, disabled = false, className = "" })
   );
 }
 
-export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
+export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows, columns = [] }) {
   // Like Excel's dialog, nothing applies until OK (2026-10-14, against screenshots of the real
   // Value Field Settings dialog) — every edit, Number Format's included, stays in this draft; OK
   // sends it in ONE onUpdate call, Cancel just leaves. A Difference From with no base field is shown
@@ -2469,11 +2490,9 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
       ...(isDimensionField ? { dimensionAggregation } : {}),
       ...(draft.format ? { format: draft.format } : {}),
     };
-    // % of Grand Total and Index both divide by the Grand Total — MdxPivotQueryBuilder rejects them
-    // without it (see ValidateShowValuesAs), so they turn Grand Totals on, the way Excel does. It
-    // rides along in the SAME onUpdate call (two calls would each build off the same stale request).
-    const requireGrandTotals = draft.showValuesAs === "PercentOfGrandTotal" || draft.showValuesAs === "Index";
-    onUpdate(patch, { requireGrandTotals });
+    // % of Grand Total / Index no longer turn Grand Totals on (2026-10-20): the backend computes the
+    // totals they divide by even when they're hidden, like Excel.
+    onUpdate(patch);
     (onDone ?? onBack)();
   };
   // A mode with a Base field needs one picked, and one with a Base item needs that too (the backend
@@ -2571,14 +2590,14 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows }) {
             ))}
           </select>
           {/* Excel's two side-by-side lists, always on screen and greyed out when the chosen
-              calculation doesn't use them. The base field is a Rows field (the backend's rule). */}
+              calculation doesn't use them. The base field is a Rows or (2026-10-20) Columns field. */}
           <div className="grid grid-cols-2 gap-2">
             <div className="min-w-0">
               <span className={`mb-1 block text-xs font-medium ${usesBase ? "text-muted" : "text-muted/60"}`}>Base field:</span>
               <ListBox
                 className="h-28"
                 disabled={!usesBase}
-                options={rows.filter((f) => f !== MEASURES_PLACEHOLDER).map((field) => ({ value: field, label: formatDimensionName(field) }))}
+                options={[...rows, ...columns].filter((f) => f !== MEASURES_PLACEHOLDER).map((field) => ({ value: field, label: formatDimensionName(field) }))}
                 value={draft.baseField}
                 onSelect={(field) => patchDraft({ baseField: field, baseItem: allowsPrevious ? PREVIOUS_BASE_ITEM : "" })}
               />
@@ -2686,15 +2705,10 @@ export default function FieldPicker({
     .map((f) => ({ value: f.name, label: `${f.name} (calculated)` }));
   const valueFieldOptions = [...measureOptions, ...calculatedFieldOptions];
 
-  // `options.requireGrandTotals` rides along in the SAME onChange call as the value patch — see
-  // ValueFieldSettingsPanel's own Show Values As handler for why this can't be two separate calls
-  // (PercentOfGrandTotal/Index both need request.grandTotals turned on, a level up from this
-  // one value field's own patch). Forces the safe universal superset (RowsAndColumns) rather than
-  // the specific axis this variant actually needs — see PivotGrid.jsx's own identical comment.
-  const updateValue = (index, patch, options = {}) => {
+  const updateValue = (index, patch) => {
     const copy = [...value.values];
     copy[index] = { ...copy[index], ...patch };
-    onChange({ ...value, values: copy, ...(options.requireGrandTotals ? { grandTotals: "RowsAndColumns" } : {}) });
+    onChange({ ...value, values: copy });
   };
 
   const removeValue = (index) => {
@@ -2873,7 +2887,7 @@ export default function FieldPicker({
     // Same dangling-reference cleanup removeValue/setSelectedValueFields and the Rows onChange
     // handler already apply — this is the THIRD path that can remove a field from Values or Rows
     // (plain drag-and-drop between zones, and each pill's own right-click "Move to…" menu).
-    next.values = clearDanglingBaseFieldReferences(next.values, next.rows);
+    next.values = clearDanglingBaseFieldReferences(next.values, [...next.rows, ...next.columns]);
     Object.assign(next, clearDanglingMeasureReferences(next, next.values.map((v) => v.field)));
     // Drilldown v3: the drilldown is a Rows slot now — it survives this move unless its own slot
     // left Rows or a same-hierarchy field arrived (see reconcileDrilldowns — it can also follow its pill to Columns).
@@ -2958,7 +2972,7 @@ export default function FieldPicker({
     next.fieldSubtotals = value.fieldSubtotals.filter((f) => !levelFields.includes(f.field));
     next.fieldsShowingItemsWithNoData = value.fieldsShowingItemsWithNoData.filter((f) => !levelFields.includes(f));
     next.calculatedItems = clearOrphanedCalculatedItems(value.calculatedItems, next.rows, next.columns);
-    next.values = clearDanglingBaseFieldReferences(next.values, next.rows);
+    next.values = clearDanglingBaseFieldReferences(next.values, [...next.rows, ...next.columns]);
     Object.assign(next, clearDanglingMeasureReferences(next, next.values.map((v) => v.field)));
     // Drilldown v3: same rule as moveField's — "+ Rows" ends the drilldown only if it adds a level
     // of the drilldown's OWN hierarchy (or "+ Cols" takes its slot away).
@@ -3249,7 +3263,7 @@ export default function FieldPicker({
                 // A Value's baseField (Show Values As PercentOf/DifferenceFrom/PercentDifferenceFrom)
                 // targets a Rows field — removed here, same dangling-reference class as
                 // clearDanglingMeasureReferences above, just for Rows instead of Values.
-                const values = clearDanglingBaseFieldReferences(value.values, rows);
+                const values = clearDanglingBaseFieldReferences(value.values, [...rows, ...value.columns]);
                 // A field's own Field Settings Subtotals override is meaningless once it's left
                 // Rows — same orphaned-per-field-config cleanup as dateGroupings/numericGroupings/
                 // calculatedItems above, just for fieldSubtotals (added 2026-10-13).
@@ -3413,7 +3427,8 @@ export default function FieldPicker({
                     key={index}
                     v={v}
                     rows={value.rows}
-                    onUpdate={(patch, options) => updateValue(index, patch, options)}
+                    columns={value.columns}
+                    onUpdate={(patch) => updateValue(index, patch)}
                     onRemove={() => removeValue(index)}
                     onDropReorder={(e) => handleValueRowDrop(e, index)}
                     onMoveTo={(zone) => moveField(v.field, "values", zone)}

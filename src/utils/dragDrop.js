@@ -105,8 +105,8 @@ export function clearDanglingMeasureReferences(request, remainingValueFields) {
 }
 
 // Same idea as clearDanglingMeasureReferences, for a Value's own baseField (Show Values As
-// PercentOf/DifferenceFrom/PercentDifferenceFrom) — baseField/baseItem target a ROWS field, not a
-// measure, so this triggers when a ROWS field (not a Value) is removed instead.
+// PercentOf/DifferenceFrom/PercentDifferenceFrom) — baseField/baseItem target a Rows or Columns field,
+// not a measure, so this triggers when such a field (not a Value) is removed instead.
 export function clearDanglingBaseFieldReferences(values, remainingRowFields) {
   return values.map((v) =>
     v.baseField && !remainingRowFields.includes(v.baseField) ? { ...v, baseField: null, baseItem: "" } : v,

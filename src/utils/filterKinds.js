@@ -1,10 +1,12 @@
+import { isLabelMode } from "./filterModes";
+
 // Excel's "Allow multiple filters per field" (2026-10-19): a field can hold one filter of each KIND
 // at once — 0 = a manual selection (Members/Exclude), 1 = a label filter, 2 = a value filter —
 // applied in that order. Mirrors MdxPivotQueryBuilder.FilterOrder.
 export function filterKind(filter) {
   const mode = filter.mode ?? "Members";
   if (mode === "Members" || mode === "Exclude") return 0;
-  if (mode === "LabelContains" || mode === "LabelBeginsWith" || mode === "LabelEndsWith") return 1;
+  if (isLabelMode(mode)) return 1;
   return 2;
 }
 
