@@ -18,6 +18,8 @@ export const DEFAULT_PIVOT_OPTIONS = {
   emptyText: "",
   filterAreaOrder: "DownThenOver",
   filterFieldsPerColumn: 0,
+  // Data tab: "Enable show details" — off grays out Show Details and blocks double-click.
+  enableShowDetails: true,
 };
 
 export const ERROR_TOKEN = "#DIV/0!";

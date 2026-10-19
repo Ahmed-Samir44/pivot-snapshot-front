@@ -8,6 +8,20 @@ import Timeline from "./Timeline";
 import { FieldSortDialog, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, ConditionalFormatEditor, SHOW_VALUES_AS_OPTIONS, PERCENT_SHOW_VALUES_AS, DEFAULT_FORMAT } from "./FieldPicker";
 import { formatForColumn } from "../../utils/numberFormat";
 import { DEFAULT_PIVOT_OPTIONS, cellText, filterAreaSlot, filterValueSummary } from "../../utils/pivotOptions";
+import { filterKind, setFieldFilter, FILTER_KIND_LABELS } from "../../utils/filterKinds";
+
+// A one-line description of a filter for the field menu's list of active filters.
+function describeFilter(filter) {
+  const mode = filter.mode ?? "Members";
+  if (mode === "Members") return filter.includedMembers.length === 1 ? filter.includedMembers[0] : `${filter.includedMembers.length} items`;
+  if (mode === "Exclude") return `all but ${filter.includedMembers.length}`;
+  if (mode === "LabelContains") return `contains "${filter.labelText}"`;
+  if (mode === "LabelBeginsWith") return `begins with "${filter.labelText}"`;
+  if (mode === "LabelEndsWith") return `ends with "${filter.labelText}"`;
+  if (mode === "TopN" || mode === "BottomN") return `${mode === "TopN" ? "Top" : "Bottom"} ${filter.n} by ${filter.byMeasureField}`;
+  if (mode === "Between") return `${filter.byMeasureField} between ${filter.value} and ${filter.valueTo}`;
+  return `${filter.byMeasureField} ${mode === "GreaterThan" ? ">" : "<"} ${filter.value}`;
+}
 import { formatDimensionName } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
 import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys, collapseKey, buildColumnHeaderRows, computeLabelSpans } from "../../utils/pivotGridLayout";
@@ -179,18 +193,25 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
     onChange({ ...request, sort: null });
   };
 
-  const existingFilter = request.filters.find((f) => f.field === field) ?? null;
+  // "Allow multiple filters per field" (PivotTable Options > Totals & Filters, 2026-10-19): the field
+  // can hold one filter of each kind (utils/filterKinds.js); off, one per field.
+  const allowMultipleFilters = Boolean(request.allowMultipleFiltersPerField);
+  const fieldFilters = request.filters.filter((f) => f.field === field);
+  // The filter the panel opens on: the manual selection if there is one, else the field's first.
+  const existingFilter = fieldFilters.find((f) => filterKind(f) === 0) ?? fieldFilters[0] ?? null;
 
   // Reused by FilterRow's own OK (fieldLocked=true, see its own WHY comment) — adds a new filter
-  // entry for this field if none existed yet, or replaces the existing one, matching the backend's
-  // one-filter-per-field model (same shape updateFilter/addFilterShortcut already used before this).
+  // entry for this field, or replaces the existing one: the field's only filter, or with multiple
+  // filters allowed, its filter of the same kind (setFieldFilter).
   const applyFieldFilter = (updatedFilter) => {
-    const exists = request.filters.some((f) => f.field === field);
-    const nextFilters = exists ? request.filters.map((f) => (f.field === field ? updatedFilter : f)) : [...request.filters, updatedFilter];
-    onChange({ ...request, filters: nextFilters });
+    onChange({ ...request, filters: setFieldFilter(request.filters, updatedFilter, allowMultipleFilters) });
   };
 
+  // "Clear Filter" clears every filter on the field, like Excel's "Clear Filter From <field>".
   const removeFilter = () => onChange({ ...request, filters: request.filters.filter((f) => f.field !== field) });
+  // FilterRow's own remove: with multiple filters allowed, just the filter of that kind.
+  const removeFilterOfKind = (kind) =>
+    onChange({ ...request, filters: request.filters.filter((f) => f.field !== field || (allowMultipleFilters && filterKind(f) !== kind)) });
 
   // TopN/BottomN/GreaterThan/etc.'s own "Choose a measure…" dropdown needs this same shape
   // FieldPicker.jsx's Filters zone already builds from value.values — mirrored here since
@@ -276,13 +297,34 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
                 picker, and Label/Value Filters ("More Filters…")/Exclude become available, matching
                 real Excel's own Row/Column field dropdown (confirmed live 2026-10-12) — see
                 FilterRow's own WHY comment for the full Report-Filter-vs-field-dropdown story. */}
+            {/* With multiple filters per field, the field's active filters (one per kind), each
+                removable on its own; the editor below adds or replaces the kind it's set to. */}
+            {allowMultipleFilters && fieldFilters.length > 0 && (
+              <ul className="mb-2 space-y-1 border-b border-slate-100 pb-2">
+                {fieldFilters.map((f) => (
+                  <li key={filterKind(f)} className="flex items-center justify-between gap-2 text-xs text-ink">
+                    <span>
+                      <span className="font-medium">{FILTER_KIND_LABELS[filterKind(f)]}:</span> {describeFilter(f)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeFilterOfKind(filterKind(f))}
+                      className="rounded-full p-0.5 text-muted hover:bg-slate-100 hover:text-ink"
+                      aria-label={`Remove ${FILTER_KIND_LABELS[filterKind(f)]}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             <FilterRow
               key={field}
               filter={existingFilter ?? { field, mode: "Members", includedMembers: [] }}
               dimensionOptions={[]}
               selectedValueOptions={selectedValueOptions}
               onChange={applyFieldFilter}
-              onRemove={removeFilter}
+              onRemove={() => (allowMultipleFilters ? removeFilterOfKind(filterKind(existingFilter ?? { mode: "Members" })) : removeFilter())}
               onClose={close}
               hideFieldPicker
               showAdvancedFilters
@@ -374,7 +416,25 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
 // value isn't a calculated field, a dimension-aggregation value, or ShowValuesAs-transformed (none
 // of those are a single stored fact-level quantity DRILLTHROUGH can meaningfully target — see
 // MdxPivotQueryBuilder.BuildDrillthrough's own WHY comment on the backend).
-function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, measureIndex, sortAxis, row, column, onShowDetails, onRefresh, displayValue, onHideFieldList, onOpenPivotTableOptions }) {
+// Whether a value cell has underlying rows Show Details can fetch: real members on both axes (a
+// total has none), a plain measure (no Show Values As, not a calculated field or a "Count of
+// <field>"). A Calculated Item is a synthetic MDX member (e.g. "East + West" combined into one
+// row/column) with a real, non-null UniqueName of its own — NOT backed by a single real fact-table
+// row set the same way a Calculated Field isn't, so it needs the exact same exclusion (caught
+// 2026-10-06, full codebase review: Show Details was still offered on a Calculated Item cell, whose
+// drillthrough would at best return only one of the combined members' own rows). Shared by the
+// right-click menu and double-click.
+function cellHasDetails(request, valueField, row, column) {
+  const isDimensionField = valueField.field.startsWith("[");
+  const isCalculatedField = request.calculatedFields.some((cf) => cf.name === valueField.field);
+  const isCalculatedItem = Boolean(row.isCalculatedItem) || Boolean(column.isCalculatedItem);
+  // A value saved without showValuesAs is a plain one (the backend's default is Normal too).
+  return Boolean(row.uniqueNames) && Boolean(column.uniqueNames) && (valueField.showValuesAs ?? "Normal") === "Normal" && !isDimensionField && !isCalculatedField && !isCalculatedItem;
+}
+
+// showDetailsEnabled: PivotTable Options > Data > "Enable show details" — off, Show Details stays
+// in the menu but grayed out, like Excel.
+function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, measureIndex, sortAxis, row, column, onShowDetails, onRefresh, displayValue, onHideFieldList, onOpenPivotTableOptions, showDetailsEnabled = true }) {
   const [panel, setPanel] = useState("root");
   const format = valueField.format ?? DEFAULT_FORMAT;
   const isDimensionField = valueField.field.startsWith("[");
@@ -397,14 +457,7 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
     onChange({ ...request, sort: { direction, byMeasureField: valueField.field, axis: sortAxis, customOrder: null }, [sortAxis === "Columns" ? "columnLevelSorts" : "rowLevelSorts"]: [] });
   const removeValue = () => onChange({ ...request, values: request.values.filter((_, i) => i !== measureIndex) });
 
-  const isCalculatedField = request.calculatedFields.some((cf) => cf.name === valueField.field);
-  // A Calculated Item is a synthetic MDX member (e.g. "East + West" combined into one row/column)
-  // with a real, non-null UniqueName of its own — NOT backed by a single real fact-table row set
-  // the same way a Calculated Field isn't, so it needs the exact same exclusion here (caught
-  // 2026-10-06, full codebase review: Show Details was still offered on a Calculated Item cell,
-  // whose drillthrough would at best return only one of the combined members' own rows).
-  const isCalculatedItem = Boolean(row.isCalculatedItem) || Boolean(column.isCalculatedItem);
-  const canShowDetails = Boolean(row.uniqueNames) && Boolean(column.uniqueNames) && valueField.showValuesAs === "Normal" && !isDimensionField && !isCalculatedField && !isCalculatedItem;
+  const canShowDetails = cellHasDetails(request, valueField, row, column);
 
   return (
     <ContextMenu x={x} y={y} onClose={onClose}>
@@ -475,8 +528,10 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
           {canShowDetails && (
             <button
               type="button"
+              disabled={!showDetailsEnabled}
+              title={showDetailsEnabled ? undefined : "Turned off in PivotTable Options > Data > Enable show details."}
               onClick={() => { onClose(); onShowDetails(); }}
-              className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+              className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10 disabled:cursor-not-allowed disabled:text-muted/50 disabled:hover:bg-transparent"
             >
               Show Details
             </button>
@@ -707,6 +762,14 @@ export default function PivotGrid({
   // above and the contextmenu handler / modal render below.
   const [cellMenu, setCellMenu] = useState(null);
   const [drillthrough, setDrillthrough] = useState(null);
+  // A short message shown above the grid (e.g. double-clicking a cell with Show Details turned off),
+  // cleared after a few seconds.
+  const [notice, setNotice] = useState(null);
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   // Keyboard navigation (Excel's own arrow-key cell selection, Enter to move down, Escape to
   // clear) — {row, col} are indices into `cells`/`rowHeaders`/`columnHeaders`, not screen position,
   // so the selection survives sorting/filtering as long as the same indices still exist. Only the
@@ -1028,6 +1091,11 @@ export default function PivotGrid({
           </div>
         );
       })()}
+      {notice && (
+        <p role="status" className="mb-2 w-fit rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+          {notice}
+        </p>
+      )}
       {/* ONE element now does both the "card" chrome AND the scrolling — previously these were two
           nested divs (a decorative outer `card` with no overflow set, wrapping this scrolling box),
           which is exactly why the table had no visible border-radius ("الجدول مالهوش border radius",
@@ -1407,6 +1475,16 @@ export default function PivotGrid({
                           setSelectedCell({ row: rowIndex, col: colIndex });
                           gridRef.current?.focus();
                         }}
+                        // Excel's double-click on a value cell = Show Details (2026-10-19); with "Enable
+                        // show details" off, Excel answers with a message instead.
+                        onDoubleClick={() => {
+                          if (!request || !valueField || !cellHasDetails(request, valueField, row, columnHeaders[colIndex])) return;
+                          if (pivotOptions.enableShowDetails === false) {
+                            setNotice("Show details is turned off for this PivotTable (PivotTable Options > Data).");
+                            return;
+                          }
+                          runDrillthrough({ row, column: columnHeaders[colIndex], valueField });
+                        }}
                         onContextMenu={(e) => {
                           if (!request || !onChange || !valueField) return;
                           e.preventDefault();
@@ -1474,6 +1552,7 @@ export default function PivotGrid({
           displayValue={cellText(cellMenu.rawValue, (request.values[cellMenu.measureIndex] ?? cellMenu.valueField)?.format, pivotOptions)}
           onHideFieldList={() => onHideFieldList?.()}
           onOpenPivotTableOptions={onOpenPivotTableOptions}
+          showDetailsEnabled={pivotOptions.enableShowDetails !== false}
         />
       )}
       {drillthrough && (

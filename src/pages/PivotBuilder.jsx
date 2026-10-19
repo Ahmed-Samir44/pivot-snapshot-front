@@ -6,6 +6,7 @@ import PivotToolbar from "../components/pivot/PivotToolbar";
 import PivotGrid from "../components/pivot/PivotGrid";
 import PivotTableOptionsDialog from "../components/pivot/PivotTableOptionsDialog";
 import { DEFAULT_PIVOT_OPTIONS } from "../utils/pivotOptions";
+import { onePerField } from "../utils/filterKinds";
 import PivotChart from "../components/pivot/PivotChart";
 import { chartUnavailableReason } from "../utils/chartLayout";
 import { queryPivot } from "../services/pivotApi";
@@ -120,6 +121,11 @@ const EMPTY_REQUEST = {
   // one field there are no groups, so nothing shows (the backend doesn't block Running Total/Rank
   // then either). A pivot saved with its own choice keeps it.
   subtotals: "Top",
+  // PivotTable Options > Totals & Filters > "Include filtered items in totals" (2026-10-19) — off is
+  // Excel's default. Part of `request` (unlike pivotOptions) since it changes the query's totals.
+  includeFilteredItemsInTotals: false,
+  // "Allow multiple filters per field" (same tab) — off is Excel's default: one filter per field.
+  allowMultipleFiltersPerField: false,
   // Real Excel's own per-field "Field Settings…" → Subtotals (2026-10-13) — overrides `subtotals`
   // above for ONE specific Rows field, falling back to it when a field has no entry here. Each entry
   // is `{ field, position }` (position: "Off"/"Bottom"/"Top", matching `subtotals`' own string
@@ -585,6 +591,8 @@ export default function PivotBuilder() {
         columnLevelSorts: request.columnLevelSorts,
         grandTotals: request.grandTotals,
         subtotals: request.subtotals,
+        includeFilteredItemsInTotals: Boolean(request.includeFilteredItemsInTotals),
+        allowMultipleFiltersPerField: Boolean(request.allowMultipleFiltersPerField),
         // Defensive, same reasoning as every other per-field array cleaned here — a field's own
         // override is meaningless (and the backend's own FieldSubtotals model doesn't expect it)
         // once that field has actually left Rows.
@@ -946,9 +954,18 @@ export default function PivotBuilder() {
               <PivotTableOptionsDialog
                 options={pivotOptions}
                 request={request}
-                onApply={(options, grandTotals) => {
+                onApply={(options, requestPatch) => {
                   setPivotOptions(options);
-                  if (grandTotals !== request.grandTotals) setRequest({ ...request, grandTotals });
+                  // Only touch `request` when a query-affecting setting really changed (it re-runs).
+                  // Turning "Allow multiple filters per field" off keeps one filter per field (the
+                  // backend would reject the rest).
+                  if (Object.entries(requestPatch).some(([key, value]) => Boolean(request[key]) !== Boolean(value) && typeof value === "boolean") || requestPatch.grandTotals !== request.grandTotals) {
+                    setRequest({
+                      ...request,
+                      ...requestPatch,
+                      filters: requestPatch.allowMultipleFiltersPerField ? request.filters : onePerField(request.filters),
+                    });
+                  }
                 }}
                 onClose={() => setShowPivotOptions(false)}
               />

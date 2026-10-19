@@ -10,6 +10,7 @@ const textClass =
 const TABS = [
   { key: "layout", label: "Layout & Format" },
   { key: "totals", label: "Totals & Filters" },
+  { key: "data", label: "Data" },
 ];
 
 function Section({ title, children }) {
@@ -42,6 +43,8 @@ export default function PivotTableOptionsDialog({ options, request, onApply, onC
   const [tab, setTab] = useState("layout");
   const [draft, setDraft] = useState({ ...DEFAULT_PIVOT_OPTIONS, ...options });
   const [grandTotals, setGrandTotals] = useState(request.grandTotals);
+  const [includeFilteredItems, setIncludeFilteredItems] = useState(Boolean(request.includeFilteredItemsInTotals));
+  const [allowMultipleFilters, setAllowMultipleFilters] = useState(Boolean(request.allowMultipleFiltersPerField));
   const set = (patch) => setDraft((prev) => ({ ...prev, ...patch }));
 
   // Excel's two checkboxes over this app's 4-way GrandTotals (the Design ribbon's dropdown).
@@ -51,7 +54,7 @@ export default function PivotTableOptionsDialog({ options, request, onApply, onC
     setGrandTotals(rows && columns ? "RowsAndColumns" : rows ? "RowsOnly" : columns ? "ColumnsOnly" : "Off");
 
   const apply = () => {
-    onApply({ ...draft, name: draft.name.trim() || DEFAULT_PIVOT_OPTIONS.name, filterFieldsPerColumn: Math.max(0, Math.floor(Number(draft.filterFieldsPerColumn) || 0)) }, grandTotals);
+    onApply({ ...draft, name: draft.name.trim() || DEFAULT_PIVOT_OPTIONS.name, filterFieldsPerColumn: Math.max(0, Math.floor(Number(draft.filterFieldsPerColumn) || 0)) }, { grandTotals, includeFilteredItemsInTotals: includeFilteredItems, allowMultipleFiltersPerField: allowMultipleFilters });
     onClose();
   };
 
@@ -110,10 +113,27 @@ export default function PivotTableOptionsDialog({ options, request, onApply, onC
               </Check>
             </Section>
           </div>
+        ) : tab === "totals" ? (
+          <div className="space-y-4">
+            <Section title="Grand Totals">
+              <Check label="Show grand totals for rows" checked={rowsOn} onChange={(v) => setTotals(v, columnsOn)} />
+              <Check label="Show grand totals for columns" checked={columnsOn} onChange={(v) => setTotals(rowsOn, v)} />
+            </Section>
+            {/* Excel's Filters section for a cube report. Off: a total is the sum of the visible
+                items; on: it counts a Rows/Columns field's filtered-out items too. */}
+            <Section title="Filters">
+              <Check label="Include filtered items in totals" checked={includeFilteredItems} onChange={setIncludeFilteredItems} />
+              {/* One filter of each kind (manual / label / value) per field at once, applied in
+                  that order — off, a new filter on a field replaces its old one. */}
+              <Check label="Allow multiple filters per field" checked={allowMultipleFilters} onChange={setAllowMultipleFilters} />
+            </Section>
+          </div>
         ) : (
-          <Section title="Grand Totals">
-            <Check label="Show grand totals for rows" checked={rowsOn} onChange={(v) => setTotals(v, columnsOn)} />
-            <Check label="Show grand totals for columns" checked={columnsOn} onChange={(v) => setTotals(rowsOn, v)} />
+          // Excel's Data tab. Its other options (save source data with the file, refresh on open,
+          // items to retain per field) are about a local data cache — this report always queries the
+          // live cube, so they don't apply.
+          <Section title="PivotTable Data">
+            <Check label="Enable show details" checked={draft.enableShowDetails !== false} onChange={(v) => set({ enableShowDetails: v })} />
           </Section>
         )}
 
