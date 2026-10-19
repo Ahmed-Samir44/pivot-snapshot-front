@@ -1,6 +1,6 @@
 import { formatNumber } from "./numberFormat";
 import { isErrorValue } from "./errorCells";
-import { isLabelMode } from "./filterModes";
+import { isDateMode, isLabelMode } from "./filterModes";
 
 // Excel's PivotTable Options > Layout & Format tab (2026-10-18, against a screenshot of the real
 // dialog). Display-only, kept beside `request` like fieldLayouts so a change never re-queries the
@@ -25,6 +25,12 @@ export const DEFAULT_PIVOT_OPTIONS = {
   // (the Analyze ribbon's "+/- Buttons" and "Field Headers" toggles are the same two settings).
   showExpandButtons: true,
   showFieldCaptions: true,
+  // Printing tab (2026-10-20) — applied to the exported sheet's page setup (print titles).
+  printTitles: false,
+  repeatRowLabelsOnPrint: true,
+  // Alt Text tab — the table's accessible name/description, and the exported file's Title/Subject.
+  altTextTitle: "",
+  altTextDescription: "",
 };
 
 export const ERROR_TOKEN = "#DIV/0!";
@@ -55,7 +61,7 @@ export function filterValueSummary(filter) {
     if (filter.includedMembers.length === 1) return filter.includedMembers[0] === "" ? "(blank)" : filter.includedMembers[0];
     return "(Multiple Items)";
   }
-  if (isLabelMode(filter.mode)) {
+  if (isLabelMode(filter.mode) || isDateMode(filter.mode)) {
     return filter.labelText ? "(Multiple Items)" : "(All)";
   }
   return "(Multiple Items)";

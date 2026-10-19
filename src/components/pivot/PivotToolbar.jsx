@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Sigma, Rows3, Calculator, ListPlus, LayoutGrid, CalendarRange, Settings2, SquarePlus, Heading, PanelRight } from "lucide-react";
+import { Sigma, Rows3, Rows4, Calculator, ListPlus, LayoutGrid, CalendarRange, Settings2, SquarePlus, Heading, PanelRight, TableProperties, Eraser, Files } from "lucide-react";
 import Popover from "../forms/Popover";
 import { CalculatedFieldDialog, CalculatedItemDialog } from "./FieldPicker";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
@@ -115,7 +115,9 @@ function RibbonGroup({ label, children }) {
 // pivotOptions/onPivotOptionsChange/onOpenPivotTableOptions: the PivotTable group (name + Options);
 // omitted, that group isn't drawn.
 // fieldListShown/onToggleFieldList: Excel's "Field List" toggle in the Show group; omitted, no button.
-export default function PivotToolbar({ request, onChange, measureOptions, dimensions = [], pivotOptions = null, onPivotOptionsChange = null, onOpenPivotTableOptions = null, fieldListShown = true, onToggleFieldList = null }) {
+// layout: { reportLayout, repeatItemLabels, fieldLayouts, onReportLayoutChange, onRepeatItemLabelsChange,
+// onFieldLayoutsChange } — the Design tab's Report Layout / Blank Rows (2026-10-20); omitted, not drawn.
+export default function PivotToolbar({ request, onChange, measureOptions, dimensions = [], pivotOptions = null, onPivotOptionsChange = null, onOpenPivotTableOptions = null, fieldListShown = true, onToggleFieldList = null, layout = null, actions = null }) {
   const [tab, setTab] = useState("analyze");
   // The name box's text while it's being typed (null = show the saved name); applied on blur/Enter.
   const [nameDraft, setNameDraft] = useState(null);
@@ -245,6 +247,89 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                 );
               }}
             </RibbonButton>
+            {layout && (
+              <>
+                {/* Excel's Design › Report Layout dropdown (2026-10-20): the three forms plus Repeat / Do
+                    Not Repeat Item Labels — the same settings as the layout box under the field list. */}
+                <RibbonButton icon={TableProperties} label="Report Layout" badge={0}>
+                  {(close) => (
+                    <div className="flex flex-col gap-1 text-sm">
+                      {[
+                        { value: "Compact", label: "Show in Compact Form" },
+                        { value: "Outline", label: "Show in Outline Form" },
+                        { value: "Tabular", label: "Show in Tabular Form" },
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => {
+                            layout.onReportLayoutChange(opt.value);
+                            close();
+                          }}
+                          className={`rounded-lg px-2 py-1.5 text-left ${layout.reportLayout === opt.value ? "bg-gold/20 font-semibold text-gold-strong" : "hover:bg-gold/10"}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                      <div className="my-1 border-t border-slate-100" />
+                      {[
+                        { value: true, label: "Repeat All Item Labels" },
+                        { value: false, label: "Do Not Repeat Item Labels" },
+                      ].map((opt) => (
+                        <button
+                          key={opt.label}
+                          type="button"
+                          // Excel greys these out in Compact Form (one column — nothing to repeat into).
+                          disabled={layout.reportLayout === "Compact"}
+                          onClick={() => {
+                            layout.onRepeatItemLabelsChange(opt.value);
+                            close();
+                          }}
+                          className={`rounded-lg px-2 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-40 ${
+                            layout.reportLayout !== "Compact" && layout.repeatItemLabels === opt.value ? "bg-gold/20 font-semibold text-gold-strong" : "hover:bg-gold/10"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </RibbonButton>
+                {/* Excel's Design › Blank Rows: a blank line after each item of every row field but the
+                    innermost (that's where Excel puts them) — the per-field "Insert blank line after
+                    each item" setting, set or cleared for all of them at once. */}
+                <RibbonButton icon={Rows4} label="Blank Rows" badge={layout.fieldLayouts.some((f) => f.insertBlankLine) ? 1 : 0}>
+                  {(close) => {
+                    const outerFields = request.rows.filter((f) => f !== MEASURES_PLACEHOLDER).slice(0, -1);
+                    const setBlankLines = (on) => {
+                      const byField = new Map(layout.fieldLayouts.map((f) => [f.field, f]));
+                      const touched = on ? outerFields : layout.fieldLayouts.map((f) => f.field);
+                      touched.forEach((field) => byField.set(field, { ...(byField.get(field) ?? { field }), insertBlankLine: on }));
+                      // A field left with nothing but defaults is dropped, like the field settings do.
+                      const next = [...byField.values()].filter((f) => f.customName || f.compact != null || f.repeatItemLabels != null || f.insertBlankLine);
+                      layout.onFieldLayoutsChange(next);
+                      close();
+                    };
+                    return (
+                      <div className="flex flex-col gap-1 text-sm">
+                        <button
+                          type="button"
+                          disabled={outerFields.length === 0}
+                          onClick={() => setBlankLines(true)}
+                          className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Insert Blank Line after Each Item
+                        </button>
+                        <button type="button" onClick={() => setBlankLines(false)} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+                          Remove Blank Line after Each Item
+                        </button>
+                        {outerFields.length === 0 && <p className="px-2 pt-1 text-xs text-muted">Needs 2+ Row fields.</p>}
+                      </div>
+                    );
+                  }}
+                </RibbonButton>
+              </>
+            )}
           </RibbonGroup>
         )}
 
@@ -277,6 +362,74 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
               <Settings2 className="h-5 w-5 text-ink/70" />
               <span className="text-center text-[11px] leading-tight">Options</span>
             </button>
+            {/* Excel's Options ▸ Show Report Filter Pages (2026-10-20): one copy of the pivot per item
+                of a Report Filter field — here, one sheet each in a downloaded workbook. */}
+            {actions && (
+              <RibbonButton icon={Files} label="Report Filter Pages" badge={0}>
+                {(close) => (
+                  <div className="w-60 space-y-2 text-sm">
+                    <p className="font-semibold text-ink">Show Report Filter Pages</p>
+                    {actions.reportFilterFields.length === 0 ? (
+                      <p className="text-xs text-muted">Add a field to the Filters area (and run the pivot) first.</p>
+                    ) : (
+                      <>
+                        <p className="text-xs text-muted">Show all report filter pages of:</p>
+                        <div className="flex flex-col gap-1">
+                          {actions.reportFilterFields.map((f) => (
+                            <button
+                              key={f.field}
+                              type="button"
+                              onClick={() => {
+                                actions.onShowReportFilterPages(f.field);
+                                close();
+                              }}
+                              className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+                            >
+                              {f.label}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {actions.filterPagesStatus && <p className="text-xs text-muted">{actions.filterPagesStatus}</p>}
+                  </div>
+                )}
+              </RibbonButton>
+            )}
+          </RibbonGroup>
+        )}
+
+        {/* Excel's Analyze › Actions › Clear (2026-10-20). (Select and Move PivotTable act on worksheet
+            cells — nothing to map them to on a web page.) */}
+        {tab === "analyze" && actions && (
+          <RibbonGroup label="Actions">
+            <RibbonButton icon={Eraser} label="Clear" badge={0}>
+              {(close) => (
+                <div className="flex flex-col gap-1 text-sm">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      actions.onClearAll();
+                      close();
+                    }}
+                    className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+                  >
+                    Clear All
+                  </button>
+                  <button
+                    type="button"
+                    disabled={request.filters.length === 0}
+                    onClick={() => {
+                      actions.onClearFilters();
+                      close();
+                    }}
+                    className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+              )}
+            </RibbonButton>
           </RibbonGroup>
         )}
 

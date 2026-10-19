@@ -186,6 +186,10 @@ export async function exportPivotToExcel({
   // filterFieldLabels[field].
   filters = [],
   filterFieldLabels = {},
+  // Show Report Filter Pages (2026-10-20): several pivots as sheets of ONE workbook — pass the
+  // workbook (and a sheet name) and it's only added to, not downloaded; see downloadWorkbook.
+  workbook: targetWorkbook = null,
+  sheetName = "Pivot",
 }) {
   const { rowHeaders, columnHeaders, cells } = result;
   // MAX across every row — a drilldown's rows have different depths.
@@ -219,8 +223,8 @@ export async function exportPivotToExcel({
   const filterSlots = filters.map((f, i) => filterAreaSlot(i, filters.length, pivotOptions));
   const filterAreaRows = filters.length > 0 ? Math.max(...filterSlots.map((s) => s.row)) + 2 : 0;
 
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Pivot", { views: [{ state: "frozen", xSplit: rowDepth, ySplit: filterAreaRows + columnDepth + (columnFieldLabels.length > 0 ? 1 : 0) }] });
+  const workbook = targetWorkbook ?? new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet(safeSheetName(workbook, sheetName), { views: [{ state: "frozen", xSplit: rowDepth, ySplit: filterAreaRows + columnDepth + (columnFieldLabels.length > 0 ? 1 : 0) }] });
 
   filters.forEach((filter, i) => {
     const { column, row } = filterSlots[i];
@@ -288,6 +292,19 @@ export async function exportPivotToExcel({
   // "Grand Total" captions, each label shown once (Excel doesn't merge label cells by default).
   const displayRows = buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts, repeatItemLabels, measuresLevel: rowsMeasuresIndex, outline: layout !== "Tabular", drilldown, drilldownSubtotals, drillSlot });
   const firstDataRow = currentRow;
+
+  // PivotTable Options › Printing (2026-10-20), applied where printing happens — the exported sheet:
+  // "Set print titles" repeats the column header rows at the top of every printed page, and "Repeat
+  // row labels on each printed page" the row label columns at the left of every page.
+  if (pivotOptions.printTitles && firstDataRow > 1 + filterAreaRows) {
+    sheet.pageSetup.printTitlesRow = `${1 + filterAreaRows}:${firstDataRow - 1}`;
+  }
+  if (pivotOptions.repeatRowLabelsOnPrint !== false && rowDepth > 0) {
+    sheet.pageSetup.printTitlesColumn = `A:${sheet.getColumn(rowDepth).letter}`;
+  }
+  // Alt Text: Excel stores it on the PivotTable; here it goes into the file's own Title/Subject.
+  if (pivotOptions.altTextTitle) workbook.title = pivotOptions.altTextTitle;
+  if (pivotOptions.altTextDescription) workbook.subject = pivotOptions.altTextDescription;
   // "Merge and center cells with labels": a real merged cell per item (computeLabelSpans). A merge
   // never crosses a blank line, so its rows are consecutive sheet rows.
   const labelSpans = pivotOptions.mergeLabels ? computeLabelSpans(displayRows, rowHeaderGroups, { drillSlot, drilldown }) : null;
@@ -392,6 +409,27 @@ export async function exportPivotToExcel({
     sheet.getColumn(col).width = Math.min(maxLen + 2, 40);
   }
 
+  if (targetWorkbook) return workbook;
+  await downloadWorkbook(workbook, filename);
+  return workbook;
+}
+
+// Excel sheet names: at most 31 characters, none of \ / ? * [ ] :, and unique in the workbook.
+function safeSheetName(workbook, name) {
+  const base = String(name ?? "").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 31) || "Sheet";
+  let candidate = base;
+  for (let n = 2; workbook.getWorksheet(candidate); n++) {
+    const suffix = ` (${n})`;
+    candidate = base.slice(0, 31 - suffix.length) + suffix;
+  }
+  return candidate;
+}
+
+export function createWorkbook() {
+  return new ExcelJS.Workbook();
+}
+
+export async function downloadWorkbook(workbook, filename) {
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);

@@ -10,7 +10,7 @@ import { FieldSortDialog, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel
 import { formatForColumn } from "../../utils/numberFormat";
 import { DEFAULT_PIVOT_OPTIONS, cellText, filterAreaSlot, filterValueSummary } from "../../utils/pivotOptions";
 import { filterKind, setFieldFilter, FILTER_KIND_LABELS } from "../../utils/filterKinds";
-import { LABEL_FILTERS, VALUE_FILTERS, isLabelMode, isRangeMode, isTop10Mode, top10Parts } from "../../utils/filterModes";
+import { LABEL_FILTERS, VALUE_FILTERS, DATE_FILTERS, isLabelMode, isDateMode, datePeriodLabel, isRangeMode, isTop10Mode, top10Parts } from "../../utils/filterModes";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
 import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys, collapseKey, buildColumnHeaderRows, computeLabelSpans } from "../../utils/pivotGridLayout";
@@ -26,6 +26,8 @@ function describeFilter(filter) {
   if (mode === "Exclude") return `all but ${filter.includedMembers.length}`;
   const name = (list) => list.find((f) => f.value === mode)?.label.replace("…", "").toLowerCase() ?? mode;
   if (isLabelMode(mode)) return `${name(LABEL_FILTERS)} "${filter.labelText}"${isRangeMode(mode) ? ` and "${filter.labelTextTo}"` : ""}`;
+  if (mode === "DatePeriod") return datePeriodLabel(filter.labelText).toLowerCase();
+  if (isDateMode(mode)) return `${name(DATE_FILTERS)} ${filter.labelText}${isRangeMode(mode) ? ` and ${filter.labelTextTo}` : ""}`;
   if (isTop10Mode(mode)) {
     const { direction, unit } = top10Parts(mode);
     return `${direction} ${unit === "Items" ? filter.n : filter.value}${unit === "Percent" ? "%" : unit === "Sum" ? " (sum)" : ""} by ${filter.byMeasureField}`;
@@ -143,7 +145,7 @@ function HeaderCell({ children, muted = false, isTotal = false, alignLeft = fals
 // fieldChoices ([{ field, label, level }], 2026-10-18): Excel's Compact-form "Row Labels" header —
 // one arrow for several fields, with a "Select field:" box on top of its menu choosing which field
 // every item below applies to (found missing by the full-app test). Replaces `field`/`level`.
-function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, muted = false, isTotal = false, level: fixedLevel = 0, sortOnly = false, fieldChoices = null }) {
+function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, muted = false, isTotal = false, level: fixedLevel = 0, sortOnly = false, fieldChoices = null, fieldCollapse = null }) {
   // "More Sort Options…"/"Field Settings…" open the SAME panel in place of the plain shortcut
   // list, same back-and-forth pattern as Excel's own header dropdown (its "More Sort Options..."
   // item opens a bigger dialog from the same arrow) — relocated here from FieldPicker's toolbar
@@ -392,6 +394,35 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
             <button type="button" onClick={() => setPanel("filter")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
               Filter…
             </button>
+            {/* Excel's Expand/Collapse Entire Field (2026-10-20) — only for a field whose items have
+                a subtotal row to collapse into (the outer Rows fields). */}
+            {fieldCollapse?.canCollapse(level) && (
+              <>
+                <div className="my-1 border-t border-slate-100" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    fieldCollapse.expand(level);
+                    close();
+                  }}
+                  disabled={!fieldCollapse.isCollapsed(level)}
+                  className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Expand Entire Field
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    fieldCollapse.collapse(level);
+                    close();
+                  }}
+                  className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+                >
+                  Collapse Entire Field
+                </button>
+                <div className="my-1 border-t border-slate-100" />
+              </>
+            )}
             {/* Excel's Group Selection / Ungroup (2026-10-20) — see GroupItemsPanel. */}
             <button type="button" onClick={() => setPanel("group")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
               {hasGroups ? "Groups…" : "Group Items…"}
@@ -943,6 +974,14 @@ export default function PivotGrid({
   // collapse would be a second, conflicting toggle on the same rows.
   const collapsible = rowsHierarchyDrilldown ? new Set() : collapsibleKeys(allDisplayRows);
   const displayRows = applyCollapse(allDisplayRows, new Set([...collapsed].filter((k) => collapsible.has(k))), rowHeaderGroups);
+  // Excel's "Expand/Collapse Entire Field" (2026-10-20): every item of one Rows level at once.
+  const levelPrefix = (level) => `${level}\u0002`;
+  const fieldCollapse = {
+    canCollapse: (level) => [...collapsible].some((k) => k.startsWith(levelPrefix(level))),
+    isCollapsed: (level) => [...collapsed].some((k) => k.startsWith(levelPrefix(level))),
+    collapse: (level) => setCollapsed((prev) => new Set([...prev, ...[...collapsible].filter((k) => k.startsWith(levelPrefix(level)))])),
+    expand: (level) => setCollapsed((prev) => new Set([...prev].filter((k) => !k.startsWith(levelPrefix(level))))),
+  };
   // PivotTable Options > Display (2026-10-19): "Show expand/collapse buttons" hides every +/- (an
   // outer item's, a drilldown member's, a Columns drilldown header's); "Display field captions and
   // filter drop downs" leaves the field-name header cells empty — no caption, no arrow — like Excel.
@@ -1172,7 +1211,13 @@ export default function PivotGrid({
         tabIndex={0}
         onKeyDown={handleGridKeyDown}
       >
-        <table className="border-collapse text-sm">
+        <table
+          className="border-collapse text-sm"
+          // PivotTable Options › Alt Text: the table's accessible name and description.
+          aria-label={pivotOptions.altTextTitle || pivotOptions.name || undefined}
+          aria-description={pivotOptions.altTextDescription || undefined}
+          title={pivotOptions.altTextTitle || undefined}
+        >
           {/* Sticky only in the standalone, boundedHeight case — it relies on gridRef's OWN
               dedicated overflow-auto box right above being the nearest scrolling ancestor (see its
               own WHY comment). Inside Modal.jsx's preview (boundedHeight=false), the scroll
@@ -1254,6 +1299,7 @@ export default function PivotGrid({
                             muted
                             // A combined drilldown slot's own column: sort only (Drilldown v3).
                             sortOnly={group.start === combinedDrillSlot}
+                            fieldCollapse={showExpandButtons ? fieldCollapse : null}
                           />
                         </th>
                       ) : (
@@ -1290,6 +1336,7 @@ export default function PivotGrid({
                               fieldChoices={Array.from({ length: group.end - group.start + 1 }, (_, i) => group.start + i)
                                 .filter((l) => rows[l] && rows[l] !== MEASURES_PLACEHOLDER && l !== combinedDrillSlot)
                                 .map((l) => ({ field: rows[l], level: l, label: rowFieldLayouts[l]?.customName || rowFieldLabels[l] || rows[l] }))}
+                              fieldCollapse={showExpandButtons ? fieldCollapse : null}
                             />
                           )}
                         </th>

@@ -11,7 +11,9 @@ const TABS = [
   { key: "layout", label: "Layout & Format" },
   { key: "totals", label: "Totals & Filters" },
   { key: "display", label: "Display" },
+  { key: "printing", label: "Printing" },
   { key: "data", label: "Data" },
+  { key: "altText", label: "Alt Text" },
 ];
 
 function Section({ title, children }) {
@@ -143,6 +145,28 @@ export default function PivotTableOptionsDialog({ options, request, onApply, onC
               <Check label="Show items with no data on rows" checked={noDataAxes.includes("Rows")} onChange={(v) => toggleNoData("Rows", v)} />
               <Check label="Show items with no data on columns" checked={noDataAxes.includes("Columns")} onChange={(v) => toggleNoData("Columns", v)} />
             </Section>
+          </div>
+        ) : tab === "printing" ? (
+          // Excel's Printing tab (2026-10-20) — applied to the Excel export's page setup, since that's
+          // what gets printed. ("Print expand/collapse buttons" has nothing to act on: the export has
+          // no buttons.)
+          <Section title="Print">
+            <Check label="Repeat row labels on each printed page" checked={draft.repeatRowLabelsOnPrint !== false} onChange={(v) => set({ repeatRowLabelsOnPrint: v })} />
+            <Check label="Set print titles" checked={Boolean(draft.printTitles)} onChange={(v) => set({ printTitles: v })} />
+            <p className="text-xs text-muted">Applies to Export to Excel: the row label columns and the header rows repeat on every printed page.</p>
+          </Section>
+        ) : tab === "altText" ? (
+          // Excel's Alt Text tab: a title and description for screen readers — the table's
+          // accessible name here, and the exported file's Title/Subject.
+          <div className="space-y-3">
+            <label className="flex flex-col gap-1 text-sm text-ink">
+              Title
+              <input type="text" className={textClass} value={draft.altTextTitle ?? ""} onChange={(e) => set({ altTextTitle: e.target.value })} />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-ink">
+              Description
+              <textarea rows={4} className={textClass} value={draft.altTextDescription ?? ""} onChange={(e) => set({ altTextDescription: e.target.value })} />
+            </label>
           </div>
         ) : (
           // Excel's Data tab. Its other options (save source data with the file, refresh on open,

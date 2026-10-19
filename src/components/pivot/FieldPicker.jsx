@@ -7,7 +7,7 @@ import MemberCheckboxList from "../forms/MemberCheckboxList";
 import Popover from "../forms/Popover";
 import { getMembers } from "../../services/cubeMetaApi";
 import { formatNumber } from "../../utils/numberFormat";
-import { LABEL_FILTERS, VALUE_FILTERS, TOP_10_MODES, TOP_10_MODE_SET, isLabelMode, isTop10Mode, isRangeMode, isValueCompareMode, top10Parts } from "../../utils/filterModes";
+import { LABEL_FILTERS, VALUE_FILTERS, DATE_FILTERS, DATE_PERIODS, TOP_10_MODES, TOP_10_MODE_SET, isLabelMode, isDateMode, isTop10Mode, isRangeMode, isValueCompareMode, top10Parts } from "../../utils/filterModes";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import {
   setFieldDragPayload,
@@ -658,8 +658,19 @@ const MORE_FILTER_GROUPS = [
   { label: "Label Filters", options: LABEL_FILTERS },
   { label: "Value Filters", options: VALUE_FILTERS },
 ];
+// A date field gets "Date Filters" in place of "Label Filters", like Excel (2026-10-20) — the exact
+// ones, then every period as "DatePeriod:<key>".
+const DATE_FILTER_GROUPS = [
+  { label: "Date Filters", options: [...DATE_FILTERS, ...DATE_PERIODS.map((p) => ({ value: `DatePeriod:${p.key}`, label: p.label }))] },
+  { label: "Value Filters", options: VALUE_FILTERS },
+];
 // Every Top 10 variant (Percent/Sum, Bottom…) counts too, though the list shows one "Top 10…".
-const MORE_FILTER_MODES = new Set([...MORE_FILTER_GROUPS.flatMap((g) => g.options.map((o) => o.value)), ...TOP_10_MODE_SET]);
+const MORE_FILTER_MODES = new Set([...MORE_FILTER_GROUPS.flatMap((g) => g.options.map((o) => o.value)), ...TOP_10_MODE_SET, ...DATE_FILTERS.map((f) => f.value), "DatePeriod"]);
+// The cube's date members read like "1/31/2025" — how FilterRow tells a date field from its items.
+const looksLikeDates = (members) => {
+  const sample = members.filter(Boolean).slice(0, 8);
+  return sample.length > 0 && sample.every((m) => /^\d{1,2}\/\d{1,2}\/\d{4}\b/.test(m));
+};
 
 // One filter's member list is only fetched once its field is chosen (and only needed for
 // Mode "Members"/"Exclude" — the rule-based modes below never show a member list, they describe a
@@ -722,6 +733,13 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
   const [memberSearch, setMemberSearch] = useState("");
   const mode = draft.mode ?? "Members";
   const isMoreFilterMode = MORE_FILTER_MODES.has(mode);
+  // Date field: already date-filtered, or its items (once loaded) are dates. Remembered, since the
+  // item list empties as soon as a rule-based mode is picked.
+  const [isDateField, setIsDateField] = useState(() => isDateMode(filter.mode));
+  useEffect(() => {
+    if (!isDateField && looksLikeDates(memberOptions)) setIsDateField(true);
+  }, [memberOptions, isDateField]);
+  const filterGroups = isDateField ? DATE_FILTER_GROUPS : MORE_FILTER_GROUPS;
   // Real Excel's Row/Column field dropdown (2026-10-14): an UNFILTERED field opens with every item
   // checked, and OK with everything checked means "no filter". Here that's an empty Members list,
   // shown as all-checked. noneChecked distinguishes "the user unchecked (Select All)" (nothing
@@ -776,6 +794,11 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
   const selectedField = dimensionOptions.find((opt) => opt.value === draft.field) ?? null;
 
   const handleModeChange = (nextMode) => {
+    // A date period option carries its key: "DatePeriod:ThisMonth".
+    if (nextMode.startsWith("DatePeriod:")) {
+      setDraft({ field: draft.field, mode: "DatePeriod", includedMembers: [], labelText: nextMode.slice("DatePeriod:".length), n: 10, byMeasureField: null, value: null, valueTo: null });
+      return;
+    }
     setDraft({ field: draft.field, mode: nextMode, includedMembers: [], labelText: "", n: 10, byMeasureField: null, value: null, valueTo: null });
   };
 
@@ -843,11 +866,11 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
           {showAdvancedFilters && (
             <select
               className={`${nativeSelectClass} w-full`}
-              value={isMoreFilterMode ? (isTop10Mode(mode) ? "TopN" : mode) : ""}
+              value={isMoreFilterMode ? (isTop10Mode(mode) ? "TopN" : mode === "DatePeriod" ? `DatePeriod:${draft.labelText}` : mode) : ""}
               onChange={(e) => (e.target.value ? handleModeChange(e.target.value) : handleModeChange("Members"))}
             >
               <option value="">{isMoreFilterMode ? "Back to member list" : "More Filters…"}</option>
-              {MORE_FILTER_GROUPS.map((group) => (
+              {filterGroups.map((group) => (
                 <optgroup key={group.label} label={group.label}>
                   {group.options.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -950,6 +973,28 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
               />
               Include new items in manual filter
             </label>
+          )}
+
+          {/* Date filters: one date, or two for Between (a period needs none — it's in the list). */}
+          {isDateMode(mode) && mode !== "DatePeriod" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="date"
+                className="input-field min-w-0 flex-1"
+                value={draft.labelText ?? ""}
+                onChange={(e) => setDraft((prev) => ({ ...prev, labelText: e.target.value }))}
+                aria-label={isRangeMode(mode) ? "From date" : "Date"}
+              />
+              {isRangeMode(mode) && (
+                <input
+                  type="date"
+                  className="input-field min-w-0 flex-1"
+                  value={draft.labelTextTo ?? ""}
+                  onChange={(e) => setDraft((prev) => ({ ...prev, labelTextTo: e.target.value }))}
+                  aria-label="To date"
+                />
+              )}
+            </div>
           )}
 
           {/* Label filters (2026-10-20: every one Excel has): one text, or two for Between/Not Between. */}

@@ -12,7 +12,7 @@ import { formatDimensionName } from "../utils/cubeMeta";
 import PivotChart from "../components/pivot/PivotChart";
 import { chartUnavailableReason } from "../utils/chartLayout";
 import { queryPivot } from "../services/pivotApi";
-import { getTables, getDimensions, getDimensionsForTable, getMeasures } from "../services/cubeMetaApi";
+import { getTables, getDimensions, getDimensionsForTable, getMeasures, getMembers } from "../services/cubeMetaApi";
 import { saveSnapshot, listDefinitions } from "../services/snapshotApi";
 import { MEASURES_PLACEHOLDER, normalizeMeasuresPlacement, hideMeasuresLabelIfSingleValue } from "../utils/measuresPlacement";
 import { readFieldDragPayload, FIELD_DRAG_MIME, removeFieldEverywhere } from "../utils/dragDrop";
@@ -862,42 +862,94 @@ export default function PivotBuilder() {
       // ~1.35MB when statically imported, 2026-09-23) — loading it only when someone actually
       // clicks Export keeps it out of everyone else's initial page load.
       const { exportPivotToExcel } = await import("../utils/exportExcel");
-      await exportPivotToExcel({
-        result,
-        rows: lastQuery.rows,
-        columns: lastQuery.columns,
-        rowFieldLabels: fieldLabels(lastQuery.rows, dimensions),
-        columnFieldLabels: fieldLabels(hideMeasuresLabelIfSingleValue(lastQuery.columns, lastQuery.values.length), dimensions),
-        valueFields: displayValues,
-        filename: snapshotName.trim() || "Pivot",
-        // Same layout as the live grid, so the export draws the same rows.
-        layout: reportLayout,
-        repeatItemLabels,
-        fieldLayouts,
-        // PivotTable Options (empty/error text, merged labels) and the Report Filter area above the
-        // table. Every applied filter is listed, slicer/timeline ones too — the file has no slicer
-        // widget to show them (same as the saved snapshot).
-        pivotOptions,
-        filters: lastQuery.filters,
-        filterFieldLabels: Object.fromEntries(lastQuery.filters.map((f) => [f.field, fieldLabels([f.field], dimensions)[0]])),
-        // A drilldown alone keeps its single ragged column; combined with other Rows fields
-        // (Drilldown v3) it's a normal field slot, indented by member depth.
-        ...(() => {
-          const d = lastQuery.rowsHierarchyDrilldown;
-          if (!d) return {};
-          const others = lastQuery.rows.filter((f) => f !== MEASURES_PLACEHOLDER && f !== d.topLevelField);
-          return others.length === 0 ? { drilldown: true } : { drillSlot: lastQuery.rows.indexOf(d.topLevelField) };
-        })(),
-        drilldownSubtotals: lastQuery.subtotals,
-        // Columns drilldown (C4): header rows from buildColumnHeaderRows, same as the grid.
-        columnsDrillSlot: lastQuery.columnsHierarchyDrilldown ? lastQuery.columns.indexOf(lastQuery.columnsHierarchyDrilldown.topLevelField) : -1,
-      });
+      await exportPivotToExcel({ ...exportOptionsFor(lastQuery, result), filename: snapshotName.trim() || "Pivot" });
     } catch (err) {
       setExportError(err.message);
     } finally {
       setExporting(false);
     }
   };
+
+  // What exportPivotToExcel needs to draw one query's result like the live grid — shared by Export
+  // and Show Report Filter Pages.
+  const exportOptionsFor = (query, queryResult) => ({
+    result: queryResult,
+    rows: query.rows,
+    columns: query.columns,
+    rowFieldLabels: fieldLabels(query.rows, dimensions),
+    columnFieldLabels: fieldLabels(hideMeasuresLabelIfSingleValue(query.columns, query.values.length), dimensions),
+    valueFields: displayValues,
+    // Same layout as the live grid, so the export draws the same rows.
+    layout: reportLayout,
+    repeatItemLabels,
+    fieldLayouts,
+    // PivotTable Options (empty/error text, merged labels) and the Report Filter area above the
+    // table. Every applied filter is listed, slicer/timeline ones too — the file has no slicer
+    // widget to show them (same as the saved snapshot).
+    pivotOptions,
+    filters: query.filters,
+    filterFieldLabels: Object.fromEntries(query.filters.map((f) => [f.field, fieldLabels([f.field], dimensions)[0]])),
+    // A drilldown alone keeps its single ragged column; combined with other Rows fields
+    // (Drilldown v3) it's a normal field slot, indented by member depth.
+    ...(() => {
+      const d = query.rowsHierarchyDrilldown;
+      if (!d) return {};
+      const others = query.rows.filter((f) => f !== MEASURES_PLACEHOLDER && f !== d.topLevelField);
+      return others.length === 0 ? { drilldown: true } : { drillSlot: query.rows.indexOf(d.topLevelField) };
+    })(),
+    drilldownSubtotals: query.subtotals,
+    // Columns drilldown (C4): header rows from buildColumnHeaderRows, same as the grid.
+    columnsDrillSlot: query.columnsHierarchyDrilldown ? query.columns.indexOf(query.columnsHierarchyDrilldown.topLevelField) : -1,
+  });
+
+  // Excel's "Show Report Filter Pages" (2026-10-20): one copy of the pivot per item of a Report Filter
+  // field, each filtered to that item. Excel makes worksheets — here, sheets of one downloaded
+  // workbook. One query per item, one at a time (the shared cube), capped at MAX_FILTER_PAGES.
+  const MAX_FILTER_PAGES = 50;
+  const [filterPagesStatus, setFilterPagesStatus] = useState(null);
+  const handleShowReportFilterPages = async (field) => {
+    if (!lastQuery) return;
+    setExportError(null);
+    try {
+      const existing = lastQuery.filters.find((f) => f.field === field);
+      let members = (await getMembers(field)).filter((m) => m !== "");
+      // A field already narrowed to some items: one page per CHOSEN item, like Excel.
+      if (existing?.mode === "Members" && existing.includedMembers.length > 0) members = members.filter((m) => existing.includedMembers.includes(m));
+      const truncated = members.length > MAX_FILTER_PAGES;
+      members = members.slice(0, MAX_FILTER_PAGES);
+      const { exportPivotToExcel, createWorkbook, downloadWorkbook } = await import("../utils/exportExcel");
+      const workbook = createWorkbook();
+      let pages = 0;
+      for (const [i, member] of members.entries()) {
+        setFilterPagesStatus(`Building page ${i + 1} of ${members.length}…`);
+        const pageQuery = {
+          ...lastQuery,
+          filters: [...lastQuery.filters.filter((f) => f.field !== field), { field, mode: "Members", includedMembers: [member] }],
+        };
+        const pageResult = await queryPivot(pageQuery);
+        if (pageResult.rowHeaders.length === 0) continue; // no data for this item — no page, like Excel
+        await exportPivotToExcel({ ...exportOptionsFor(pageQuery, pageResult), workbook, sheetName: member });
+        pages++;
+      }
+      if (pages === 0) throw new Error("None of the items has data.");
+      await downloadWorkbook(workbook, `${snapshotName.trim() || "Pivot"} - ${fieldLabels([field], dimensions)[0]}`);
+      setFilterPagesStatus(`${pages} page${pages === 1 ? "" : "s"} exported${truncated ? ` (first ${MAX_FILTER_PAGES} items only)` : ""}.`);
+    } catch (err) {
+      setFilterPagesStatus(null);
+      setExportError(err.message);
+    }
+  };
+
+  // Excel's Analyze › Clear: Clear All empties the pivot (the same as Reset); Clear Filters drops
+  // every filter, leaving a slicer/timeline field with an "(All)" entry so the widget stays.
+  const handleClearFilters = () =>
+    setRequest((prev) => ({
+      ...prev,
+      filters: prev.filters
+        .filter((f) => prev.slicerFields.includes(f.field) || prev.timelineFields.includes(f.field))
+        .filter((f, i, all) => all.findIndex((x) => x.field === f.field) === i)
+        .map((f) => ({ field: f.field, mode: "Members", includedMembers: [] })),
+    }));
 
   return (
     // onDragOver/onDrop here, outside AppShell entirely: catches a field dropped ANYWHERE on the
@@ -966,6 +1018,27 @@ export default function PivotBuilder() {
               onOpenPivotTableOptions={() => setShowPivotOptions(true)}
               fieldListShown={showFieldList}
               onToggleFieldList={() => setShowFieldList((v) => !v)}
+              layout={{
+                reportLayout,
+                repeatItemLabels,
+                fieldLayouts,
+                onReportLayoutChange: setReportLayout,
+                onRepeatItemLabelsChange: setRepeatItemLabels,
+                onFieldLayoutsChange: setFieldLayouts,
+              }}
+              actions={{
+                onClearAll: handleReset,
+                onClearFilters: handleClearFilters,
+                // Report Filter fields = the Filters area's fields (one still at "(All)" too — it isn't
+                // in the query, but it's exactly the field Excel offers), not on Rows/Columns.
+                reportFilterFields: lastQuery
+                  ? [...new Set(request.filters.map((f) => f.field).filter(Boolean))]
+                      .filter((f) => !request.rows.includes(f) && !request.columns.includes(f))
+                      .map((field) => ({ field, label: fieldLabels([field], dimensions)[0] }))
+                  : [],
+                onShowReportFilterPages: handleShowReportFilterPages,
+                filterPagesStatus,
+              }}
             />
             {showPivotOptions && (
               <PivotTableOptionsDialog

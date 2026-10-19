@@ -32,6 +32,44 @@ export const VALUE_FILTERS = [
   { value: "TopN", label: "Top 10…" },
 ];
 
+// Excel's "Date Filters" (2026-10-20) — a date field's menu shows these in place of Label Filters.
+// The exact ones take "yyyy-MM-dd" dates (labelText, labelTextTo for Between); a period is
+// DatePeriod with its key in labelText, resolved by the backend when the query runs
+// (DateFilterPeriods), so a saved "This Month" stays this month. In the "More Filters…" list a period
+// is the option value "DatePeriod:<key>".
+export const DATE_FILTERS = [
+  { value: "DateEquals", label: "Equals…" },
+  { value: "DateBefore", label: "Before…" },
+  { value: "DateAfter", label: "After…" },
+  { value: "DateBetween", label: "Between…" },
+];
+export const DATE_PERIODS = [
+  { key: "Tomorrow", label: "Tomorrow" },
+  { key: "Today", label: "Today" },
+  { key: "Yesterday", label: "Yesterday" },
+  { key: "NextWeek", label: "Next Week" },
+  { key: "ThisWeek", label: "This Week" },
+  { key: "LastWeek", label: "Last Week" },
+  { key: "NextMonth", label: "Next Month" },
+  { key: "ThisMonth", label: "This Month" },
+  { key: "LastMonth", label: "Last Month" },
+  { key: "NextQuarter", label: "Next Quarter" },
+  { key: "ThisQuarter", label: "This Quarter" },
+  { key: "LastQuarter", label: "Last Quarter" },
+  { key: "NextYear", label: "Next Year" },
+  { key: "ThisYear", label: "This Year" },
+  { key: "LastYear", label: "Last Year" },
+  { key: "YearToDate", label: "Year to Date" },
+  ...["Q1", "Q2", "Q3", "Q4"].map((q) => ({ key: q, label: `All dates in ${q.replace("Q", "Quarter ")}` })),
+  ...["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((m, i) => ({
+    key: `M${i + 1}`,
+    label: `All dates in ${m}`,
+  })),
+];
+const DATE_MODE_SET = new Set([...DATE_FILTERS.map((f) => f.value), "DatePeriod"]);
+export const isDateMode = (mode) => DATE_MODE_SET.has(mode);
+export const datePeriodLabel = (key) => DATE_PERIODS.find((p) => p.key === key)?.label ?? key;
+
 // Excel's Top 10 dialog: [Top|Bottom] [n] [Items|Percent|Sum].
 export const TOP_10_MODES = {
   Top: { Items: "TopN", Percent: "TopPercent", Sum: "TopSum" },
@@ -43,7 +81,7 @@ const LABEL_MODE_SET = new Set(LABEL_FILTERS.map((f) => f.value));
 
 export const isLabelMode = (mode) => LABEL_MODE_SET.has(mode);
 export const isTop10Mode = (mode) => TOP_10_MODE_SET.has(mode);
-export const isRangeMode = (mode) => mode === "Between" || mode === "NotBetween" || mode === "LabelBetween" || mode === "LabelNotBetween";
+export const isRangeMode = (mode) => mode === "Between" || mode === "NotBetween" || mode === "LabelBetween" || mode === "LabelNotBetween" || mode === "DateBetween";
 // A value filter that compares the measure with a number (not Top 10).
 export const isValueCompareMode = (mode) => VALUE_FILTERS.some((f) => f.value === mode) && !isTop10Mode(mode);
 
@@ -58,7 +96,7 @@ export function top10Parts(mode) {
 // Whether a rule-based filter has everything its mode needs (mirrors MdxPivotQueryBuilder.ValidateFilterShape).
 export function isRuleFilterComplete(filter) {
   const mode = filter.mode;
-  if (isLabelMode(mode)) return Boolean(filter.labelText) && (!isRangeMode(mode) || Boolean(filter.labelTextTo));
+  if (isLabelMode(mode) || isDateMode(mode)) return Boolean(filter.labelText) && (!isRangeMode(mode) || Boolean(filter.labelTextTo));
   if (mode === "TopN" || mode === "BottomN") return Boolean(filter.n > 0 && filter.byMeasureField);
   if (isTop10Mode(mode)) return filter.value != null && Boolean(filter.byMeasureField);
   if (isValueCompareMode(mode)) return filter.value != null && (!isRangeMode(mode) || filter.valueTo != null) && Boolean(filter.byMeasureField);
