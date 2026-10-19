@@ -17,6 +17,10 @@ import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys,
 import { MEASURES_PLACEHOLDER, measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "../../utils/measuresPlacement";
 import { applyReportSubtotals } from "../../utils/subtotals";
 import { drillthroughPivot } from "../../services/pivotApi";
+import { removeFieldEverywhere } from "../../utils/dragDrop";
+
+// The drag payload type for moving a row item inside the grid (Excel's drag-an-item-to-reorder).
+const GRID_ITEM_DRAG_MIME = "application/x-pivot-grid-item";
 
 // A one-line description of a filter for the field menu's list of active filters, from the same
 // mode names the filter editor uses (utils/filterModes.js).
@@ -481,7 +485,106 @@ function cellHasDetails(request, valueField, row, column) {
 
 // showDetailsEnabled: PivotTable Options > Data > "Enable show details" — off, Show Details stays
 // in the menu but grayed out, like Excel.
-function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, measureIndex, sortAxis, row, column, onShowDetails, onRefresh, displayValue, onHideFieldList, onOpenPivotTableOptions, showDetailsEnabled = true }) {
+// Excel's right-click menu on a ROW LABEL (2026-10-20): Copy, Sort, Filter (Keep Only / Hide /
+// Clear Filter From), Expand/Collapse (the item, the entire field), Move (Up / Down / To Beginning /
+// To End — a manual order, LevelSort.CustomOrder), Remove the field. Flat sections instead of
+// Excel's flyout submenus.
+function MenuSection({ children }) {
+  return <p className="px-2 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">{children}</p>;
+}
+
+function RowLabelContextMenu({ x, y, level, label, field, fieldLabel, request, onChange, onClose, fieldCollapse, onToggleItem, itemCollapsed, onMove }) {
+  const allowMultipleFilters = Boolean(request.allowMultipleFiltersPerField);
+  const manual = request.filters.find((f) => f.field === field && filterKind(f) === 0);
+  const hasFilter = request.filters.some((f) => f.field === field);
+  const run = (action) => () => {
+    action();
+    onClose();
+  };
+  const setSort = (direction) =>
+    onChange({
+      ...request,
+      sort: request.sort?.axis === "Rows" ? null : request.sort,
+      rowLevelSorts: [...request.rowLevelSorts.filter((s) => s.level !== level), { level, direction, byMeasureField: null }],
+    });
+  const keepOnly = () => onChange({ ...request, filters: setFieldFilter(request.filters, { field, mode: "Members", includedMembers: [label] }, allowMultipleFilters) });
+  // Hide: out of the manual selection if there is one, else excluded.
+  const hide = () => {
+    const next =
+      manual?.mode === "Members" && manual.includedMembers.length > 0
+        ? { ...manual, includedMembers: manual.includedMembers.filter((m) => m !== label) }
+        : { field, mode: "Exclude", includedMembers: [...new Set([...(manual?.mode === "Exclude" ? manual.includedMembers : []), label])] };
+    onChange({ ...request, filters: setFieldFilter(request.filters, next, allowMultipleFilters) });
+  };
+  const itemClass = "rounded-lg px-2 py-1.5 text-left hover:bg-gold/10 disabled:cursor-not-allowed disabled:opacity-40";
+  const short = label.length > 24 ? `${label.slice(0, 23)}…` : label;
+
+  return (
+    <ContextMenu x={x} y={y} onClose={onClose}>
+      <div className="flex flex-col">
+        <button type="button" className={itemClass} onClick={run(() => navigator.clipboard?.writeText(label).catch(() => {}))}>
+          Copy
+        </button>
+        <MenuSection>Sort</MenuSection>
+        <button type="button" className={itemClass} onClick={run(() => setSort("Ascending"))}>
+          Sort A → Z
+        </button>
+        <button type="button" className={itemClass} onClick={run(() => setSort("Descending"))}>
+          Sort Z → A
+        </button>
+        <MenuSection>Filter</MenuSection>
+        <button type="button" className={itemClass} onClick={run(keepOnly)}>
+          Keep Only Selected Items
+        </button>
+        <button type="button" className={itemClass} onClick={run(hide)}>
+          Hide Selected Items
+        </button>
+        <button type="button" className={itemClass} disabled={!hasFilter} onClick={run(() => onChange({ ...request, filters: request.filters.filter((f) => f.field !== field) }))}>
+          Clear Filter From &quot;{fieldLabel}&quot;
+        </button>
+        {(onToggleItem || fieldCollapse?.canCollapse(level)) && (
+          <>
+            <MenuSection>Expand/Collapse</MenuSection>
+            {onToggleItem && (
+              <button type="button" className={itemClass} onClick={run(onToggleItem)}>
+                {itemCollapsed ? "Expand" : "Collapse"}
+              </button>
+            )}
+            {fieldCollapse?.canCollapse(level) && (
+              <>
+                <button type="button" className={itemClass} disabled={!fieldCollapse.isCollapsed(level)} onClick={run(() => fieldCollapse.expand(level))}>
+                  Expand Entire Field
+                </button>
+                <button type="button" className={itemClass} onClick={run(() => fieldCollapse.collapse(level))}>
+                  Collapse Entire Field
+                </button>
+              </>
+            )}
+          </>
+        )}
+        <MenuSection>Move</MenuSection>
+        <button type="button" className={itemClass} onClick={run(() => onMove("beginning"))}>
+          Move &quot;{short}&quot; to Beginning
+        </button>
+        <button type="button" className={itemClass} onClick={run(() => onMove("up"))}>
+          Move &quot;{short}&quot; Up
+        </button>
+        <button type="button" className={itemClass} onClick={run(() => onMove("down"))}>
+          Move &quot;{short}&quot; Down
+        </button>
+        <button type="button" className={itemClass} onClick={run(() => onMove("end"))}>
+          Move &quot;{short}&quot; to End
+        </button>
+        <div className="my-1 border-t border-slate-100" />
+        <button type="button" className={itemClass} onClick={run(() => onChange(removeFieldEverywhere(request, field)))}>
+          Remove &quot;{fieldLabel}&quot;
+        </button>
+      </div>
+    </ContextMenu>
+  );
+}
+
+function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, measureIndex, sortAxis, row, column, onShowDetails, onRefresh, displayValue, onHideFieldList, onOpenPivotTableOptions, showDetailsEnabled = true, onCopyRange = null }) {
   const [panel, setPanel] = useState("root");
   const format = valueField.format ?? DEFAULT_FORMAT;
   const isDimensionField = valueField.field.startsWith("[");
@@ -508,6 +611,11 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
             type="button"
             onClick={async () => {
               onClose();
+              // A multi-cell selection is copied whole (tab-separated, like Excel).
+              if (onCopyRange) {
+                onCopyRange();
+                return;
+              }
               try {
                 await navigator.clipboard.writeText(displayValue);
               } catch {
@@ -799,6 +907,8 @@ export default function PivotGrid({
   // click but the modal needs to stay open through the fetch and after) — see ValueCellContextMenu
   // above and the contextmenu handler / modal render below.
   const [cellMenu, setCellMenu] = useState(null);
+  // The row-label right-click menu: { x, y, level, label, path, field, fieldLabel, collapseKey }.
+  const [labelMenu, setLabelMenu] = useState(null);
   const [drillthrough, setDrillthrough] = useState(null);
   // A short message shown above the grid (e.g. double-clicking a cell with Show Details turned off),
   // cleared after a few seconds.
@@ -815,6 +925,9 @@ export default function PivotGrid({
   // one thing worth replicating is "move the active cell around with arrow keys to read values
   // without reaching for the mouse," not full worksheet-wide navigation.
   const [selectedCell, setSelectedCell] = useState(null);
+  // The other corner of a selected RANGE (2026-10-20, Excel's Shift+click / Shift+arrow) — the range
+  // runs from here to selectedCell; null/equal = just the one cell. Ctrl+C copies it (copyRange).
+  const [anchorCell, setAnchorCell] = useState(null);
   // A fresh `result` (re-sort, re-filter, a field added/removed) can reshuffle which row/column
   // lands at a given index — `selectedCell` is plain {row, col} ARRAY INDICES with no identity
   // check against what's actually there now, so the ring highlight used to silently keep "selecting"
@@ -822,7 +935,13 @@ export default function PivotGrid({
   // 2026-10-06, full codebase review). Cleared on every new result instead of carried forward.
   useEffect(() => {
     setSelectedCell(null);
+    setAnchorCell(null);
   }, [result]);
+  // Selects a cell; with Shift held the anchor stays put and the range grows, like Excel.
+  const selectCell = (cell, extend = false) => {
+    setSelectedCell(cell);
+    if (!extend || !anchorCell) setAnchorCell(cell);
+  };
   const gridRef = useRef(null);
   // Same shape FieldPicker.jsx builds for FilterRow's own "choose a field"/"by measure" selects —
   // see FilterHeaderRow above, which reuses FilterRow unchanged for the Report Filter area's own
@@ -982,6 +1101,80 @@ export default function PivotGrid({
     collapse: (level) => setCollapsed((prev) => new Set([...prev, ...[...collapsible].filter((k) => k.startsWith(levelPrefix(level)))])),
     expand: (level) => setCollapsed((prev) => new Set([...prev].filter((k) => !k.startsWith(levelPrefix(level))))),
   };
+
+  // Excel's Move "X" Up/Down/To Beginning/To End, and dragging an item onto another (2026-10-20):
+  // the item moves among its SIBLINGS (same outer items), and the level gets a manual order
+  // (LevelSort.CustomOrder) — the level's labels in display order with the siblings rearranged.
+  const moveItem = (level, path, where) => {
+    if (!request || !onChange) return;
+    const label = path[level];
+    const parent = path.slice(0, level);
+    const unique = (labels) => [...new Set(labels)];
+    const atLevel = allDisplayRows.filter((d) => d.kind !== "grand" && d.path.length > level);
+    const siblings = unique(atLevel.filter((d) => parent.every((p, k) => d.path[k] === p)).map((d) => d.path[level]));
+    const from = siblings.indexOf(label);
+    if (from < 0) return;
+    const reordered = siblings.filter((s) => s !== label);
+    const to =
+      where === "up" ? Math.max(0, from - 1)
+      : where === "down" ? Math.min(reordered.length, from + 1)
+      : where === "beginning" ? 0
+      : where === "end" ? reordered.length
+      : reordered.indexOf(where.before);
+    if (to < 0) return;
+    reordered.splice(to, 0, label);
+    const siblingSet = new Set(siblings);
+    let next = 0;
+    const order = unique(atLevel.map((d) => d.path[level])).map((l) => (siblingSet.has(l) ? reordered[next++] : l));
+    onChange({
+      ...request,
+      sort: request.sort?.axis === "Rows" ? null : request.sort,
+      rowLevelSorts: [...request.rowLevelSorts.filter((s) => s.level !== level), { level, direction: "Ascending", byMeasureField: null, customOrder: order }],
+    });
+  };
+
+  // Right-click and drag handlers for one row label (a real Rows field's item — not a total row,
+  // Σ Values, or a drilldown member, which have their own controls).
+  const labelHandlers = (level, displayRow) => {
+    const field = rows[level];
+    if (!request || !onChange || !field || field === MEASURES_PLACEHOLDER || drilldownAlone || level === combinedDrillSlot) return {};
+    if (displayRow.kind === "subtotal" || displayRow.kind === "grand" || displayRow.path.length <= level) return {};
+    const label = displayRow.path[level];
+    const parentKey = JSON.stringify(displayRow.path.slice(0, level));
+    return {
+      onContextMenu: (e) => {
+        e.preventDefault();
+        setLabelMenu({
+          x: e.clientX,
+          y: e.clientY,
+          level,
+          label,
+          path: displayRow.path,
+          field,
+          fieldLabel: rowFieldLayouts[level]?.customName || rowFieldLabels[level] || field,
+          collapseKey: collapseKey(level, displayRow.path),
+        });
+      },
+      draggable: true,
+      onDragStart: (e) => {
+        e.dataTransfer.setData(GRID_ITEM_DRAG_MIME, JSON.stringify({ level, parentKey, label }));
+        e.dataTransfer.effectAllowed = "move";
+      },
+      onDragOver: (e) => {
+        if (e.dataTransfer.types.includes(GRID_ITEM_DRAG_MIME)) e.preventDefault();
+      },
+      onDrop: (e) => {
+        const raw = e.dataTransfer.getData(GRID_ITEM_DRAG_MIME);
+        if (!raw) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const dragged = JSON.parse(raw);
+        // Only within the same field and the same outer item, like Excel.
+        if (dragged.level !== level || dragged.parentKey !== parentKey || dragged.label === label) return;
+        moveItem(level, [...displayRow.path.slice(0, level), dragged.label], { before: label });
+      },
+    };
+  };
   // PivotTable Options > Display (2026-10-19): "Show expand/collapse buttons" hides every +/- (an
   // outer item's, a drilldown member's, a Columns drilldown header's); "Display field captions and
   // filter drop downs" leaves the field-name header cells empty — no caption, no arrow — like Excel.
@@ -1034,27 +1227,74 @@ export default function PivotGrid({
   // collapsed/hidden rows the same way the mouse already does (clicking a collapsed group's hidden
   // detail rows isn't possible either, since they're not rendered at all).
   const handleGridKeyDown = (e) => {
+    // Ctrl+C / ⌘C copies the selected range, like Excel.
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && selectedCell) {
+      e.preventDefault();
+      copyRange();
+      return;
+    }
     if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape"].includes(e.key)) return;
     e.preventDefault();
     if (e.key === "Escape") {
       setSelectedCell(null);
+      setAnchorCell(null);
       return;
     }
     if (!selectedCell) {
-      if (navigableRows.length > 0 && columnHeaders.length > 0) setSelectedCell({ row: navigableRows[0], col: 0 });
+      if (navigableRows.length > 0 && columnHeaders.length > 0) selectCell({ row: navigableRows[0], col: 0 });
       return;
     }
     const { row, col } = selectedCell;
+    const extend = e.shiftKey && e.key !== "Enter";
     if (e.key === "ArrowLeft") {
-      setSelectedCell({ row, col: Math.max(0, col - 1) });
+      selectCell({ row, col: Math.max(0, col - 1) }, extend);
     } else if (e.key === "ArrowRight") {
-      setSelectedCell({ row, col: Math.min(columnHeaders.length - 1, col + 1) });
+      selectCell({ row, col: Math.min(columnHeaders.length - 1, col + 1) }, extend);
     } else if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Enter") {
       // Steps in DISPLAY order (a Top subtotal can be drawn after its item's rows in Tabular, so
       // source order isn't screen order).
       const position = navigableRows.indexOf(row);
       const next = navigableRows[position + (e.key === "ArrowUp" ? -1 : 1)];
-      if (position >= 0 && next !== undefined) setSelectedCell({ row: next, col });
+      if (position >= 0 && next !== undefined) selectCell({ row: next, col }, extend);
+    }
+  };
+
+  // The selected range in DISPLAY order: row positions in navigableRows and a column span.
+  const rangeBounds = () => {
+    if (!selectedCell) return null;
+    const anchor = anchorCell ?? selectedCell;
+    const a = navigableRows.indexOf(anchor.row);
+    const b = navigableRows.indexOf(selectedCell.row);
+    if (a < 0 || b < 0) return null;
+    return { top: Math.min(a, b), bottom: Math.max(a, b), left: Math.min(anchor.col, selectedCell.col), right: Math.max(anchor.col, selectedCell.col) };
+  };
+  const bounds = rangeBounds();
+  const isMultiCellRange = bounds && (bounds.top !== bounds.bottom || bounds.left !== bounds.right);
+  const inRange = (rowIndex, colIndex) => {
+    if (!isMultiCellRange) return false;
+    const position = navigableRows.indexOf(rowIndex);
+    return position >= bounds.top && position <= bounds.bottom && colIndex >= bounds.left && colIndex <= bounds.right;
+  };
+
+  // Copies the range as tab-separated text (what Excel puts on the clipboard), each value in its
+  // displayed format; one row of the range per line.
+  const copyRange = async () => {
+    if (!bounds) return;
+    const lines = navigableRows.slice(bounds.top, bounds.bottom + 1).map((rowIndex) =>
+      Array.from({ length: bounds.right - bounds.left + 1 }, (_, k) => {
+        const colIndex = bounds.left + k;
+        const measureIndex = measuresInRows
+          ? measureIndexOf(rowHeaders[rowIndex], rowsMeasuresIndex, captionToIndex)
+          : measureIndexOf(columnHeaders[colIndex], columnsMeasuresIndex, captionToIndex);
+        return cellText(cells[rowIndex]?.[colIndex], formatForColumn(measureIndex, valueFields), pivotOptions);
+      }).join("\t"),
+    );
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      const count = lines.length * (bounds.right - bounds.left + 1);
+      setNotice(`Copied ${count} cell${count === 1 ? "" : "s"}.`);
+    } catch {
+      setNotice("Couldn't copy — the browser blocked clipboard access.");
     }
   };
 
@@ -1442,6 +1682,7 @@ export default function PivotGrid({
                           key={group.start}
                           rowSpan={labelSpan > 1 ? labelSpan : undefined}
                           className={`${cellBorder} whitespace-nowrap px-3 py-1.5 ${labelSpan >= 1 ? "bg-white text-center align-middle" : "text-left"} ${labelWeight}`}
+                          {...(lines[0] ? labelHandlers(lines[0].level, displayRow) : {})}
                         >
                           <span className="inline-flex items-center gap-1.5">
                             {lines[0] && collapseToggleFor(lines[0])}
@@ -1490,7 +1731,7 @@ export default function PivotGrid({
                                 ? (isDrilldownMemberExpanded?.(uniqueName, labelRow) ?? rowsHierarchyDrilldown.expandedMemberUniqueNames.includes(uniqueName))
                                 : false;
                               return (
-                                <div key={level} style={{ paddingLeft: line.indent * 16 }} className="flex items-center gap-1">
+                                <div key={level} style={{ paddingLeft: line.indent * 16 }} className="flex items-center gap-1" {...labelHandlers(level, displayRow)}>
                                   {uniqueName && onToggleDrilldownMember && showExpandButtons && (
                                     <button
                                       type="button"
@@ -1539,16 +1780,17 @@ export default function PivotGrid({
                       : null;
 
                     const isSelected = selectedCell?.row === rowIndex && selectedCell?.col === colIndex;
+                    const isInRange = inRange(rowIndex, colIndex);
 
                     return (
                       <td
                         key={colIndex}
                         className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-center tabular-nums ${
                           isTotalCell ? "font-bold text-ink" : "text-slate-700"
-                        } ${isSelected ? "relative z-20 ring-2 ring-inset ring-gold-strong" : ""}`}
+                        } ${isSelected ? "relative z-20 ring-2 ring-inset ring-gold-strong" : ""} ${isInRange ? "!bg-gold/25" : ""}`}
                         style={conditionalStyle ?? undefined}
-                        onClick={() => {
-                          setSelectedCell({ row: rowIndex, col: colIndex });
+                        onClick={(e) => {
+                          selectCell({ row: rowIndex, col: colIndex }, e.shiftKey);
                           gridRef.current?.focus();
                         }}
                         // Excel's double-click on a value cell = Show Details (2026-10-19); with "Enable
@@ -1564,7 +1806,8 @@ export default function PivotGrid({
                         onContextMenu={(e) => {
                           if (!request || !onChange || !valueField) return;
                           e.preventDefault();
-                          setSelectedCell({ row: rowIndex, col: colIndex });
+                          // A right-click inside the selected range keeps it (its Copy copies the range).
+                          if (!isInRange) selectCell({ row: rowIndex, col: colIndex });
                           setCellMenu({
                             x: e.clientX,
                             y: e.clientY,
@@ -1629,6 +1872,19 @@ export default function PivotGrid({
           onHideFieldList={() => onHideFieldList?.()}
           onOpenPivotTableOptions={onOpenPivotTableOptions}
           showDetailsEnabled={pivotOptions.enableShowDetails !== false}
+          onCopyRange={isMultiCellRange ? copyRange : null}
+        />
+      )}
+      {labelMenu && request && onChange && (
+        <RowLabelContextMenu
+          {...labelMenu}
+          request={request}
+          onChange={onChange}
+          onClose={() => setLabelMenu(null)}
+          fieldCollapse={showExpandButtons ? fieldCollapse : null}
+          onToggleItem={labelMenu.collapseKey && collapsible.has(labelMenu.collapseKey) ? () => toggleGroup(labelMenu.collapseKey) : null}
+          itemCollapsed={labelMenu.collapseKey ? collapsed.has(labelMenu.collapseKey) : false}
+          onMove={(where) => moveItem(labelMenu.level, labelMenu.path, where)}
         />
       )}
       {drillthrough && (

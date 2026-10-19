@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import Select from "react-select";
-import { X, GripVertical, Plus, Filter, Columns3, Rows3, Sigma, Loader2, ChevronDown, ChevronRight, ChevronLeft, Search, Folder, Table2 } from "lucide-react";
+import { X, GripVertical, Plus, Filter, Columns3, Rows3, Sigma, Loader2, ChevronDown, ChevronRight, ChevronLeft, Search, Folder, Table2, Settings } from "lucide-react";
+
+// The Field List gear menu's choices (pane layout, sort order) — see FieldPicker's `pane` state.
+const FIELD_LIST_PANE_KEY = "pivotSnapshot.fieldListPane";
 import HierarchicalCubePathSelect from "../forms/HierarchicalCubePathSelect";
 import MultiSelectField from "../forms/MultiSelectField";
 import MemberCheckboxList from "../forms/MemberCheckboxList";
@@ -312,7 +315,7 @@ function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleF
   );
 }
 
-function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tables, tablesLoading, enabledTableNames, onEnabledTableNamesChange, fieldsLoading, allDimensions = null, onFieldDropped, onAddHierarchy, onStartDrilldown }) {
+function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tables, tablesLoading, enabledTableNames, onEnabledTableNamesChange, fieldsLoading, allDimensions = null, onFieldDropped, onAddHierarchy, onStartDrilldown, sortOrder = "az" }) {
   // Real Excel's own Field List shows EVERY table immediately, collapsed, with its own ▸/▾ arrow —
   // no prior "search and pick a table" step at all (confirmed live, 2026-10-05, against real
   // Excel's own PivotTable Fields pane screenshots: ~300 tables, all listed, none pre-selected).
@@ -420,9 +423,10 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
   // Union of every real cube table AND every measure group name — a measure group with no matching
   // dimension table still needs its own top-level entry (most of this cube's measure groups aren't
   // ALSO set up as a browsable fact dimension). Deduplicated since a name can appear in both.
-  const allTableNames = Array.from(new Set([...tables.map((t) => t.displayName), ...measuresByGroup.keys()])).sort(
-    (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }),
-  );
+  // The gear menu's "Sort A to Z" (default) or "Sort in Data Source Order" — the cube's own order.
+  const byName = (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" });
+  const sortNames = (names) => (sortOrder === "source" ? names : [...names].sort(byName));
+  const allTableNames = sortNames(Array.from(new Set([...tables.map((t) => t.displayName), ...measuresByGroup.keys()])));
   const query = tableSearch.trim().toLowerCase();
   // Excel's search matches FIELD names too (2026-10-18, full-app test: "Country" or "Total Revenue"
   // found nothing). A table whose NAME matches is listed as before (expand it to see everything);
@@ -443,7 +447,7 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
   }
   const tableNameMatches = (name) => name.toLowerCase().includes(query);
   const visibleTableNames = query
-    ? Array.from(new Set([...allTableNames.filter(tableNameMatches), ...fieldMatchesByTable.keys()])).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+    ? sortNames(Array.from(new Set([...allTableNames.filter(tableNameMatches), ...fieldMatchesByTable.keys()])))
     : allTableNames;
 
   // Real Excel's own "Σ Values" pseudo-field — a single field (not a table with children),
@@ -2770,6 +2774,29 @@ export default function FieldPicker({
   // this only ever reacts to the zones column's own height, never the page's.
   const zonesColumnRef = useRef(null);
   const [zonesColumnHeight, setZonesColumnHeight] = useState(null);
+
+  // Excel's Field List gear menu (2026-10-20): the pane's layout — fields and areas side by side
+  // (this app's default), stacked, fields only, or areas only (2 by 2) — and the field list's sort
+  // order. A per-browser preference, like Excel's, so it's kept in localStorage.
+  const [pane, setPane] = useState(() => {
+    const defaults = { layout: "sideBySide", sortOrder: "az" };
+    try {
+      return { ...defaults, ...JSON.parse(localStorage.getItem(FIELD_LIST_PANE_KEY) ?? "{}") };
+    } catch {
+      return defaults;
+    }
+  });
+  const updatePane = (patch) =>
+    setPane((prev) => {
+      const next = { ...prev, ...patch };
+      try {
+        localStorage.setItem(FIELD_LIST_PANE_KEY, JSON.stringify(next));
+      } catch {
+        // Storage unavailable (private window): the choice just isn't remembered.
+      }
+      return next;
+    });
+
   useEffect(() => {
     const el = zonesColumnRef.current;
     if (!el) return undefined;
@@ -2778,7 +2805,8 @@ export default function FieldPicker({
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+    // Re-attached when the layout brings the areas back (fields-only has none to measure).
+  }, [pane.layout]);
 
   const dimensionOptions = dimensions.map((d) => ({ value: d.field, label: d.displayName }));
   const measureOptions = measures.map((m) => ({ value: m.field, label: m.displayName }));
@@ -3110,6 +3138,63 @@ export default function FieldPicker({
   const isFieldPlaced = (field) =>
     value.rows.includes(field) || value.columns.includes(field) || value.values.some((v) => v.field === field) || value.filters.some((f) => f.field === field);
 
+  // The gear (Excel's "Tools" button at the top of the Field List) and Reset.
+  const paneControls = (
+    <>
+      <Popover
+        align="right"
+        trigger={(toggle) => (
+          <button type="button" onClick={toggle} className="btn-secondary px-2 py-1.5 text-xs" title="Field List layout and sort order" aria-label="Field List tools">
+            <Settings className="h-3.5 w-3.5" />
+          </button>
+        )}
+      >
+        {(close) => (
+          <div className="flex flex-col gap-1 text-sm">
+            {[
+              { value: "sideBySide", label: "Fields Section and Areas Section Side-By-Side" },
+              { value: "stacked", label: "Fields Section and Areas Section Stacked" },
+              { value: "fieldsOnly", label: "Fields Section Only" },
+              { value: "areasOnly", label: "Areas Section Only (2 by 2)" },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => {
+                  updatePane({ layout: opt.value });
+                  close();
+                }}
+                className={`rounded-lg px-2 py-1.5 text-left ${pane.layout === opt.value ? "bg-gold/20 font-semibold text-gold-strong" : "hover:bg-gold/10"}`}
+              >
+                {opt.label}
+              </button>
+            ))}
+            <div className="my-1 border-t border-slate-100" />
+            {[
+              { value: "az", label: "Sort A to Z" },
+              { value: "source", label: "Sort in Data Source Order" },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => {
+                  updatePane({ sortOrder: opt.value });
+                  close();
+                }}
+                className={`rounded-lg px-2 py-1.5 text-left ${pane.sortOrder === opt.value ? "bg-gold/20 font-semibold text-gold-strong" : "hover:bg-gold/10"}`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </Popover>
+      <button type="button" onClick={onReset} className="btn-secondary px-3 py-1.5 text-xs">
+        Reset
+      </button>
+    </>
+  );
+
   return (
     // Field list on the LEFT, the 4 drop zones stacked in ONE column on the RIGHT — real Excel's
     // own PivotTable Fields pane layout (confirmed live, 2026-10-04, against a screenshot: "الاربعه
@@ -3134,14 +3219,23 @@ export default function FieldPicker({
     // wider than the card actually sizes to, spilling a sliver of content out past the card's own
     // right edge (flagged live, 2026-10-04: "ليه طالع برا الكارد"). minmax(0, …) lets each column
     // actually shrink to the space it's given, so `truncate` inside it can do its job.
-    <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)] items-start gap-2">
+    <div className={pane.layout === "sideBySide" ? "grid grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)] items-start gap-2" : "flex flex-col gap-2"}>
+      {pane.layout === "fieldsOnly" && <div className="flex justify-end gap-1">{paneControls}</div>}
       {/* Height set explicitly from the zones column's OWN measured height (zonesColumnHeight,
           above) once known — min 200px as a sane floor for the very first render (before the
           ResizeObserver's first callback fires) and for the unlikely case of an almost-empty zones
           column. AvailableFieldsPanel fills whatever height this div ends up with (h-full flex-col,
-          its own scrollable list as flex-1) — see its own WHY comment. */}
-      <div style={{ height: zonesColumnHeight ? `${Math.max(zonesColumnHeight, 200)}px` : undefined }}>
+          its own scrollable list as flex-1) — see its own WHY comment. Stacked / fields-only use a
+          fixed height instead (nothing beside them to match). */}
+      {pane.layout !== "areasOnly" && (
+      <div
+        style={{
+          height:
+            pane.layout === "stacked" ? "300px" : pane.layout === "fieldsOnly" ? "560px" : zonesColumnHeight ? `${Math.max(zonesColumnHeight, 200)}px` : undefined,
+        }}
+      >
         <AvailableFieldsPanel
+          sortOrder={pane.sortOrder}
           dimensions={dimensions}
           measures={measures}
           valuesCount={value.values.length}
@@ -3157,7 +3251,10 @@ export default function FieldPicker({
           onStartDrilldown={startDrilldown}
         />
       </div>
+      )}
 
+      {pane.layout !== "fieldsOnly" && (
+      <>
       {/* Each zone shows only its pill list; the full add/edit form (dimension picker, filter
           mode, show-values-as, ...) lives in a Popover behind the zone's "+" or, for Filters/
           Values, behind the pill itself — one click away instead of permanently occupying space.
@@ -3173,12 +3270,9 @@ export default function FieldPicker({
             2026-10-12 on explicit request ("شيل دا"): this sidebar is tight on vertical space now
             that the save/export controls also live in it (see PivotBuilder.jsx's own WHY comment),
             so literal Excel-instructional-text parity lost out to reclaiming the row for it. */}
-        <div className="mb-1 flex justify-end">
-          <button type="button" onClick={onReset} className="btn-secondary px-3 py-1.5 text-xs">
-            Reset
-          </button>
-        </div>
-        <div className="grid grid-cols-1 gap-1.5">
+        <div className="mb-1 flex justify-end gap-1">{paneControls}</div>
+        {/* Stacked / areas-only have the pane's full width: Excel's 2 by 2 areas. */}
+        <div className={`grid gap-1.5 ${pane.layout === "sideBySide" ? "grid-cols-1" : "grid-cols-2"}`}>
           <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
@@ -3555,6 +3649,8 @@ export default function FieldPicker({
           onChange={(dateGroupings, numericGroupings) => onChange({ ...value, dateGroupings, numericGroupings })}
         />
       </div>
+      </>
+      )}
     </div>
   );
 }

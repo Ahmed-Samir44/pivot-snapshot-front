@@ -464,6 +464,15 @@ export default function PivotBuilder() {
   // PivotTable Analyze ribbon too, not just the context menu, but there's no ribbon button for it
   // here yet — this is the only entry point so far).
   const [showFieldList, setShowFieldList] = useState(true);
+  // Excel's "Defer Layout Update" (2026-10-20, bottom of the Field List): while checked, field list
+  // edits collect in pendingRequest (what the field list shows) and nothing re-queries; "Update"
+  // applies them in one go. Unchecking applies whatever is pending. Not persisted, like Excel's.
+  const [deferLayout, setDeferLayout] = useState(false);
+  const [pendingRequest, setPendingRequest] = useState(null);
+  const applyPendingLayout = () => {
+    if (pendingRequest) setRequest(pendingRequest);
+    setPendingRequest(null);
+  };
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
   const [saveError, setSaveError] = useState(null);
@@ -772,6 +781,7 @@ export default function PivotBuilder() {
     queryAbortControllerRef.current?.abort();
     setLoading(false);
     setRequest(EMPTY_REQUEST);
+    setPendingRequest(null);
     setLastQuery(null);
     setResult(null);
     setError(null);
@@ -1190,8 +1200,8 @@ export default function PivotBuilder() {
         {showFieldList ? (
           <aside className="w-full shrink-0 xl:sticky xl:top-8 xl:w-[460px]">
             <FieldPicker
-              value={request}
-              onChange={setRequest}
+              value={pendingRequest ?? request}
+              onChange={deferLayout ? (next) => setPendingRequest(normalizeMeasuresPlacement(next)) : setRequest}
               dimensions={dimensions}
               measures={measures}
               tables={tables}
@@ -1216,6 +1226,29 @@ export default function PivotBuilder() {
                 vertically (flex-col, w-full inputs) instead of the old wide-row flex-wrap layout,
                 which only made sense stretched across the main column — unmodified in this narrow
                 460px sidebar, that row would just wrap into a messy multi-line block. */}
+            {/* Excel's "Defer Layout Update" + "Update", at the bottom of the Field List. */}
+            <div className="mt-2 flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm">
+              <label className="flex items-center gap-2 text-ink">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-gold"
+                  checked={deferLayout}
+                  onChange={(e) => {
+                    setDeferLayout(e.target.checked);
+                    if (!e.target.checked) applyPendingLayout();
+                  }}
+                />
+                Defer Layout Update
+              </label>
+              <button
+                type="button"
+                onClick={applyPendingLayout}
+                disabled={!deferLayout || !pendingRequest}
+                className="btn-secondary px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Update
+              </button>
+            </div>
             {result && (
               // p-3 (not .card's own p-6) and gap-1.5 (not gap-3), plus py-2 on both text inputs
               // below (not .input-field's own py-3) — shrunk 2026-10-12 ("صغر ارتفاع دي شوية", then
