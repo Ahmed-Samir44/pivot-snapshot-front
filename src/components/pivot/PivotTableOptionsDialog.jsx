@@ -10,6 +10,7 @@ const textClass =
 const TABS = [
   { key: "layout", label: "Layout & Format" },
   { key: "totals", label: "Totals & Filters" },
+  { key: "display", label: "Display" },
   { key: "data", label: "Data" },
 ];
 
@@ -45,6 +46,10 @@ export default function PivotTableOptionsDialog({ options, request, onApply, onC
   const [grandTotals, setGrandTotals] = useState(request.grandTotals);
   const [includeFilteredItems, setIncludeFilteredItems] = useState(Boolean(request.includeFilteredItemsInTotals));
   const [allowMultipleFilters, setAllowMultipleFilters] = useState(Boolean(request.allowMultipleFiltersPerField));
+  // Display tab's "Show items with no data on rows/columns" — the same per-axis setting as each
+  // field menu's "Show items with no data" (request.showItemsWithNoData).
+  const [noDataAxes, setNoDataAxes] = useState(request.showItemsWithNoData ?? []);
+  const toggleNoData = (axis, on) => setNoDataAxes((prev) => (on ? [...prev.filter((a) => a !== axis), axis] : prev.filter((a) => a !== axis)));
   const set = (patch) => setDraft((prev) => ({ ...prev, ...patch }));
 
   // Excel's two checkboxes over this app's 4-way GrandTotals (the Design ribbon's dropdown).
@@ -54,7 +59,7 @@ export default function PivotTableOptionsDialog({ options, request, onApply, onC
     setGrandTotals(rows && columns ? "RowsAndColumns" : rows ? "RowsOnly" : columns ? "ColumnsOnly" : "Off");
 
   const apply = () => {
-    onApply({ ...draft, name: draft.name.trim() || DEFAULT_PIVOT_OPTIONS.name, filterFieldsPerColumn: Math.max(0, Math.floor(Number(draft.filterFieldsPerColumn) || 0)) }, { grandTotals, includeFilteredItemsInTotals: includeFilteredItems, allowMultipleFiltersPerField: allowMultipleFilters });
+    onApply({ ...draft, name: draft.name.trim() || DEFAULT_PIVOT_OPTIONS.name, filterFieldsPerColumn: Math.max(0, Math.floor(Number(draft.filterFieldsPerColumn) || 0)) }, { grandTotals, includeFilteredItemsInTotals: includeFilteredItems, allowMultipleFiltersPerField: allowMultipleFilters, showItemsWithNoData: noDataAxes });
     onClose();
   };
 
@@ -126,6 +131,17 @@ export default function PivotTableOptionsDialog({ options, request, onApply, onC
               {/* One filter of each kind (manual / label / value) per field at once, applied in
                   that order — off, a new filter on a field replaces its old one. */}
               <Check label="Allow multiple filters per field" checked={allowMultipleFilters} onChange={setAllowMultipleFilters} />
+            </Section>
+          </div>
+        ) : tab === "display" ? (
+          // Excel's Display tab, for a cube report. Its other options (tooltips, classic layout,
+          // the Values row, item labels with no value fields, field list order) aren't built yet.
+          <div className="space-y-4">
+            <Section title="Display">
+              <Check label="Show expand/collapse buttons" checked={draft.showExpandButtons !== false} onChange={(v) => set({ showExpandButtons: v })} />
+              <Check label="Display field captions and filter drop downs" checked={draft.showFieldCaptions !== false} onChange={(v) => set({ showFieldCaptions: v })} />
+              <Check label="Show items with no data on rows" checked={noDataAxes.includes("Rows")} onChange={(v) => toggleNoData("Rows", v)} />
+              <Check label="Show items with no data on columns" checked={noDataAxes.includes("Columns")} onChange={(v) => toggleNoData("Columns", v)} />
             </Section>
           </div>
         ) : (

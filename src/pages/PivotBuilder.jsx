@@ -7,6 +7,7 @@ import PivotGrid from "../components/pivot/PivotGrid";
 import PivotTableOptionsDialog from "../components/pivot/PivotTableOptionsDialog";
 import { DEFAULT_PIVOT_OPTIONS } from "../utils/pivotOptions";
 import { onePerField } from "../utils/filterKinds";
+import { formatDimensionName } from "../utils/cubeMeta";
 import PivotChart from "../components/pivot/PivotChart";
 import { chartUnavailableReason } from "../utils/chartLayout";
 import { queryPivot } from "../services/pivotApi";
@@ -195,11 +196,13 @@ function readPersistedBuilderState() {
 
 // PivotResult only carries member VALUES (e.g. "Cardiology"), not the field's own name — this
 // looks each row/column field id up in the dimensions list to get something readable ("Specialty
-// Name") for the grid's header row, instead of leaving it blank.
+// Name") for the grid's header row, instead of leaving it blank. A field whose table isn't loaded in
+// the field list (collapsed, or restored from a saved pivot) is formatted from its own identifier
+// instead of shown raw ("[Dim X].[Y].[Y]" — seen 2026-10-19), the same way Snapshot History labels it.
 function fieldLabels(fieldIds, dimensions) {
   if (!fieldIds) return [];
   return fieldIds.map((id) =>
-    id === MEASURES_PLACEHOLDER ? "Σ Values" : (dimensions.find((d) => d.field === id)?.displayName ?? id),
+    id === MEASURES_PLACEHOLDER ? "Σ Values" : (dimensions.find((d) => d.field === id)?.displayName ?? formatDimensionName(id)),
   );
 }
 
@@ -959,7 +962,8 @@ export default function PivotBuilder() {
                   // Only touch `request` when a query-affecting setting really changed (it re-runs).
                   // Turning "Allow multiple filters per field" off keeps one filter per field (the
                   // backend would reject the rest).
-                  if (Object.entries(requestPatch).some(([key, value]) => Boolean(request[key]) !== Boolean(value) && typeof value === "boolean") || requestPatch.grandTotals !== request.grandTotals) {
+                  const differs = (key, value) => (typeof value === "boolean" ? Boolean(request[key]) !== value : JSON.stringify(request[key]) !== JSON.stringify(value));
+                  if (Object.entries(requestPatch).some(([key, value]) => differs(key, value))) {
                     setRequest({
                       ...request,
                       ...requestPatch,

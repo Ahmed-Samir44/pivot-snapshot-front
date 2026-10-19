@@ -231,6 +231,7 @@ export async function exportPivotToExcel({
     sheet.getRow(row + 1).getCell(column * 3 + 2).value = filterValueSummary(filter);
   });
 
+  const showCaptions = pivotOptions.showFieldCaptions !== false;
   const totalCols = rowDepth + columnHeaders.length;
   let currentRow = 1 + filterAreaRows;
 
@@ -240,7 +241,7 @@ export async function exportPivotToExcel({
     const labelRow = sheet.getRow(currentRow);
     if (rowDepth + 1 <= totalCols) sheet.mergeCells(currentRow, rowDepth + 1, currentRow, totalCols);
     const cell = labelRow.getCell(rowDepth + 1);
-    cell.value = columnFieldLabels.join(" › ");
+    cell.value = showCaptions ? columnFieldLabels.join(" › ") : "";
     cell.font = { italic: true, color: { argb: "FF64748B" } };
     cell.alignment = { horizontal: "center" };
     currentRow += 1;
@@ -255,7 +256,8 @@ export async function exportPivotToExcel({
       rowHeaderGroups.forEach((group, gi) => {
         const cell = row.getCell(gi + 1);
         // A compact-merged column is Excel's literal "Row Labels"; a standalone one is its field.
-        cell.value = group.start < group.end ? "Row Labels" : rowFieldLayouts[group.start]?.customName || rowFieldLabels[group.start] || "";
+        // Blank with "Display field captions and filter drop downs" off (PivotTable Options > Display).
+        cell.value = !showCaptions ? "" : group.start < group.end ? "Row Labels" : rowFieldLayouts[group.start]?.customName || rowFieldLabels[group.start] || "";
         cell.font = { bold: true };
         cell.fill = HEADER_FILL;
         if (columnDepth > 1) sheet.mergeCells(columnHeaderStartRow, gi + 1, columnHeaderStartRow + columnDepth - 1, gi + 1);

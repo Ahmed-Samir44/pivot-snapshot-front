@@ -416,6 +416,11 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
 // value isn't a calculated field, a dimension-aggregation value, or ShowValuesAs-transformed (none
 // of those are a single stored fact-level quantity DRILLTHROUGH can meaningfully target — see
 // MdxPivotQueryBuilder.BuildDrillthrough's own WHY comment on the backend).
+// A field-name header cell with field captions turned off (PivotTable Options > Display): empty.
+function NoCaption() {
+  return null;
+}
+
 // Whether a value cell has underlying rows Show Details can fetch: real members on both axes (a
 // total has none), a plain measure (no Show Values As, not a calculated field or a "Count of
 // <field>"). A Calculated Item is a synthetic MDX member (e.g. "East + West" combined into one
@@ -920,6 +925,11 @@ export default function PivotGrid({
   // collapse would be a second, conflicting toggle on the same rows.
   const collapsible = rowsHierarchyDrilldown ? new Set() : collapsibleKeys(allDisplayRows);
   const displayRows = applyCollapse(allDisplayRows, new Set([...collapsed].filter((k) => collapsible.has(k))), rowHeaderGroups);
+  // PivotTable Options > Display (2026-10-19): "Show expand/collapse buttons" hides every +/- (an
+  // outer item's, a drilldown member's, a Columns drilldown header's); "Display field captions and
+  // filter drop downs" leaves the field-name header cells empty — no caption, no arrow — like Excel.
+  const showExpandButtons = pivotOptions.showExpandButtons !== false;
+  const FieldCaption = pivotOptions.showFieldCaptions === false ? NoCaption : FieldHeaderMenu;
   // "Merge and center cells with labels": an item's label cell spans its rows (computeLabelSpans).
   const labelSpans = pivotOptions.mergeLabels ? computeLabelSpans(displayRows, rowHeaderGroups, { drillSlot: combinedDrillSlot, drilldown: drilldownAlone }) : null;
   // Value-carrying rows in display order — what arrow-key navigation steps through (an item row
@@ -1185,7 +1195,7 @@ export default function PivotGrid({
                     just rendering at its practical minimum width (caught 2026-10-06, full codebase
                     review). */}
                 <th colSpan={Math.max(1, columnHeaders.length)} className={`${headerCellBorder} border-b-2 border-b-white/40 ${headerBg} px-2 py-2`}>
-                  <FieldHeaderMenu
+                  <FieldCaption
                     label={columnFieldLabels.join(" › ")}
                     // A Columns drilldown sorts from here (A→Z/Z→A or by value), whatever else is on
                     // Columns — the backend counts it as the axis's one sortable field. Sort only,
@@ -1216,7 +1226,7 @@ export default function PivotGrid({
                       // a second contrast issue).
                       group.start === group.end && !drilldownAlone ? (
                         <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-white/40 ${headerBg} px-2 py-2`}>
-                          <FieldHeaderMenu
+                          <FieldCaption
                             label={rowFieldLayouts[group.start]?.customName || rowFieldLabels[group.start] || ""}
                             field={rows[group.start] ?? null}
                             axis="Rows"
@@ -1240,7 +1250,7 @@ export default function PivotGrid({
                           {drilldownAlone ? (
                             // A drilldown hierarchy sorts from here (Drilldown v2) — sort only, see
                             // FieldHeaderMenu's sortOnly WHY comment.
-                            <FieldHeaderMenu
+                            <FieldCaption
                               label="Row Labels"
                               field={rowsHierarchyDrilldown.topLevelField ?? null}
                               axis="Rows"
@@ -1253,7 +1263,7 @@ export default function PivotGrid({
                             // Excel's Compact "Row Labels" arrow: sort/filter any of the fields
                             // sharing this column, picked from its "Select field:" box (Σ Values
                             // and a drilldown slot have no menu of their own, so they're left out).
-                            <FieldHeaderMenu
+                            <FieldCaption
                               label="Row Labels"
                               axis="Rows"
                               request={request}
@@ -1274,7 +1284,7 @@ export default function PivotGrid({
                 {(columnHeaderRows[level] ?? []).map((cell) => {
                   const column = columnHeaders[cell.sourceIndex];
                   const uniqueName = cell.memberUniqueName && cell.memberUniqueName.endsWith("]") ? cell.memberUniqueName : null;
-                  const toggle = uniqueName && onToggleColumnDrilldownMember;
+                  const toggle = uniqueName && onToggleColumnDrilldownMember && showExpandButtons;
                   // A member's ancestors: those of the column it heads, down to the member itself.
                   const allAncestors = column?.drill?.ancestorUniqueNames ?? [];
                   const ownIndex = allAncestors.indexOf(uniqueName);
@@ -1328,6 +1338,7 @@ export default function PivotGrid({
               // innermost (2026-10-15 — it used to be the outermost field only): on its item row in
               // compact/outline form, on its first row in tabular form, and on the collapsed row.
               const collapseToggleFor = (line) => {
+                if (!showExpandButtons) return null;
                 if (displayRow.kind === "subtotal" || displayRow.kind === "grand" || displayRow.path.length <= line.level) return null;
                 const key = collapseKey(line.level, displayRow.path);
                 if (!collapsible.has(key)) return null;
@@ -1415,7 +1426,7 @@ export default function PivotGrid({
                                 : false;
                               return (
                                 <div key={level} style={{ paddingLeft: line.indent * 16 }} className="flex items-center gap-1">
-                                  {uniqueName && onToggleDrilldownMember && (
+                                  {uniqueName && onToggleDrilldownMember && showExpandButtons && (
                                     <button
                                       type="button"
                                       onClick={() => onToggleDrilldownMember(uniqueName, labelRow)}

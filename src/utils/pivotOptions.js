@@ -20,6 +20,10 @@ export const DEFAULT_PIVOT_OPTIONS = {
   filterFieldsPerColumn: 0,
   // Data tab: "Enable show details" — off grays out Show Details and blocks double-click.
   enableShowDetails: true,
+  // Display tab: "Show expand/collapse buttons" and "Display field captions and filter drop downs"
+  // (the Analyze ribbon's "+/- Buttons" and "Field Headers" toggles are the same two settings).
+  showExpandButtons: true,
+  showFieldCaptions: true,
 };
 
 export const ERROR_TOKEN = "#DIV/0!";

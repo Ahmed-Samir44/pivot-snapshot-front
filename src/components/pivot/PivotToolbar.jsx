@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Sigma, Rows3, Calculator, ListPlus, LayoutGrid, CalendarRange, Settings2 } from "lucide-react";
+import { Sigma, Rows3, Calculator, ListPlus, LayoutGrid, CalendarRange, Settings2, SquarePlus, Heading } from "lucide-react";
 import Popover from "../forms/Popover";
 import { CalculatedFieldDialog, CalculatedItemDialog } from "./FieldPicker";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
@@ -339,6 +339,31 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                 />
               )}
             </RibbonButton>
+          </RibbonGroup>
+        )}
+
+        {/* Excel's "Show" group: the same two settings as PivotTable Options > Display, as
+            pressed/unpressed toggles (2026-10-19). */}
+        {tab === "analyze" && pivotOptions && (
+          <RibbonGroup label="Show">
+            {[
+              { key: "showExpandButtons", label: "+/- Buttons", icon: SquarePlus },
+              { key: "showFieldCaptions", label: "Field Headers", icon: Heading },
+            ].map(({ key, label, icon: Icon }) => {
+              const on = pivotOptions[key] !== false;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => onPivotOptionsChange({ ...pivotOptions, [key]: !on })}
+                  className={`flex h-16 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded px-1 text-ink ${on ? "bg-gold/15 ring-1 ring-gold/40" : "hover:bg-black/5"}`}
+                >
+                  <Icon className="h-5 w-5 text-ink/70" />
+                  <span className="text-center text-[11px] leading-tight">{label}</span>
+                </button>
+              );
+            })}
           </RibbonGroup>
         )}
       </div>
