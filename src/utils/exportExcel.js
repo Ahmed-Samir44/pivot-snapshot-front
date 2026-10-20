@@ -414,9 +414,11 @@ export async function exportPivotToExcel({
   return workbook;
 }
 
-// Excel sheet names: at most 31 characters, none of \ / ? * [ ] :, and unique in the workbook.
+// Excel sheet names: at most 31 characters, none of \ / ? * [ ] :, and unique in the workbook. An
+// apostrophe becomes ’ — the print-titles name ExcelJS writes quotes the sheet name as 'name'!…
+// without escaping, so "Children's" made Excel report a damaged file (found in review 2026-10-20).
 function safeSheetName(workbook, name) {
-  const base = String(name ?? "").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 31) || "Sheet";
+  const base = String(name ?? "").replace(/[\\/?*[\]:]/g, " ").replace(/'/g, "’").trim().slice(0, 31) || "Sheet";
   let candidate = base;
   for (let n = 2; workbook.getWorksheet(candidate); n++) {
     const suffix = ` (${n})`;
@@ -453,7 +455,7 @@ export async function downloadWorkbook(workbook, filename) {
 // becomes a real number so it sums/sorts in Excel.
 export async function exportDetailsToExcel({ columns, rows, filename, sheetName = "Details" }) {
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet(sheetName.slice(0, 31).replace(/[\\/?*[\]:]/g, " "));
+  const sheet = workbook.addWorksheet(safeSheetName(workbook, sheetName));
 
   // Table column names must be unique and non-empty.
   const seen = new Map();
@@ -463,7 +465,14 @@ export async function exportDetailsToExcel({ columns, rows, filename, sheetName 
     seen.set(base, n);
     return n === 1 ? base : `${base} (${n})`;
   });
-  const toCell = (v) => (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : v ?? null);
+  // Only a plain decimal becomes a number — not an ID with leading zeros ("000123"), one too long to
+  // keep exactly (16+ digits), or hex/exponent text that Number() would also accept.
+  const toCell = (v) => {
+    if (typeof v !== "string") return v ?? null;
+    const t = v.trim();
+    const plainDecimal = /^-?(0|[1-9]\d*)(\.\d+)?$/.test(t) && t.replace(/[-.]/g, "").length <= 15;
+    return plainDecimal ? Number(t) : v;
+  };
 
   sheet.addTable({
     name: "Details",

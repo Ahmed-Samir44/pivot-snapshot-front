@@ -473,6 +473,17 @@ export default function PivotBuilder() {
     if (pendingRequest) setRequest(pendingRequest);
     setPendingRequest(null);
   };
+  // While deferred changes are pending, EVERY editor (ribbon, grid menus, options dialog, page drop)
+  // edits that pending copy too — editing `request` instead would be overwritten by Update, or
+  // undone, since the pending copy was taken before the edit (found in review 2026-10-20).
+  const editingRequest = pendingRequest ?? request;
+  const editRequest = (updater) => {
+    if (!pendingRequest) {
+      setRequest(updater);
+      return;
+    }
+    setPendingRequest((prev) => normalizeMeasuresPlacement(typeof updater === "function" ? updater(prev) : updater));
+  };
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
   const [saveError, setSaveError] = useState(null);
@@ -815,7 +826,7 @@ export default function PivotBuilder() {
     const payload = readFieldDragPayload(e);
     if (!payload) return;
     e.preventDefault();
-    setRequest((prev) => removeFieldEverywhere(prev, payload.field));
+    editRequest((prev) => removeFieldEverywhere(prev, payload.field));
   };
 
   const handleSave = async () => {
@@ -916,15 +927,25 @@ export default function PivotBuilder() {
   // field, each filtered to that item. Excel makes worksheets — here, sheets of one downloaded
   // workbook. One query per item, one at a time (the shared cube), capped at MAX_FILTER_PAGES.
   const MAX_FILTER_PAGES = 50;
+  // The Report Filter area's fields: filters on fields not on Rows/Columns, minus slicer/timeline
+  // fields (the grid draws those as widgets, not in the Report Filter area).
+  const reportFilterFieldsOf = (req) =>
+    [...new Set(req.filters.map((f) => f.field).filter(Boolean))].filter(
+      (f) => !req.rows.includes(f) && !req.columns.includes(f) && !req.slicerFields.includes(f) && !req.timelineFields.includes(f),
+    );
+  const [filterPagesRunning, setFilterPagesRunning] = useState(false);
   const [filterPagesStatus, setFilterPagesStatus] = useState(null);
   const handleShowReportFilterPages = async (field) => {
-    if (!lastQuery) return;
+    if (!lastQuery || filterPagesRunning) return;
     setExportError(null);
+    setFilterPagesRunning(true);
     try {
       const existing = lastQuery.filters.find((f) => f.field === field);
       let members = (await getMembers(field)).filter((m) => m !== "");
-      // A field already narrowed to some items: one page per CHOSEN item, like Excel.
+      // A field already narrowed to some items: one page per CHOSEN item, like Excel (or every item
+      // but the excluded ones).
       if (existing?.mode === "Members" && existing.includedMembers.length > 0) members = members.filter((m) => existing.includedMembers.includes(m));
+      if (existing?.mode === "Exclude") members = members.filter((m) => !existing.includedMembers.includes(m));
       const truncated = members.length > MAX_FILTER_PAGES;
       members = members.slice(0, MAX_FILTER_PAGES);
       const { exportPivotToExcel, createWorkbook, downloadWorkbook } = await import("../utils/exportExcel");
@@ -937,7 +958,9 @@ export default function PivotBuilder() {
           filters: [...lastQuery.filters.filter((f) => f.field !== field), { field, mode: "Members", includedMembers: [member] }],
         };
         const pageResult = await queryPivot(pageQuery);
-        if (pageResult.rowHeaders.length === 0) continue; // no data for this item — no page, like Excel
+        // No data for this item — no page, like Excel. (A Values-only pivot always has its one row,
+        // so emptiness is judged by the values.)
+        if (pageResult.rowHeaders.length === 0 || pageResult.cells.every((row) => row.every((v) => v === null || v === undefined))) continue;
         await exportPivotToExcel({ ...exportOptionsFor(pageQuery, pageResult), workbook, sheetName: member });
         pages++;
       }
@@ -947,16 +970,20 @@ export default function PivotBuilder() {
     } catch (err) {
       setFilterPagesStatus(null);
       setExportError(err.message);
+    } finally {
+      setFilterPagesRunning(false);
     }
   };
 
   // Excel's Analyze › Clear: Clear All empties the pivot (the same as Reset); Clear Filters drops
   // every filter, leaving a slicer/timeline field with an "(All)" entry so the widget stays.
+  // A Report Filter field (and a slicer's/timeline's) goes back to "(All)" rather than leaving — like
+  // Excel, Clear Filters keeps the fields where they are (it used to drop the Filters-area fields).
   const handleClearFilters = () =>
-    setRequest((prev) => ({
+    editRequest((prev) => ({
       ...prev,
       filters: prev.filters
-        .filter((f) => prev.slicerFields.includes(f.field) || prev.timelineFields.includes(f.field))
+        .filter((f) => !prev.rows.includes(f.field) && !prev.columns.includes(f.field))
         .filter((f, i, all) => all.findIndex((x) => x.field === f.field) === i)
         .map((f) => ({ field: f.field, mode: "Members", includedMembers: [] })),
     }));
@@ -1019,8 +1046,8 @@ export default function PivotBuilder() {
               spacing (flex gap / mt-4) when they're actually shown. */}
           <div>
             <PivotToolbar
-              request={request}
-              onChange={setRequest}
+              request={editingRequest}
+              onChange={editRequest}
               measureOptions={measures.map((m) => ({ value: m.field, label: m.displayName }))}
               dimensions={dimensions}
               pivotOptions={pivotOptions}
@@ -1040,12 +1067,9 @@ export default function PivotBuilder() {
                 onClearAll: handleReset,
                 onClearFilters: handleClearFilters,
                 // Report Filter fields = the Filters area's fields (one still at "(All)" too — it isn't
-                // in the query, but it's exactly the field Excel offers), not on Rows/Columns.
-                reportFilterFields: lastQuery
-                  ? [...new Set(request.filters.map((f) => f.field).filter(Boolean))]
-                      .filter((f) => !request.rows.includes(f) && !request.columns.includes(f))
-                      .map((field) => ({ field, label: fieldLabels([field], dimensions)[0] }))
-                  : [],
+                // in the query, but it's exactly the field Excel offers), not on Rows/Columns, and not
+                // a slicer's/timeline's (they aren't in the Report Filter area).
+                reportFilterFields: lastQuery ? reportFilterFieldsOf(request).map((field) => ({ field, label: fieldLabels([field], dimensions)[0] })) : [],
                 onShowReportFilterPages: handleShowReportFilterPages,
                 filterPagesStatus,
               }}
@@ -1053,18 +1077,18 @@ export default function PivotBuilder() {
             {showPivotOptions && (
               <PivotTableOptionsDialog
                 options={pivotOptions}
-                request={request}
+                request={editingRequest}
                 onApply={(options, requestPatch) => {
                   setPivotOptions(options);
                   // Only touch `request` when a query-affecting setting really changed (it re-runs).
                   // Turning "Allow multiple filters per field" off keeps one filter per field (the
                   // backend would reject the rest).
-                  const differs = (key, value) => (typeof value === "boolean" ? Boolean(request[key]) !== value : JSON.stringify(request[key]) !== JSON.stringify(value));
+                  const differs = (key, value) => (typeof value === "boolean" ? Boolean(editingRequest[key]) !== value : JSON.stringify(editingRequest[key]) !== JSON.stringify(value));
                   if (Object.entries(requestPatch).some(([key, value]) => differs(key, value))) {
-                    setRequest({
-                      ...request,
+                    editRequest({
+                      ...editingRequest,
                       ...requestPatch,
-                      filters: requestPatch.allowMultipleFiltersPerField ? request.filters : onePerField(request.filters),
+                      filters: requestPatch.allowMultipleFiltersPerField ? editingRequest.filters : onePerField(editingRequest.filters),
                     });
                   }
                 }}
@@ -1114,7 +1138,7 @@ export default function PivotBuilder() {
                   const nextScoped = scoped.some(isThis)
                     ? scoped.filter((e) => !isThis(e))
                     : [...scoped, { outerUniqueNames, memberUniqueName: uniqueName, ancestors: row.drill.ancestorUniqueNames }];
-                  setRequest({ ...request, rowsHierarchyDrilldown: { ...current, scopedExpansions: nextScoped } });
+                  editRequest({ ...editingRequest, rowsHierarchyDrilldown: { ...current, scopedExpansions: nextScoped } });
                   return;
                 }
                 // Like Excel, collapsing a member REMEMBERS the expansions under it (Drilldown v2,
@@ -1137,7 +1161,7 @@ export default function PivotBuilder() {
                 const expanded = collapsing
                   ? current.expandedMemberUniqueNames.filter((u) => u !== uniqueName)
                   : [...current.expandedMemberUniqueNames, uniqueName];
-                setRequest({ ...request, rowsHierarchyDrilldown: { ...current, expandedMemberUniqueNames: expanded, expandedAncestors: ancestors } });
+                editRequest({ ...editingRequest, rowsHierarchyDrilldown: { ...current, expandedMemberUniqueNames: expanded, expandedAncestors: ancestors } });
               }}
               // Columns drilldown (C4): its slot in the DISPLAYED columns (lastQuery), and +/- on the
               // header cells. Expansions are per outer item when real Columns fields sit before the
@@ -1154,7 +1178,7 @@ export default function PivotBuilder() {
                 if (!current || !lastQuery) return;
                 const outer = columnsOuterIndexes(lastQuery.columns, current).map((i) => column?.uniqueNames?.[i]);
                 if (outer.some((u) => !u)) return;
-                setRequest({ ...request, columnsHierarchyDrilldown: toggleDrilldownExpansion(current, uniqueName, outer, ancestors) });
+                editRequest({ ...editingRequest, columnsHierarchyDrilldown: toggleDrilldownExpansion(current, uniqueName, outer, ancestors) });
               }}
               // request/onChange, not lastQuery: a header's Sort/Filter menu edits the LIVE field
               // config (same request/setRequest pair FieldPicker already uses) — rows/columns above
@@ -1162,8 +1186,8 @@ export default function PivotBuilder() {
               // displayed, but the edit itself targets the live request, same as every other
               // Sort/Filter control in FieldPicker (still needs Run query to take effect — this isn't
               // a special case, just a new entry point into the same existing flow).
-              request={request}
-              onChange={setRequest}
+              request={editingRequest}
+              onChange={editRequest}
               onRefresh={runQuery}
               onHideFieldList={() => setShowFieldList(false)}
               pivotOptions={pivotOptions}

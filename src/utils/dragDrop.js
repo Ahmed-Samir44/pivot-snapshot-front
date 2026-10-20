@@ -130,7 +130,9 @@ export function removeFieldEverywhere(request, field) {
     ...request,
     rows,
     columns,
-    values: request.values.filter((v) => v.field !== field),
+    // A Show Values As base field on the removed field (Rows OR Columns) would leave a query the
+    // backend rejects.
+    values: clearDanglingBaseFieldReferences(request.values.filter((v) => v.field !== field), [...rows, ...columns]),
     filters: request.filters.filter((f) => f.field !== field),
     dateGroupings: request.dateGroupings.filter((g) => g.field !== field),
     numericGroupings: request.numericGroupings.filter((g) => g.field !== field),

@@ -479,12 +479,21 @@ function cellHasDetails(request, valueField, row, column) {
   const isDimensionField = valueField.field.startsWith("[");
   const isCalculatedField = request.calculatedFields.some((cf) => cf.name === valueField.field);
   const isCalculatedItem = Boolean(row.isCalculatedItem) || Boolean(column.isCalculatedItem);
+  // A Group Selection item is a calculated member too — SSAS can't drill through it (2026-10-20).
+  const groupNames = (request.itemGroups ?? []).map((g) => `.[${g.name}]`);
+  const isGroupItem = [...(row.uniqueNames ?? []), ...(column.uniqueNames ?? [])].some((u) => groupNames.some((n) => u?.endsWith(n)));
   // A value saved without showValuesAs is a plain one (the backend's default is Normal too).
-  return Boolean(row.uniqueNames) && Boolean(column.uniqueNames) && (valueField.showValuesAs ?? "Normal") === "Normal" && !isDimensionField && !isCalculatedField && !isCalculatedItem;
+  return (
+    Boolean(row.uniqueNames) &&
+    Boolean(column.uniqueNames) &&
+    (valueField.showValuesAs ?? "Normal") === "Normal" &&
+    !isDimensionField &&
+    !isCalculatedField &&
+    !isCalculatedItem &&
+    !isGroupItem
+  );
 }
 
-// showDetailsEnabled: PivotTable Options > Data > "Enable show details" — off, Show Details stays
-// in the menu but grayed out, like Excel.
 // Excel's right-click menu on a ROW LABEL (2026-10-20): Copy, Sort, Filter (Keep Only / Hide /
 // Clear Filter From), Expand/Collapse (the item, the entire field), Move (Up / Down / To Beginning /
 // To End — a manual order, LevelSort.CustomOrder), Remove the field. Flat sections instead of
@@ -493,7 +502,7 @@ function MenuSection({ children }) {
   return <p className="px-2 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">{children}</p>;
 }
 
-function RowLabelContextMenu({ x, y, level, label, field, fieldLabel, request, onChange, onClose, fieldCollapse, onToggleItem, itemCollapsed, onMove }) {
+function RowLabelContextMenu({ x, y, level, label, filterable = true, field, fieldLabel, request, onChange, onClose, fieldCollapse, onToggleItem, itemCollapsed, onMove }) {
   const allowMultipleFilters = Boolean(request.allowMultipleFiltersPerField);
   const manual = request.filters.find((f) => f.field === field && filterKind(f) === 0);
   const hasFilter = request.filters.some((f) => f.field === field);
@@ -533,10 +542,17 @@ function RowLabelContextMenu({ x, y, level, label, field, fieldLabel, request, o
           Sort Z → A
         </button>
         <MenuSection>Filter</MenuSection>
-        <button type="button" className={itemClass} onClick={run(keepOnly)}>
+        <button type="button" className={itemClass} disabled={!filterable} onClick={run(keepOnly)}>
           Keep Only Selected Items
         </button>
-        <button type="button" className={itemClass} onClick={run(hide)}>
+        {/* Hiding the only item left would empty the selection — which means "no filter", so every
+            item would come back. Excel greys it out there too. */}
+        <button
+          type="button"
+          className={itemClass}
+          disabled={!filterable || (manual?.mode === "Members" && manual.includedMembers.length === 1 && manual.includedMembers[0] === label)}
+          onClick={run(hide)}
+        >
           Hide Selected Items
         </button>
         <button type="button" className={itemClass} disabled={!hasFilter} onClick={run(() => onChange({ ...request, filters: request.filters.filter((f) => f.field !== field) }))}>
@@ -584,6 +600,8 @@ function RowLabelContextMenu({ x, y, level, label, field, fieldLabel, request, o
   );
 }
 
+// showDetailsEnabled: PivotTable Options > Data > "Enable show details" — off, Show Details stays
+// in the menu but grayed out, like Excel.
 function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, measureIndex, sortAxis, row, column, onShowDetails, onRefresh, displayValue, onHideFieldList, onOpenPivotTableOptions, showDetailsEnabled = true, onCopyRange = null }) {
   const [panel, setPanel] = useState("root");
   const format = valueField.format ?? DEFAULT_FORMAT;
@@ -1141,6 +1159,12 @@ export default function PivotGrid({
     if (displayRow.kind === "subtotal" || displayRow.kind === "grand" || displayRow.path.length <= level) return {};
     const label = displayRow.path[level];
     const parentKey = JSON.stringify(displayRow.path.slice(0, level));
+    // A group's own label, or a date/number bucket ("Q1 2025", "0-10"), isn't a cube member — Keep
+    // Only/Hide would filter on a name the cube doesn't have (found in review 2026-10-20).
+    const filterable =
+      !(request.itemGroups ?? []).some((g) => g.field === field && g.name === label) &&
+      !request.dateGroupings.some((g) => g.field === field) &&
+      !request.numericGroupings.some((g) => g.field === field);
     return {
       onContextMenu: (e) => {
         e.preventDefault();
@@ -1149,6 +1173,7 @@ export default function PivotGrid({
           y: e.clientY,
           level,
           label,
+          filterable,
           path: displayRow.path,
           field,
           fieldLabel: rowFieldLayouts[level]?.customName || rowFieldLabels[level] || field,
@@ -1227,6 +1252,10 @@ export default function PivotGrid({
   // collapsed/hidden rows the same way the mouse already does (clicking a collapsed group's hidden
   // detail rows isn't possible either, since they're not rendered at all).
   const handleGridKeyDown = (e) => {
+    // Keys typed in a popover/menu (portaled, but React still bubbles them here) or in any input
+    // belong to that control — Ctrl+C in a filter search box must copy its text, not the cell range.
+    const target = e.target;
+    if (!e.currentTarget.contains(target) || target.closest?.("input, textarea, select, [contenteditable='true']")) return;
     // Ctrl+C / ⌘C copies the selected range, like Excel.
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && selectedCell) {
       e.preventDefault();

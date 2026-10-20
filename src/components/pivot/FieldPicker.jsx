@@ -10,7 +10,7 @@ import MemberCheckboxList from "../forms/MemberCheckboxList";
 import Popover from "../forms/Popover";
 import { getMembers } from "../../services/cubeMetaApi";
 import { formatNumber } from "../../utils/numberFormat";
-import { LABEL_FILTERS, VALUE_FILTERS, DATE_FILTERS, DATE_PERIODS, TOP_10_MODES, TOP_10_MODE_SET, isLabelMode, isDateMode, isTop10Mode, isRangeMode, isValueCompareMode, top10Parts } from "../../utils/filterModes";
+import { LABEL_FILTERS, VALUE_FILTERS, DATE_FILTERS, DATE_PERIODS, TOP_10_MODES, TOP_10_MODE_SET, isLabelMode, isDateMode, isTop10Mode, isRangeMode, isValueCompareMode, top10Parts, isRuleFilterComplete } from "../../utils/filterModes";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import {
   setFieldDragPayload,
@@ -670,10 +670,13 @@ const DATE_FILTER_GROUPS = [
 ];
 // Every Top 10 variant (Percent/Sum, Bottom…) counts too, though the list shows one "Top 10…".
 const MORE_FILTER_MODES = new Set([...MORE_FILTER_GROUPS.flatMap((g) => g.options.map((o) => o.value)), ...TOP_10_MODE_SET, ...DATE_FILTERS.map((f) => f.value), "DatePeriod"]);
-// The cube's date members read like "1/31/2025" — how FilterRow tells a date field from its items.
+// The cube's date members read like "1/31/2025" (or ISO "2025-01-31") — how FilterRow tells a date
+// field from its items. Most, not all, of a sample: a date field can also hold an "Unknown" member
+// (one non-date item used to hide Date Filters — found in review 2026-10-20).
 const looksLikeDates = (members) => {
-  const sample = members.filter(Boolean).slice(0, 8);
-  return sample.length > 0 && sample.every((m) => /^\d{1,2}\/\d{1,2}\/\d{4}\b/.test(m));
+  const sample = members.filter(Boolean).slice(0, 20);
+  const dates = sample.filter((m) => /^(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\b/.test(m)).length;
+  return dates >= 3 && dates >= sample.length * 0.8;
 };
 
 // One filter's member list is only fetched once its field is chosen (and only needed for
@@ -1027,7 +1030,10 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
               direction and unit pick the mode (TOP_10_MODES); Items uses n, Percent/Sum use value. */}
           {isTop10Mode(mode) && (() => {
             const { direction, unit } = top10Parts(mode);
-            const setParts = (nextDirection, nextUnit) => setDraft((prev) => ({ ...prev, mode: TOP_10_MODES[nextDirection][nextUnit] }));
+            // Percent/Sum read `value` — start it at 10 like Excel's dialog (it was left empty, and the
+            // filter was then silently dropped from the query).
+            const setParts = (nextDirection, nextUnit) =>
+              setDraft((prev) => ({ ...prev, mode: TOP_10_MODES[nextDirection][nextUnit], value: nextUnit === "Items" ? prev.value : (prev.value ?? 10) }));
             return (
               <div className="flex flex-wrap items-center gap-2">
                 <select className={nativeSelectClass} value={direction} onChange={(e) => setParts(e.target.value, unit)}>
@@ -1130,7 +1136,9 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
           <button
             type="button"
             onClick={handleOk}
-            disabled={emptyMeansAll && noneChecked}
+            // A rule filter missing its text/number/measure would be stored but never sent (the query
+            // drops incomplete filters) — so OK waits until it's complete, like Excel's dialogs.
+            disabled={(emptyMeansAll && noneChecked) || (isMoreFilterMode && !isRuleFilterComplete(draft))}
             className="btn-primary px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
           >
             OK
@@ -3384,6 +3392,8 @@ export default function FieldPicker({
                   ...value,
                   rows,
                   columns,
+                  // A Show Values As base field can be a Columns field (2026-10-20) — dropped with it.
+                  values: clearDanglingBaseFieldReferences(value.values, [...rows, ...columns]),
                   dateGroupings,
                   numericGroupings,
                   calculatedItems,
@@ -3447,7 +3457,7 @@ export default function FieldPicker({
                 // A Value's baseField (Show Values As PercentOf/DifferenceFrom/PercentDifferenceFrom)
                 // targets a Rows field — removed here, same dangling-reference class as
                 // clearDanglingMeasureReferences above, just for Rows instead of Values.
-                const values = clearDanglingBaseFieldReferences(value.values, [...rows, ...value.columns]);
+                const values = clearDanglingBaseFieldReferences(value.values, [...rows, ...columns]);
                 // A field's own Field Settings Subtotals override is meaningless once it's left
                 // Rows — same orphaned-per-field-config cleanup as dateGroupings/numericGroupings/
                 // calculatedItems above, just for fieldSubtotals (added 2026-10-13).

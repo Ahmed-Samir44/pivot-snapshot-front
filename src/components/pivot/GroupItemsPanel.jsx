@@ -49,7 +49,10 @@ export default function GroupItemsPanel({ field, request, onChange, onBack, onDo
     ? "Enter a name."
     : /[[\]]/.test(trimmedName)
       ? "A name can't contain [ or ]."
-      : groups.some((g) => g.name === trimmedName) || available.includes(trimmedName) || grouped.has(trimmedName)
+      : groups.some((g) => g.name === trimmedName) ||
+          available.includes(trimmedName) ||
+          grouped.has(trimmedName) ||
+          (request.calculatedItems ?? []).some((i) => i.field === field && i.name === trimmedName)
         ? "That name is already an item of this field."
         : null;
 
