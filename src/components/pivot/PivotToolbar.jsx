@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
 import { Sigma, Rows3, Rows4, Calculator, ListPlus, LayoutGrid, CalendarRange, Settings2, SquarePlus, Heading, PanelRight, TableProperties, Eraser, Files } from "lucide-react";
 import Popover from "../forms/Popover";
 import { CalculatedFieldDialog, CalculatedItemDialog } from "./FieldPicker";
@@ -66,23 +66,57 @@ const TABS = [
 // panelClassName widens the panel for a bigger dialog (Popover's default caps it at 26rem, and a
 // dialog wider than that spilled its buttons out of the card — caught live 2026-10-14). Every ribbon
 // panel also opens a little lower (!mt-6), clear of the group caption under the button ("Calculations").
-function RibbonButton({ icon: Icon, label, badge, panelClassName = "", children }) {
+// Excel's narrow ribbon (2026-10-20, from a screenshot at 120% zoom: the Show group had scrolled out
+// of view): when the full ribbon doesn't fit, its large icon-over-label buttons become small
+// icon-beside-label buttons stacked three high in each group — set by PivotToolbar, read here.
+const RibbonCompact = createContext(false);
+
+function ribbonButtonClass(compact, extra = "") {
+  return compact
+    ? `relative flex h-[21px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1.5 text-ink ${extra}`
+    : `relative flex h-16 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded px-1 text-ink ${extra}`;
+}
+
+function RibbonButtonFace({ icon: Icon, label, badge = 0 }) {
+  const compact = useContext(RibbonCompact);
+  return (
+    <>
+      <Icon className={compact ? "h-4 w-4 shrink-0 text-ink/70" : "h-5 w-5 text-ink/70"} />
+      <span className={compact ? "text-[11px] leading-none" : "text-center text-[11px] leading-tight"}>{label}</span>
+      {badge > 0 && (
+        <span
+          className={`flex h-4 w-4 items-center justify-center rounded-full bg-gold text-[10px] font-bold text-white ${compact ? "ml-0.5" : "absolute right-1 top-1"}`}
+        >
+          {badge}
+        </span>
+      )}
+    </>
+  );
+}
+
+// A plain (non-dropdown) ribbon button — Options, and the Show group's toggles (`pressed`).
+function RibbonPlainButton({ icon, label, onClick, pressed }) {
+  const compact = useContext(RibbonCompact);
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={ribbonButtonClass(compact, pressed ? "bg-gold/15 ring-1 ring-gold/40" : "hover:bg-black/5")}
+    >
+      <RibbonButtonFace icon={icon} label={label} />
+    </button>
+  );
+}
+
+function RibbonButton({ icon, label, badge, panelClassName = "", children }) {
+  const compact = useContext(RibbonCompact);
   return (
     <Popover
       panelClassName={`!mt-6 ${panelClassName}`}
       trigger={(toggle) => (
-        <button
-          type="button"
-          onClick={toggle}
-          className="relative flex h-16 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded px-1 text-ink hover:bg-black/5"
-        >
-          <Icon className="h-5 w-5 text-ink/70" />
-          <span className="text-center text-[11px] leading-tight">{label}</span>
-          {badge > 0 && (
-            <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold text-[10px] font-bold text-white">
-              {badge}
-            </span>
-          )}
+        <button type="button" onClick={toggle} className={ribbonButtonClass(compact, "hover:bg-black/5")}>
+          <RibbonButtonFace icon={icon} label={label} badge={badge} />
         </button>
       )}
     >
@@ -104,9 +138,11 @@ function RibbonButton({ icon: Icon, label, badge, panelClassName = "", children 
 // One ribbon "group" — a cluster of buttons with a shared bottom caption and a divider on its
 // right, exactly Excel's own group convention (e.g. "Calculations", "Layout").
 function RibbonGroup({ label, children }) {
+  const compact = useContext(RibbonCompact);
   return (
     <div className="flex h-full flex-col items-stretch border-r border-slate-300/70 px-2 pt-1">
-      <div className="flex flex-1 items-start gap-1">{children}</div>
+      {/* Narrow ribbon: small buttons fill each column top to bottom, three to a column. */}
+      <div className={compact ? "grid h-16 flex-1 grid-flow-col grid-rows-3 content-start items-center gap-x-1" : "flex flex-1 items-start gap-1"}>{children}</div>
       <p className="pb-1 text-center text-[10px] text-muted">{label}</p>
     </div>
   );
@@ -147,7 +183,38 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
   const availableForSlicer = dimensions.filter((d) => !request.slicerFields.includes(d.field));
   const availableForTimeline = dimensions.filter((d) => d.isDate && !request.timelineFields.includes(d.field));
 
+  // Narrow ribbon (see RibbonCompact): the full-size ribbon's width is measured while it's full size
+  // (per tab — each tab has its own groups), and the small buttons are used whenever the space is
+  // narrower than that. Measured before paint, so there's no flicker.
+  const surfaceRef = useRef(null);
+  const [compact, setCompact] = useState(false);
+  const compactRef = useRef(false);
+  const fullWidthRef = useRef(0);
+  useLayoutEffect(() => {
+    const el = surfaceRef.current;
+    if (!el) return undefined;
+    const check = () => {
+      if (!compactRef.current) fullWidthRef.current = el.scrollWidth;
+      const next = el.clientWidth < fullWidthRef.current;
+      if (next !== compactRef.current) {
+        compactRef.current = next;
+        setCompact(next);
+      }
+    };
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [tab]);
+  const switchTab = (key) => {
+    // Re-measure the new tab at full size first.
+    compactRef.current = false;
+    setCompact(false);
+    setTab(key);
+  };
+
   return (
+    <RibbonCompact.Provider value={compact}>
     <div className="mb-3 overflow-hidden rounded-xl border border-slate-300/70 bg-white shadow-sm">
       {/* Tab strip — Excel's active tab merges into the ribbon surface below it (no border between
           them); inactive tabs sit on the title-bar-colored strip above that surface. */}
@@ -156,7 +223,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
           <button
             key={t.key}
             type="button"
-            onClick={() => setTab(t.key)}
+            onClick={() => switchTab(t.key)}
             className={`-mb-px border-b-2 px-1 pb-1.5 text-xs font-medium ${
               tab === t.key ? "border-gold bg-white text-gold-strong" : "border-transparent text-muted hover:text-ink"
             }`}
@@ -170,7 +237,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
       {/* overflow-x-auto (2026-10-19): on a narrow window the groups scroll sideways instead of
           being cut off (the Calculations/Show groups used to vanish). Dropdown panels render in a
           portal, so this doesn't clip them. */}
-      <div className="custom-scrollbar flex items-stretch gap-0 overflow-x-auto bg-slate-50 px-2 py-1">
+      <div ref={surfaceRef} className="custom-scrollbar flex items-stretch gap-0 overflow-x-auto bg-slate-50 px-2 py-1">
         {tab === "design" && (
           <RibbonGroup label="Layout">
             {/* Real Excel's own Design tab "Grand Totals"/"Subtotals" are each a 4-/3-way DROPDOWN,
@@ -337,7 +404,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
             button that opens the PivotTable Options dialog (2026-10-18). */}
         {tab === "analyze" && pivotOptions && (
           <RibbonGroup label="PivotTable">
-            <div className="flex h-16 w-40 flex-col justify-center gap-1 px-1">
+            <div className={`flex flex-col justify-center gap-1 px-1 ${compact ? "row-span-3 h-16 w-32" : "h-16 w-40"}`}>
               <label className="text-[11px] text-muted" htmlFor="pivot-table-name">
                 PivotTable Name:
               </label>
@@ -354,14 +421,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                 className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-gold"
               />
             </div>
-            <button
-              type="button"
-              onClick={onOpenPivotTableOptions}
-              className="relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded px-1 text-ink hover:bg-black/5"
-            >
-              <Settings2 className="h-5 w-5 text-ink/70" />
-              <span className="text-center text-[11px] leading-tight">Options</span>
-            </button>
+            <RibbonPlainButton icon={Settings2} label="Options" onClick={onOpenPivotTableOptions} />
             {/* Excel's Options ▸ Show Report Filter Pages (2026-10-20): one copy of the pivot per item
                 of a Report Filter field — here, one sheet each in a downloaded workbook. */}
             {actions && (
@@ -504,38 +564,18 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
         {tab === "analyze" && pivotOptions && (
           <RibbonGroup label="Show">
             {/* Excel's "Field List" toggle — hides the field pane so the grid gets the full width. */}
-            {onToggleFieldList && (
-              <button
-                type="button"
-                aria-pressed={fieldListShown}
-                onClick={onToggleFieldList}
-                className={`flex h-16 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded px-1 text-ink ${fieldListShown ? "bg-gold/15 ring-1 ring-gold/40" : "hover:bg-black/5"}`}
-              >
-                <PanelRight className="h-5 w-5 text-ink/70" />
-                <span className="text-center text-[11px] leading-tight">Field List</span>
-              </button>
-            )}
+            {onToggleFieldList && <RibbonPlainButton icon={PanelRight} label="Field List" pressed={fieldListShown} onClick={onToggleFieldList} />}
             {[
               { key: "showExpandButtons", label: "+/- Buttons", icon: SquarePlus },
               { key: "showFieldCaptions", label: "Field Headers", icon: Heading },
-            ].map(({ key, label, icon: Icon }) => {
+            ].map(({ key, label, icon }) => {
               const on = pivotOptions[key] !== false;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => onPivotOptionsChange({ ...pivotOptions, [key]: !on })}
-                  className={`flex h-16 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded px-1 text-ink ${on ? "bg-gold/15 ring-1 ring-gold/40" : "hover:bg-black/5"}`}
-                >
-                  <Icon className="h-5 w-5 text-ink/70" />
-                  <span className="text-center text-[11px] leading-tight">{label}</span>
-                </button>
-              );
+              return <RibbonPlainButton key={key} icon={icon} label={label} pressed={on} onClick={() => onPivotOptionsChange({ ...pivotOptions, [key]: !on })} />;
             })}
           </RibbonGroup>
         )}
       </div>
     </div>
+    </RibbonCompact.Provider>
   );
 }
