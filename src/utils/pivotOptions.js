@@ -58,6 +58,9 @@ export function filterAreaSlot(index, count, options = DEFAULT_PIVOT_OPTIONS) {
 export function filterValueSummary(filter) {
   if (filter.mode === "Members" || filter.mode === "Exclude" || !filter.mode) {
     if (filter.includedMembers.length === 0) return "(All)";
+    // Exclude lists the HIDDEN items — every other item is still selected (it used to show the
+    // excluded item's name as if it were the one selected; found by the first frontend tests).
+    if (filter.mode === "Exclude") return "(Multiple Items)";
     if (filter.includedMembers.length === 1) return filter.includedMembers[0] === "" ? "(blank)" : filter.includedMembers[0];
     return "(Multiple Items)";
   }
