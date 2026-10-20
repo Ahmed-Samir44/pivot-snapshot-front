@@ -72,7 +72,7 @@ export default function ContextMenu({ x, y, onClose, children }) {
     <div
       ref={menuRef}
       style={{ position: "fixed", top: position.top, left: position.left }}
-      className="z-50 min-w-[14rem] max-w-[20rem] rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-xl"
+      className="z-50 min-w-[14rem] max-w-[20rem] rounded-lg border border-slate-200 bg-white p-1 text-sm shadow-lg"
       onMouseDown={(e) => e.stopPropagation()}
     >
       {children}

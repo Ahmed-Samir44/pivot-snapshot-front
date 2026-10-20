@@ -145,8 +145,8 @@ export default function Popover({
       // Totals/No-Data Items/Calculated Field/Calculated Item, all sitting directly above
       // the "Run query" button with barely any gap) needs opening one of these to actually
       // push Run query down, not float a panel over it regardless of panel height.
-      `mt-2 min-w-[22rem] max-w-[26rem] rounded-xl border border-slate-200 bg-white p-4 shadow-xl ${panelClassName}`
-    : `fixed z-50 mt-2 min-w-[22rem] max-w-[26rem] rounded-xl border border-slate-200 bg-white p-4 shadow-xl ${panelClassName}`;
+      `mt-2 min-w-[22rem] max-w-[26rem] rounded-lg border border-slate-200 bg-white p-4 shadow-lg ${panelClassName}`
+    : `fixed z-50 mt-2 min-w-[22rem] max-w-[26rem] rounded-lg border border-slate-200 bg-white p-4 shadow-lg ${panelClassName}`;
 
   const panel = open && (
     <div

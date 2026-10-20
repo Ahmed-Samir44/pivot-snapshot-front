@@ -2,48 +2,44 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Component classes ported from the Segmentation project so both tools share one visual
-   language (same glass-panel/button/input/card treatment) instead of diverging designs. */
+/* Shared component classes. Flat enterprise surfaces (2026-10-20 UI refresh, Fluent/Slate style):
+   white panels with a slate-200 hairline and a barely-there shadow on a slate-50 canvas — no
+   gradients, glass blur or hover scaling, which competed with the data. The HMIS Analytics gold
+   stays as the ONE accent (primary action, focus ring, active state), used sparingly. */
 @layer base {
   body {
-    @apply bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 text-ink font-sans antialiased;
+    @apply bg-slate-50 text-ink font-sans antialiased;
   }
 }
 
 @layer components {
+  /* Name kept so every existing caller picks up the flat look without a rename. */
   .glass-panel {
-    @apply bg-white/80 backdrop-blur-xl border border-white/50 rounded-2xl shadow-xl;
+    @apply bg-white border border-slate-200 rounded-lg shadow-sm;
   }
 
   .btn-primary {
-    @apply bg-gradient-to-r from-gold to-gold-strong text-white font-bold py-2 px-4 rounded-xl shadow-gold-button hover:shadow-gold-button-hover transition-all duration-200 hover:scale-105;
+    @apply bg-gold text-white font-semibold py-2 px-4 rounded-md border border-gold-strong/40 shadow-sm transition-colors duration-150 hover:bg-gold-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 focus-visible:ring-offset-1;
   }
 
   .btn-secondary {
-    @apply bg-white/90 text-ink font-semibold py-2 px-4 rounded-xl border border-slate-200 shadow-md hover:shadow-lg transition-all duration-200 hover:scale-105;
+    @apply bg-white text-ink font-medium py-2 px-4 rounded-md border border-slate-300 shadow-sm transition-colors duration-150 hover:bg-slate-50 hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 focus-visible:ring-offset-1;
   }
 
   .input-field {
-    @apply w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/90 focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent transition-all duration-200;
+    @apply w-full px-3 py-2 rounded-md border border-slate-300 bg-white text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-gold/40 focus:border-gold transition-colors duration-150;
   }
 
   .card {
-    @apply glass-panel p-6 hover:shadow-2xl transition-all duration-300;
+    @apply glass-panel p-4;
   }
 
-  /* Thin, gold-tinted scrollbar replacing the browser's own default — requested live 2026-10-07
-     for Modal.jsx's snapshot preview, whose default OS scrollbar also squared off the card's
-     rounded corners on the side it sits on (a plain `overflow-auto` scrollbar doesn't respect its
-     container's own border-radius). Kept as a reusable class (not Modal-specific) since any other
-     scrollable box in the app (PivotGrid's grid area, FieldPicker's field list) has the exact same
-     default-scrollbar-vs-rounded-corner mismatch, should it ever come up there too. Firefox
-     (scrollbar-width/scrollbar-color) and WebKit/Chromium (::-webkit-scrollbar-*) need separate
-     rules — there's no single cross-browser scrollbar-styling property yet.
-     stroke/transparent track (not a filled one) so it blends into whatever background sits behind
-     the scrollable box instead of drawing its own, unrelated rectangle. */
+  /* Thin scrollbar replacing the OS default, so a scrollbar never squares off a rounded box.
+     Neutral slate (was gold) — a scrollbar is chrome, not an accent. Firefox (scrollbar-*) and
+     Chromium (::-webkit-scrollbar-*) need separate rules. */
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: theme('colors.gold.DEFAULT') transparent;
+    scrollbar-color: theme('colors.slate.300') transparent;
   }
   .custom-scrollbar::-webkit-scrollbar {
     width: 8px;
@@ -53,9 +49,9 @@
     background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    @apply bg-gold/60 rounded-full;
+    @apply bg-slate-300 rounded-full;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    @apply bg-gold-strong;
+    @apply bg-slate-400;
   }
 }

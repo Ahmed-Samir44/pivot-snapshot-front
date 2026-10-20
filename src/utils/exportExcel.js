@@ -5,6 +5,8 @@ import { DEFAULT_PIVOT_OPTIONS, ERROR_TOKEN, filterAreaSlot, filterValueSummary 
 import { isErrorValue } from "./errorCells";
 import { measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "./measuresPlacement";
 import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "./conditionalFormat";
+import { buildPivotSource, addPivotTableToXlsx } from "./excelPivot";
+import { cellFormatKey, hasCellFormats } from "./cellFormats";
 
 // ExcelJS wants ARGB ("FFRRGGBB"), this app's own ConditionalFormat colors are plain "#RRGGBB" —
 // alpha is always opaque (FF), matching every hardcoded color this export already used before
@@ -189,8 +191,31 @@ export async function exportPivotToExcel({
   // Show Report Filter Pages (2026-10-20): several pivots as sheets of ONE workbook — pass the
   // workbook (and a sheet name) and it's only added to, not downloaded; see downloadWorkbook.
   workbook: targetWorkbook = null,
-  sheetName = "Pivot",
+  // The sheet's name — by default the PivotTable Name (2026-10-20, ribbon/Options), so the name the
+  // user gave the pivot is what they see on the sheet tab. Report Filter Pages pass the item instead.
+  sheetName = null,
+  // A real Excel PivotTable over a Data sheet (2026-10-20, see excelPivot.js) — false keeps plain
+  // cells. Not for a sheet added to a shared workbook (Report Filter Pages): one pivot per file.
+  asPivotTable = true,
+  // Formats set on individual cells (Home › Number, utils/cellFormats.js) — they win over the value
+  // field's format, like the live grid.
+  cellFormats = null,
 }) {
+  sheetName = sheetName || pivotOptions.name?.trim() || "Pivot";
+  // When Excel can rebuild these numbers from detail rows, the sheet becomes a PivotTable; the cells
+  // drawn below are then only what shows until Excel refreshes it on open (Protected View), so they
+  // stay plain — no merges, fills or conditional formats, which would get in the pivot's way.
+  // Cell formats can't be carried by the generated PivotTable (it formats whole value fields), so a
+  // pivot with any stays plain values that keep them.
+  const pivotSource = !asPivotTable || targetWorkbook
+    ? null
+    : hasCellFormats(cellFormats)
+      ? { ok: false, reason: "cells have their own number formats, which are kept this way" }
+      : buildPivotSource({ result, rows, columns, rowFieldLabels, columnFieldLabels, valueFields, filters, filterFieldLabels, drilldown, drillSlot, columnsDrillSlot });
+  const plain = Boolean(pivotSource?.ok);
+  // As a PivotTable, the filter area holds just the page fields Excel will draw there (a field at
+  // (All) has none — see buildPivotSource), so no stale caption is left beside them.
+  if (plain) filters = filters.filter((f) => !rows.includes(f.field) && !columns.includes(f.field) && filterValueSummary(f) !== "(All)");
   const { rowHeaders, columnHeaders, cells } = result;
   // MAX across every row — a drilldown's rows have different depths.
   const labelDepth = rowHeaders.reduce((max, h) => Math.max(max, h.labels.length), 0);
@@ -224,7 +249,13 @@ export async function exportPivotToExcel({
   const filterAreaRows = filters.length > 0 ? Math.max(...filterSlots.map((s) => s.row)) + 2 : 0;
 
   const workbook = targetWorkbook ?? new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet(safeSheetName(workbook, sheetName), { views: [{ state: "frozen", xSplit: rowDepth, ySplit: filterAreaRows + columnDepth + (columnFieldLabels.length > 0 ? 1 : 0) }] });
+  const sheet = workbook.addWorksheet(
+    safeSheetName(workbook, sheetName),
+    plain ? {} : { views: [{ state: "frozen", xSplit: rowDepth, ySplit: filterAreaRows + columnDepth + (columnFieldLabels.length > 0 ? 1 : 0) }] },
+  );
+  const mergeCells = (...range) => {
+    if (!plain) sheet.mergeCells(...range);
+  };
 
   filters.forEach((filter, i) => {
     const { column, row } = filterSlots[i];
@@ -243,7 +274,7 @@ export async function exportPivotToExcel({
   // mirrors PivotGrid's own muted pill row above the column headers.
   if (columnFieldLabels.length > 0) {
     const labelRow = sheet.getRow(currentRow);
-    if (rowDepth + 1 <= totalCols) sheet.mergeCells(currentRow, rowDepth + 1, currentRow, totalCols);
+    if (rowDepth + 1 <= totalCols) mergeCells(currentRow, rowDepth + 1, currentRow, totalCols);
     const cell = labelRow.getCell(rowDepth + 1);
     cell.value = showCaptions ? columnFieldLabels.join(" › ") : "";
     cell.font = { italic: true, color: { argb: "FF64748B" } };
@@ -264,7 +295,7 @@ export async function exportPivotToExcel({
         cell.value = !showCaptions ? "" : group.start < group.end ? "Row Labels" : rowFieldLayouts[group.start]?.customName || rowFieldLabels[group.start] || "";
         cell.font = { bold: true };
         cell.fill = HEADER_FILL;
-        if (columnDepth > 1) sheet.mergeCells(columnHeaderStartRow, gi + 1, columnHeaderStartRow + columnDepth - 1, gi + 1);
+        if (columnDepth > 1) mergeCells(columnHeaderStartRow, gi + 1, columnHeaderStartRow + columnDepth - 1, gi + 1);
       });
     }
     // A Grand Total column shows its caption once, in the top header row, like Excel.
@@ -282,7 +313,7 @@ export async function exportPivotToExcel({
       // An outer header spanning its children is left-aligned (Excel's Compact layout) — centered with
       // "Merge and center cells with labels"; a single column stays centered.
       cell.alignment = { horizontal: endCol > startCol && !pivotOptions.mergeLabels ? "left" : "center" };
-      if (endCol > startCol) sheet.mergeCells(currentRow, startCol, currentRow, endCol);
+      if (endCol > startCol) mergeCells(currentRow, startCol, currentRow, endCol);
     }
     currentRow += 1;
   }
@@ -322,7 +353,7 @@ export async function exportPivotToExcel({
       if (lines[0]?.indent) cell.alignment = { indent: lines[0].indent };
       // An outer item's label (span >= 1) is merged and centered; everything else keeps its alignment.
       if (span >= 1) cell.alignment = { horizontal: "center", vertical: "middle" };
-      if (span > 1) sheet.mergeCells(excelRow, gi + 1, excelRow + span - 1, gi + 1);
+      if (span > 1) mergeCells(excelRow, gi + 1, excelRow + span - 1, gi + 1);
       cell.font = { bold: isTotalRow || displayRow.kind === "header" };
       if (isTotalRow) cell.fill = SUBTOTAL_FILL;
     });
@@ -351,18 +382,25 @@ export async function exportPivotToExcel({
       } else {
         cell.value = value;
       }
-      cell.numFmt = excelNumberFormat(formatForColumn(measureIndex, valueFields));
+      cell.numFmt = excelNumberFormat(cellFormats?.[cellFormatKey(rowHeader, colHeader)] ?? formatForColumn(measureIndex, valueFields));
       cell.font = { bold: isTotalCell };
       cell.alignment = { horizontal: "center" };
       if (isTotalCell) cell.fill = SUBTOTAL_FILL;
     });
   });
 
+  // Plain cells under a PivotTable: Excel applies the pivot's own style once it refreshes.
+  if (plain) {
+    sheet.eachRow({ includeEmpty: false }, (row) => row.eachCell({ includeEmpty: false }, (cell) => (cell.style = {})));
+  }
+
   // Native Excel conditional formatting, scoped to each measure's own detail cells (excluding
   // Total/Grand-Total rows or columns — same exclusion detailRangeForColumn/Row already applies
   // for the live grid's min/max, done here as actual excluded RANGES instead, so Excel computes
   // min/max live over just the real data rather than a snapshot of it).
-  if (measuresInRows) {
+  if (plain) {
+    // (none — see above)
+  } else if (measuresInRows) {
     placedRows.forEach(([excelRow, rowIndex]) => {
       const rowHeader = rowHeaders[rowIndex];
       if (rowHeader.isTotal) return;
@@ -410,8 +448,43 @@ export async function exportPivotToExcel({
   }
 
   if (targetWorkbook) return workbook;
-  await downloadWorkbook(workbook, filename);
-  return workbook;
+  if (!plain) {
+    await downloadWorkbook(workbook, filename);
+    return { workbook, pivotTable: false, reason: pivotSource?.reason ?? null };
+  }
+
+  // The PivotTable's source: one row per Rows × Columns item combination (buildPivotSource), on its
+  // own sheet after the pivot, measure columns in each value field's number format.
+  const dataSheet = workbook.addWorksheet(safeSheetName(workbook, "Data"));
+  dataSheet.addRow(pivotSource.fields.map((f) => f.name)).font = { bold: true };
+  pivotSource.data.forEach((record) => dataSheet.addRow(record.map((v) => (v === "" ? null : v))));
+  const numFmtCodes = [];
+  pivotSource.fields.forEach((f, i) => {
+    const column = dataSheet.getColumn(i + 1);
+    column.width = Math.min(Math.max(f.name.length, ...pivotSource.data.slice(0, 200).map((r) => String(r[i] ?? "").length)) + 2, 40);
+    if (f.kind !== "data") return;
+    const code = excelNumberFormat(formatForColumn(f.measureIndex, valueFields));
+    numFmtCodes.push(code);
+    column.numFmt = code;
+  });
+  const lastDataCol = dataSheet.getColumn(pivotSource.fields.length).letter;
+  const pivotTop = 1 + filterAreaRows;
+  const buffer = await workbook.xlsx.writeBuffer();
+  const withPivot = await addPivotTableToXlsx(buffer, {
+    source: pivotSource,
+    name: pivotOptions.name?.trim() || "PivotTable1",
+    pivotSheet: sheet.name,
+    dataSheet: dataSheet.name,
+    dataRef: `A1:${lastDataCol}${pivotSource.data.length + 1}`,
+    location: `A${pivotTop}:${sheet.getColumn(Math.max(totalCols, 1)).letter}${Math.max(currentRow - 1, pivotTop + 1)}`,
+    layout,
+    subtotalsAtBottom: drilldownSubtotals === "Bottom",
+    numFmtCodes,
+    pageOverThenDown: pivotOptions.filterAreaOrder === "OverThenDown",
+    pageWrap: pivotOptions.filterFieldsPerColumn > 0 ? pivotOptions.filterFieldsPerColumn : 0,
+  });
+  downloadBlob(withPivot, filename);
+  return { workbook, pivotTable: true, verified: pivotSource.verified };
 }
 
 // Excel sheet names: at most 31 characters, none of \ / ? * [ ] :, and unique in the workbook. An
@@ -437,7 +510,10 @@ export function createWorkbook() {
 // from Snapshot History saved "5ea6bf54-…" instead of "<pivot>_v1.xlsx"). Characters Windows
 // doesn't allow in a file name are replaced too, so the name is never rejected.
 export async function downloadWorkbook(workbook, filename) {
-  const buffer = await workbook.xlsx.writeBuffer();
+  downloadBlob(await workbook.xlsx.writeBuffer(), filename);
+}
+
+function downloadBlob(buffer, filename) {
   const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const safeName = String(filename ?? "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "Pivot";
   const url = URL.createObjectURL(blob);

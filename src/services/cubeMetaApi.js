@@ -1,4 +1,5 @@
 import { getDataverseAccessToken } from "./dataverseAuth";
+import { apiErrorFrom } from "./apiError";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5191";
 
@@ -14,7 +15,7 @@ async function getJson(path, signal) {
   const accessToken = await getDataverseAccessToken();
   const response = await fetch(`${API_BASE_URL}${path}`, { headers: { Authorization: `Bearer ${accessToken}` }, signal });
   if (!response.ok) {
-    throw new Error(`Request to ${path} failed with status ${response.status}`);
+    throw await apiErrorFrom(response, `Request to ${path} failed with status ${response.status}`);
   }
   return response.json();
 }

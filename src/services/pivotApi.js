@@ -1,4 +1,5 @@
 import { getDataverseAccessToken } from "./dataverseAuth";
+import { apiErrorFrom } from "./apiError";
 import { reviveResultCells } from "../utils/errorCells";
 
 // Falls back to the local dev API port when VITE_API_BASE_URL isn't set. Production builds must
@@ -22,11 +23,10 @@ export async function queryPivot(request, { signal } = {}) {
     signal,
   });
 
-  const data = await response.json();
-
   if (!response.ok) {
-    throw new Error(data.error || "An unexpected error occurred.");
+    throw await apiErrorFrom(response, "An unexpected error occurred.");
   }
+  const data = await response.json();
 
   // Error cells arrive as "NaN" (see utils/errorCells.js).
   return reviveResultCells(data);
@@ -43,11 +43,10 @@ export async function drillthroughPivot(request, { signal } = {}) {
     signal,
   });
 
-  const data = await response.json();
-
   if (!response.ok) {
-    throw new Error(data.error || "An unexpected error occurred.");
+    throw await apiErrorFrom(response, "An unexpected error occurred.");
   }
+  const data = await response.json();
 
   return data;
 }

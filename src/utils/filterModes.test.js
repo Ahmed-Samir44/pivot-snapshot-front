@@ -48,3 +48,13 @@ describe("isRuleFilterComplete (mirrors the backend's ValidateFilterShape)", () 
     expect(isRuleFilterComplete({ mode: "GreaterThanOrEqual", value: 0, byMeasureField: "Revenue" })).toBe(true);
   });
 });
+
+describe("isFilterComplete (what the query and Show Details send)", () => {
+  it("drops a field left at (All) but keeps real filters", async () => {
+    const { isFilterComplete } = await import("./filterModes");
+    expect(isFilterComplete({ field: "[BU]", mode: "Members", includedMembers: [] })).toBe(false);
+    expect(isFilterComplete({ field: "[BU]", mode: "Members", includedMembers: ["ASH"] })).toBe(true);
+    expect(isFilterComplete({ field: "[BU]", mode: "Exclude", includedMembers: [] })).toBe(true);
+    expect(isFilterComplete({ field: "[BU]", mode: "LabelBeginsWith", includedMembers: [], labelText: "" })).toBe(false);
+  });
+});

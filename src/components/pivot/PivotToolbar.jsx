@@ -1,6 +1,7 @@
-import { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
-import { Sigma, Rows3, Rows4, Calculator, ListPlus, LayoutGrid, CalendarRange, Settings2, SquarePlus, Heading, PanelRight, TableProperties, Eraser, Files } from "lucide-react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, DecimalsArrowLeft, DecimalsArrowRight, DollarSign, Percent, Sigma, Rows3, Rows4, Calculator, ListPlus, LayoutGrid, CalendarRange, Settings2, SquarePlus, Heading, PanelRight, TableProperties, Eraser, Files } from "lucide-react";
 import Popover from "../forms/Popover";
+import { NUMBER_FORMAT_CHOICES, accountingStyle, changeDecimals, commaStyle, percentStyle, withFormatType } from "../../utils/numberFormatCommands";
 import { CalculatedFieldDialog, CalculatedItemDialog } from "./FieldPicker";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
 import { applyReportSubtotals } from "../../utils/subtotals";
@@ -53,7 +54,10 @@ function InsertFieldsDialog({ title, fields, emptyText, onOk, onCancel }) {
 // an earlier version of this comment incorrectly assumed they were nested under one combined
 // "Fields, Items & Sets" dropdown; they're genuinely two buttons side by side, matching exactly
 // what's built here).
+const RIBBON_COLLAPSED_KEY = "pivotSnapshot.ribbonCollapsed";
+
 const TABS = [
+  { key: "home", label: "Home" },
   { key: "analyze", label: "PivotTable Analyze" },
   { key: "design", label: "Design" },
 ];
@@ -73,16 +77,36 @@ const RibbonCompact = createContext(false);
 
 function ribbonButtonClass(compact, extra = "") {
   return compact
-    ? `relative flex h-[21px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1.5 text-ink ${extra}`
-    : `relative flex h-16 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded px-1 text-ink ${extra}`;
+    ? `relative flex h-[21px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1.5 text-ink transition-colors ${extra}`
+    : `relative flex h-16 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-md px-1 text-ink transition-colors ${extra}`;
 }
+
+// Each command's icon colour, by family — Excel's ribbon icons are coloured, not grey line art
+// (2026-10-20, "i need the user to be pleased"): layout/totals green, filtering teal, calculations
+// indigo, view toggles gold, destructive red, the rest slate.
+const ICON_TONES = {
+  "Grand Totals": "text-emerald-600",
+  Subtotals: "text-emerald-600",
+  "Report Layout": "text-emerald-600",
+  "Blank Rows": "text-emerald-600",
+  "Insert Slicer": "text-teal-600",
+  "Insert Timeline": "text-teal-600",
+  "Report Filter Pages": "text-sky-600",
+  "Calculated Field": "text-indigo-600",
+  "Calculated Item": "text-indigo-600",
+  "Field List": "text-gold-strong",
+  "+/- Buttons": "text-gold-strong",
+  "Field Headers": "text-gold-strong",
+  Clear: "text-rose-600",
+};
 
 function RibbonButtonFace({ icon: Icon, label, badge = 0 }) {
   const compact = useContext(RibbonCompact);
+  const tone = ICON_TONES[label] ?? "text-slate-600";
   return (
     <>
-      <Icon className={compact ? "h-4 w-4 shrink-0 text-ink/70" : "h-5 w-5 text-ink/70"} />
-      <span className={compact ? "text-[11px] leading-none" : "text-center text-[11px] leading-tight"}>{label}</span>
+      <Icon className={compact ? `h-4 w-4 shrink-0 ${tone}` : `h-6 w-6 ${tone}`} strokeWidth={1.6} />
+      <span className={compact ? "text-xs leading-none text-slate-700" : "text-center text-xs leading-tight text-slate-700"}>{label}</span>
       {badge > 0 && (
         <span
           className={`flex h-4 w-4 items-center justify-center rounded-full bg-gold text-[10px] font-bold text-white ${compact ? "ml-0.5" : "absolute right-1 top-1"}`}
@@ -102,7 +126,7 @@ function RibbonPlainButton({ icon, label, onClick, pressed }) {
       type="button"
       aria-pressed={pressed}
       onClick={onClick}
-      className={ribbonButtonClass(compact, pressed ? "bg-gold/15 ring-1 ring-gold/40" : "hover:bg-black/5")}
+      className={ribbonButtonClass(compact, pressed ? "bg-gold-soft ring-1 ring-inset ring-gold/50" : "hover:bg-slate-100")}
     >
       <RibbonButtonFace icon={icon} label={label} />
     </button>
@@ -115,7 +139,7 @@ function RibbonButton({ icon, label, badge, panelClassName = "", children }) {
     <Popover
       panelClassName={`!mt-6 ${panelClassName}`}
       trigger={(toggle) => (
-        <button type="button" onClick={toggle} className={ribbonButtonClass(compact, "hover:bg-black/5")}>
+        <button type="button" onClick={toggle} className={ribbonButtonClass(compact, "hover:bg-slate-100")}>
           <RibbonButtonFace icon={icon} label={label} badge={badge} />
         </button>
       )}
@@ -135,15 +159,94 @@ function RibbonButton({ icon, label, badge, panelClassName = "", children }) {
   );
 }
 
+// Excel's Home › Number group (2026-10-20): the format dropdown over $ (Accounting, with a currency
+// menu), % (Percent Style), , (Comma Style) and Increase / Decrease Decimal. Like Excel it formats
+// just the selected cells (drag over cells, Shift+click, or click a column header for a column).
+const CURRENCY_SYMBOLS = ["", "EGP", "SAR", "AED", "$", "€", "£"];
+
+function NumberGroup({ selection, onApply }) {
+  const enabled = Boolean(selection?.count || selection?.cellCount);
+  const shared = enabled ? selection.formatType ?? null : null;
+  // fn(format, shownDecimals) → the cell's next format; the grid runs it for each selected cell.
+  const apply = (fn) => enabled && onApply(fn);
+  const hint = enabled ? null : "Select cells in the PivotTable first (click a column header to select a whole column)";
+  const iconButton = "flex h-7 min-w-7 items-center justify-center rounded px-1 text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent";
+  return (
+    <RibbonGroup label="Number">
+      <div className="row-span-3 flex flex-col justify-center gap-1.5 px-1 py-1" title={hint ?? undefined}>
+        <select
+          aria-label="Number Format"
+          disabled={!enabled}
+          value={shared ?? ""}
+          onChange={(e) => e.target.value && apply((f) => withFormatType(f, e.target.value))}
+          className="h-7 w-40 rounded border border-slate-300 bg-white px-1.5 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-gold disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted"
+        >
+          {shared === null && <option value="">{enabled ? "(mixed)" : "General"}</option>}
+          {NUMBER_FORMAT_CHOICES.map((c) => (
+            <option key={c.type} value={c.type}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+        <div className="flex items-center gap-0.5">
+          <button type="button" disabled={!enabled} onClick={() => apply((f) => accountingStyle(f))} className={iconButton} title="Accounting Number Format" aria-label="Accounting Number Format">
+            <DollarSign className="h-4 w-4 text-emerald-600" />
+          </button>
+          <Popover
+            align="left"
+            panelClassName="!min-w-[9rem] !max-w-[9rem] !p-1"
+            trigger={(toggle) => (
+              <button type="button" disabled={!enabled} onClick={toggle} className={`${iconButton} !min-w-4 !px-0`} title="Currency symbol" aria-label="Choose the currency symbol">
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            )}
+          >
+            {(close) => (
+              <div className="flex flex-col text-sm">
+                {CURRENCY_SYMBOLS.map((sym) => (
+                  <button
+                    key={sym || "none"}
+                    type="button"
+                    onClick={() => {
+                      apply((f) => accountingStyle(f, sym));
+                      close();
+                    }}
+                    className="rounded-md px-2 py-1.5 text-left hover:bg-slate-100"
+                  >
+                    {sym || "None"}
+                  </button>
+                ))}
+              </div>
+            )}
+          </Popover>
+          <button type="button" disabled={!enabled} onClick={() => apply(percentStyle)} className={iconButton} title="Percent Style" aria-label="Percent Style">
+            <Percent className="h-4 w-4 text-emerald-600" />
+          </button>
+          <button type="button" disabled={!enabled} onClick={() => apply(commaStyle)} className={`${iconButton} text-base font-bold leading-none text-emerald-700`} title="Comma Style" aria-label="Comma Style">
+            ,
+          </button>
+          <span className="mx-1 h-5 w-px bg-slate-200" aria-hidden="true" />
+          <button type="button" disabled={!enabled} onClick={() => apply((f, shown) => changeDecimals(f, +1, shown))} className={iconButton} title="Increase Decimal" aria-label="Increase Decimal">
+            <DecimalsArrowRight className="h-4 w-4 text-sky-600" />
+          </button>
+          <button type="button" disabled={!enabled} onClick={() => apply((f, shown) => changeDecimals(f, -1, shown))} className={iconButton} title="Decrease Decimal" aria-label="Decrease Decimal">
+            <DecimalsArrowLeft className="h-4 w-4 text-sky-600" />
+          </button>
+        </div>
+      </div>
+    </RibbonGroup>
+  );
+}
+
 // One ribbon "group" — a cluster of buttons with a shared bottom caption and a divider on its
 // right, exactly Excel's own group convention (e.g. "Calculations", "Layout").
 function RibbonGroup({ label, children }) {
   const compact = useContext(RibbonCompact);
   return (
-    <div className="flex h-full flex-col items-stretch border-r border-slate-300/70 px-2 pt-1">
+    <div className="flex h-full flex-col items-stretch border-r border-slate-200 px-2 pt-1 last:border-r-0">
       {/* Narrow ribbon: small buttons fill each column top to bottom, three to a column. */}
       <div className={compact ? "grid h-16 flex-1 grid-flow-col grid-rows-3 content-start items-center gap-x-1" : "flex flex-1 items-start gap-1"}>{children}</div>
-      <p className="pb-1 text-center text-[10px] text-muted">{label}</p>
+      <p className="pb-0.5 text-center text-[10px] text-slate-400">{label}</p>
     </div>
   );
 }
@@ -153,7 +256,9 @@ function RibbonGroup({ label, children }) {
 // fieldListShown/onToggleFieldList: Excel's "Field List" toggle in the Show group; omitted, no button.
 // layout: { reportLayout, repeatItemLabels, fieldLayouts, onReportLayoutChange, onRepeatItemLabelsChange,
 // onFieldLayoutsChange } — the Design tab's Report Layout / Blank Rows (2026-10-20); omitted, not drawn.
-export default function PivotToolbar({ request, onChange, measureOptions, dimensions = [], pivotOptions = null, onPivotOptionsChange = null, onOpenPivotTableOptions = null, fieldListShown = true, onToggleFieldList = null, layout = null, actions = null }) {
+// numberFormat: { selection (the grid's selected range summary, or null), onApply(fn) — formats the
+// selected cells } — Home › Number; omitted, the Home tab has no Number group.
+export default function PivotToolbar({ request, onChange, measureOptions, dimensions = [], allDimensions = null, pivotOptions = null, onPivotOptionsChange = null, onOpenPivotTableOptions = null, fieldListShown = true, onToggleFieldList = null, layout = null, actions = null, numberFormat = null }) {
   const [tab, setTab] = useState("analyze");
   // The name box's text while it's being typed (null = show the saved name); applied on blur/Enter.
   const [nameDraft, setNameDraft] = useState(null);
@@ -180,14 +285,43 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
     onChange({ ...request, timelineFields: [...request.timelineFields, ...added], filters: withFilterEntries(request.filters, added) });
   };
 
-  const availableForSlicer = dimensions.filter((d) => !request.slicerFields.includes(d.field));
-  const availableForTimeline = dimensions.filter((d) => d.isDate && !request.timelineFields.includes(d.field));
+  // Every field of the cube once the full list has loaded (allDimensions), like Excel's Insert Slicers /
+  // Insert Timelines — not just the tables expanded in the Field List (2026-10-20).
+  const insertable = allDimensions?.length ? allDimensions : dimensions;
+  const availableForSlicer = insertable.filter((d) => !request.slicerFields.includes(d.field));
+  const availableForTimeline = insertable.filter((d) => d.isDate && !request.timelineFields.includes(d.field));
 
   // Narrow ribbon (see RibbonCompact): the full-size ribbon's width is measured while it's full size
   // (per tab — each tab has its own groups), and the small buttons are used whenever the space is
   // narrower than that. Measured before paint, so there's no flicker.
   const surfaceRef = useRef(null);
   const [compact, setCompact] = useState(false);
+  // Excel's Collapse the Ribbon (Ctrl+F1, 2026-10-20): only the tab names stay, giving the grid the
+  // ribbon's height; clicking a tab brings the ribbon back. Remembered per browser.
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(RIBBON_COLLAPSED_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(RIBBON_COLLAPSED_KEY, String(collapsed));
+    } catch {
+      // Not remembered — still applies on this page.
+    }
+  }, [collapsed]);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.ctrlKey && e.key === "F1") {
+        e.preventDefault();
+        setCollapsed((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const compactRef = useRef(false);
   const fullWidthRef = useRef(0);
   useLayoutEffect(() => {
@@ -205,39 +339,57 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
     const observer = new ResizeObserver(check);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [tab]);
+  }, [tab, collapsed]);
   const switchTab = (key) => {
     // Re-measure the new tab at full size first.
     compactRef.current = false;
     setCompact(false);
     setTab(key);
+    setCollapsed(false);
   };
 
   return (
     <RibbonCompact.Provider value={compact}>
-    <div className="mb-3 overflow-hidden rounded-xl border border-slate-300/70 bg-white shadow-sm">
-      {/* Tab strip — Excel's active tab merges into the ribbon surface below it (no border between
-          them); inactive tabs sit on the title-bar-colored strip above that surface. */}
-      <div className="flex gap-4 border-b border-slate-300/70 bg-slate-100 px-3 pt-1.5">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => switchTab(t.key)}
-            className={`-mb-px border-b-2 px-1 pb-1.5 text-xs font-medium ${
-              tab === t.key ? "border-gold bg-white text-gold-strong" : "border-transparent text-muted hover:text-ink"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+    <div className="shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      {/* Tab strip — the modern Office ribbon (2026-10-20 UI refresh): flat, one surface, the active
+          tab marked by a short gold underline and bold ink text (was a tinted strip with gold text). */}
+      <div role="tablist" aria-label="Ribbon" className={`flex items-center gap-1 px-2 ${collapsed ? "" : "border-b border-slate-200"}`}>
+        {TABS.map((t) => {
+          const active = tab === t.key && !collapsed;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => switchTab(t.key)}
+              className={`relative px-2.5 py-2 text-xs transition-colors ${active ? "font-semibold text-ink" : "font-medium text-slate-500 hover:text-ink"}`}
+            >
+              {t.label}
+              {active && <span className="absolute inset-x-2.5 bottom-0 h-[2px] rounded-full bg-gold" aria-hidden="true" />}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="ml-auto rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-ink"
+          aria-label={collapsed ? "Expand the ribbon" : "Collapse the ribbon"}
+          title={collapsed ? "Expand the ribbon (Ctrl+F1)" : "Collapse the ribbon (Ctrl+F1)"}
+        >
+          <ChevronUp className={`h-4 w-4 transition-transform ${collapsed ? "rotate-180" : ""}`} />
+        </button>
       </div>
 
-      {/* Ribbon surface — Excel's light gray ribbon background, not a white card. */}
+      {/* Ribbon surface — flat white, groups split by hairlines. */}
       {/* overflow-x-auto (2026-10-19): on a narrow window the groups scroll sideways instead of
           being cut off (the Calculations/Show groups used to vanish). Dropdown panels render in a
           portal, so this doesn't clip them. */}
-      <div ref={surfaceRef} className="custom-scrollbar flex items-stretch gap-0 overflow-x-auto bg-slate-50 px-2 py-1">
+      {!collapsed && (
+      <div ref={surfaceRef} role="tabpanel" className="custom-scrollbar flex items-stretch gap-0 overflow-x-auto bg-white px-1 py-1">
+        {tab === "home" && numberFormat && <NumberGroup {...numberFormat} />}
+        {tab === "home" && !numberFormat && <p className="px-3 py-6 text-xs text-muted">Nothing here yet.</p>}
+
         {tab === "design" && (
           <RibbonGroup label="Layout">
             {/* Real Excel's own Design tab "Grand Totals"/"Subtotals" are each a 4-/3-way DROPDOWN,
@@ -267,7 +419,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                         onChange({ ...request, grandTotals: opt.value });
                         close();
                       }}
-                      className={`rounded-lg px-2 py-1.5 text-left ${request.grandTotals === opt.value ? "bg-gold/20 font-semibold text-gold-strong" : "hover:bg-gold/10"}`}
+                      className={`rounded-lg px-2 py-1.5 text-left ${request.grandTotals === opt.value ? "bg-gold-soft font-semibold text-gold-strong" : "hover:bg-slate-100"}`}
                     >
                       {opt.label}
                     </button>
@@ -303,7 +455,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                           close();
                         }}
                         className={`rounded-lg px-2 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-40 ${
-                          request.subtotals === opt.value ? "bg-gold/20 font-semibold text-gold-strong" : "hover:bg-gold/10"
+                          request.subtotals === opt.value ? "bg-gold-soft font-semibold text-gold-strong" : "hover:bg-slate-100"
                         }`}
                       >
                         {opt.label}
@@ -333,7 +485,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                             layout.onReportLayoutChange(opt.value);
                             close();
                           }}
-                          className={`rounded-lg px-2 py-1.5 text-left ${layout.reportLayout === opt.value ? "bg-gold/20 font-semibold text-gold-strong" : "hover:bg-gold/10"}`}
+                          className={`rounded-lg px-2 py-1.5 text-left ${layout.reportLayout === opt.value ? "bg-gold-soft font-semibold text-gold-strong" : "hover:bg-slate-100"}`}
                         >
                           {opt.label}
                         </button>
@@ -353,7 +505,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                             close();
                           }}
                           className={`rounded-lg px-2 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-40 ${
-                            layout.reportLayout !== "Compact" && layout.repeatItemLabels === opt.value ? "bg-gold/20 font-semibold text-gold-strong" : "hover:bg-gold/10"
+                            layout.reportLayout !== "Compact" && layout.repeatItemLabels === opt.value ? "bg-gold-soft font-semibold text-gold-strong" : "hover:bg-slate-100"
                           }`}
                         >
                           {opt.label}
@@ -383,11 +535,11 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                           type="button"
                           disabled={outerFields.length === 0}
                           onClick={() => setBlankLines(true)}
-                          className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10 disabled:cursor-not-allowed disabled:opacity-40"
+                          className="rounded-md px-2 py-1.5 text-left hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           Insert Blank Line after Each Item
                         </button>
-                        <button type="button" onClick={() => setBlankLines(false)} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+                        <button type="button" onClick={() => setBlankLines(false)} className="rounded-md px-2 py-1.5 text-left hover:bg-slate-100">
                           Remove Blank Line after Each Item
                         </button>
                         {outerFields.length === 0 && <p className="px-2 pt-1 text-xs text-muted">Needs 2+ Row fields.</p>}
@@ -443,7 +595,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                                 actions.onShowReportFilterPages(f.field);
                                 close();
                               }}
-                              className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+                              className="rounded-md px-2 py-1.5 text-left hover:bg-slate-100"
                             >
                               {f.label}
                             </button>
@@ -472,7 +624,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                       actions.onClearAll();
                       close();
                     }}
-                    className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+                    className="rounded-md px-2 py-1.5 text-left hover:bg-slate-100"
                   >
                     Clear All
                   </button>
@@ -483,7 +635,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                       actions.onClearFilters();
                       close();
                     }}
-                    className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="rounded-md px-2 py-1.5 text-left hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Clear Filters
                   </button>
@@ -575,6 +727,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
           </RibbonGroup>
         )}
       </div>
+      )}
     </div>
     </RibbonCompact.Provider>
   );

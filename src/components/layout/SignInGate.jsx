@@ -38,7 +38,7 @@ export default function SignInGate({ children }) {
 
   if (!signedIn) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 px-4">
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
         <div className="card w-full max-w-sm text-center">
           <h1 className="mb-2 text-xl font-bold text-ink">Pivot Snapshot Builder</h1>
           <p className="mb-4 text-sm text-muted">

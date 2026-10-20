@@ -172,6 +172,21 @@ export function signOut() {
   clearTokens();
 }
 
+// The signed-in user's name and email, read from the access token's own claims (no extra call) —
+// for the account menu in the top bar. Nulls when there's no token or it can't be read.
+export function getSignedInUser() {
+  try {
+    const token = readTokens()?.accessToken;
+    const payload = token?.split(".")[1];
+    if (!payload) return { name: null, email: null };
+    const bytes = Uint8Array.from(atob(payload.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+    const json = JSON.parse(new TextDecoder().decode(bytes));
+    return { name: json.name ?? null, email: json.upn ?? json.unique_name ?? json.email ?? null };
+  } catch {
+    return { name: null, email: null };
+  }
+}
+
 // Shared by every concurrent caller currently refreshing — see getDataverseAccessToken's own WHY
 // comment on the race this closes.
 let refreshPromise = null;

@@ -1,16 +1,17 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronLeft, FileSpreadsheet, Filter as FilterIcon, Table2, X } from "lucide-react";
+import { Fragment, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, ChevronLeft, FileSpreadsheet, Filter as FilterIcon, Loader2, Table2, X } from "lucide-react";
 import Popover from "../forms/Popover";
 import ContextMenu from "../forms/ContextMenu";
 import Modal from "../forms/Modal";
 import Slicer from "./Slicer";
 import Timeline from "./Timeline";
 import GroupItemsPanel from "./GroupItemsPanel";
-import { FieldSortDialog, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, ConditionalFormatEditor, SHOW_VALUES_AS_OPTIONS, PERCENT_SHOW_VALUES_AS, DEFAULT_FORMAT } from "./FieldPicker";
+import { FieldSortDialog, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, ConditionalFormatEditor, SHOW_VALUES_AS_OPTIONS, DEFAULT_FORMAT } from "./FieldPicker";
+import { formatForShowValuesAs } from "../../utils/showValuesAsFormat";
 import { formatForColumn } from "../../utils/numberFormat";
 import { DEFAULT_PIVOT_OPTIONS, cellText, filterAreaSlot, filterValueSummary } from "../../utils/pivotOptions";
 import { filterKind, setFieldFilter, FILTER_KIND_LABELS } from "../../utils/filterKinds";
-import { LABEL_FILTERS, VALUE_FILTERS, DATE_FILTERS, isLabelMode, isDateMode, datePeriodLabel, isRangeMode, isTop10Mode, top10Parts } from "../../utils/filterModes";
+import { LABEL_FILTERS, VALUE_FILTERS, DATE_FILTERS, isLabelMode, isDateMode, datePeriodLabel, isRangeMode, isTop10Mode, top10Parts, isFilterComplete } from "../../utils/filterModes";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
 import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys, collapseKey, buildColumnHeaderRows, computeLabelSpans } from "../../utils/pivotGridLayout";
@@ -18,6 +19,9 @@ import { MEASURES_PLACEHOLDER, measuresIndexOf, buildCaptionToIndex, measureInde
 import { applyReportSubtotals } from "../../utils/subtotals";
 import { drillthroughPivot } from "../../services/pivotApi";
 import { removeFieldEverywhere } from "../../utils/dragDrop";
+import { selectionStats } from "../../utils/selectionStats";
+import { cellFormatKey } from "../../utils/cellFormats";
+import { sharedFormatType } from "../../utils/numberFormatCommands";
 
 // The drag payload type for moving a row item inside the grid (Excel's drag-an-item-to-reorder).
 const GRID_ITEM_DRAG_MIME = "application/x-pivot-grid-item";
@@ -108,15 +112,30 @@ function FilterHeaderRow({ filter, index, request, onChange, dimensionOptions, s
 // 2026-09-28 ("نفس الشكل نفس الـ behaviours" — look AND behave like Excel's own PivotTable).
 // alignLeft: an outer column header spanning its children ("2024" over its months) is left-aligned,
 // like Excel's Compact layout (2026-10-15, the user's call) — single-column cells stay centered.
+// Reports the selected range's stats up to the status bar when they change. A child component so its
+// effect can live past PivotGrid's no-result early return (no hook may sit after one).
+// Exposes this render's commands on a ref the parent owns (React's useImperativeHandle) — a child
+// so the hook can live past PivotGrid's no-result early return.
+function CommandBinder({ target, value }) {
+  useImperativeHandle(target, () => value);
+  return null;
+}
+
+function SelectionStatsReporter({ stats, onChange }) {
+  const key = JSON.stringify(stats);
+  useEffect(() => {
+    onChange(key === "null" ? null : JSON.parse(key));
+  }, [key, onChange]);
+  return null;
+}
+
 function HeaderCell({ children, muted = false, isTotal = false, alignLeft = false }) {
-  // Header band is the app's own gold gradient now (see headerBg's own WHY comment) — white text
-  // throughout reads cleanly on it; muted (field-name labels, not real member captions) dims to
-  // white/75 instead of switching hue, and isTotal stays white but gets its own underline accent so
-  // a Grand Total column still stands out even though the whole band is already one strong color.
+  // Neutral slate header band (see headerBg) — ink text; muted (field-name labels, not real member
+  // captions) is a lighter slate, and a Total column header is bold ink with a gold underline.
   return (
     <span
-      className={`flex items-center ${alignLeft ? "justify-start" : "justify-center"} gap-1 text-sm font-semibold text-white ${
-        muted ? "opacity-75" : isTotal ? "underline decoration-2 underline-offset-2" : ""
+      className={`flex items-center ${alignLeft ? "justify-start" : "justify-center"} gap-1 text-sm ${
+        muted ? "font-medium text-slate-500" : isTotal ? "font-bold text-ink underline decoration-gold decoration-2 underline-offset-4" : "font-semibold text-ink"
       }`}
     >
       {children}
@@ -250,21 +269,16 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
             setPanel("shortcuts");
             toggle();
           }}
-          // text-muted (a gray meant for light backgrounds) had near-zero contrast against this
-          // header's own gold gradient band — every other muted label on this same band
-          // (HeaderCell, just above) already uses white-at-75%-opacity instead; this interactive
-          // button's trigger never matched that, just not noticed until a long raw field identifier
-          // made it obvious (caught live, 2026-10-13, "الheader لونه مش باين").
-          // hover:text-white, not hover:text-gold: gold text on this gold band made the label vanish
-          // whenever the pointer was over it — i.e. the whole time its dropdown was open (caught
-          // live 2026-10-14). Same for the filter icon below.
-          className={`flex w-full items-center justify-center gap-1 text-sm font-semibold hover:text-white ${
-            muted ? "text-white/75" : isTotal ? "text-gold-strong" : "text-ink"
+          // Same tones as HeaderCell on the neutral slate band (the 2026-10-13/14 contrast bugs came
+          // from the old gold band: gray and gold text both vanished on it). Gold is the hover/
+          // filtered accent only.
+          className={`flex w-full items-center justify-center gap-1 text-sm font-semibold hover:text-gold-strong ${
+            muted ? "text-slate-500" : isTotal ? "text-gold-strong" : "text-ink"
           }`}
           title={`Sort or filter ${label}`}
         >
           {label}
-          {hasFilter && <FilterIcon className="h-3 w-3 shrink-0 text-white" />}
+          {hasFilter && <FilterIcon className="h-3 w-3 shrink-0 text-gold-strong" />}
           <ChevronDown className="h-3.5 w-3.5 shrink-0" />
         </button>
       )}
@@ -855,9 +869,8 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
                   valuePatch.baseField = [...request.rows].reverse().find((f) => f !== MEASURES_PLACEHOLDER) ?? null;
                   valuePatch.baseItem = "";
                 }
-                if (PERCENT_SHOW_VALUES_AS.has(opt.value) && format.type === "General") {
-                  valuePatch.format = { ...format, type: "Percentage" };
-                }
+                const nextFormat = formatForShowValuesAs(format, valueField.showValuesAs, opt.value);
+                if (nextFormat) valuePatch.format = nextFormat;
                 const values = request.values.map((v, i) => (i === measureIndex ? { ...v, ...valuePatch } : v));
                 // Grand Totals stay as they are (2026-10-20): the backend computes hidden ones for
                 // % of Grand Total / Index, like Excel.
@@ -924,6 +937,23 @@ export default function PivotGrid({
   pivotOptions = DEFAULT_PIVOT_OPTIONS,
   // Opens the PivotTable Options dialog (the value-cell menu's "PivotTable Options…"); null = none.
   onOpenPivotTableOptions = null,
+  // The Builder's workspace layout (2026-10-20): the grid box flexes into its parent's leftover
+  // height/width instead of hugging the table. The parent must be a flex column.
+  fill = false,
+  // Table zoom factor (1 = 100%), from the status bar.
+  zoom = 1,
+  // Called with the selected range's numbers ({ count, numericCount, sum, average }) or null when
+  // nothing is selected — the status bar's Excel-style Sum/Average/Count.
+  onSelectionStatsChange = null,
+  // Number formats set on individual cells ({ [cellFormatKey]: format }, utils/cellFormats.js) — they
+  // win over the value field's own format. onCellFormatsChange(next) receives Home › Number's edits.
+  cellFormats = null,
+  onCellFormatsChange = null,
+  // { current } the grid fills with { applyNumberFormat(fn) } — how the ribbon formats the selection.
+  commandRef = null,
+  // A query is running: with no result yet the placeholder says so, instead of "choose fields"
+  // (2026-10-20, found by the feature test — it showed while fields were already placed).
+  loading = false,
 }) {
   const [collapsed, setCollapsed] = useState(() => new Set());
   // The right-clicked value cell's context menu ({x, y, row, column, valueField, measureIndex}) and
@@ -967,6 +997,13 @@ export default function PivotGrid({
     if (!extend || !anchorCell) setAnchorCell(cell);
   };
   const gridRef = useRef(null);
+  // True while the mouse button is held after pressing on a value cell (drag-to-select).
+  const draggingRef = useRef(false);
+  useEffect(() => {
+    const stop = () => (draggingRef.current = false);
+    document.addEventListener("mouseup", stop);
+    return () => document.removeEventListener("mouseup", stop);
+  }, []);
   // Same shape FieldPicker.jsx builds for FilterRow's own "choose a field"/"by measure" selects —
   // see FilterHeaderRow above, which reuses FilterRow unchanged for the Report Filter area's own
   // dropdown.
@@ -1009,7 +1046,9 @@ export default function PivotGrid({
         rowUniqueNames,
         columnUniqueNames,
         measureField: valueField.field,
-        filters: request.filters,
+        // Only filters that narrow something — a field left at (All) is no filter (and the backend
+        // rejects an empty member list), the same rule the pivot query uses.
+        filters: request.filters.filter((f) => f.field && isFilterComplete(f)),
       });
       setDrillthrough({ loading: false, error: null, data, label });
     } catch (err) {
@@ -1039,13 +1078,30 @@ export default function PivotGrid({
   // against a side-by-side screenshot of a brand-new real Excel PivotTable).
   if (!result) {
     return (
-      <div className="flex min-h-[22rem] items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-white/60">
-        <div className="max-w-xs text-center">
-          <Table2 className="mx-auto mb-3 h-10 w-10 text-gold/50" />
-          <p className="text-sm font-semibold text-ink">To build a report, choose fields from the Fields panel</p>
-          <p className="mt-1 text-xs text-muted">Drag a field into Filters, Columns, Rows or Values to get started.</p>
+      <>
+      {onSelectionStatsChange && <SelectionStatsReporter stats={null} onChange={onSelectionStatsChange} />}
+      <div
+        className={`flex min-h-[22rem] items-center justify-center rounded-lg border border-slate-200 bg-white ${fill ? "flex-1" : ""}`}
+      >
+        {/* Excel's own placeholder for an empty PivotTable, as a card on the empty sheet. */}
+        <div className="max-w-sm rounded-xl border border-slate-200 bg-white px-8 py-7 text-center shadow-sm">
+          <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-gold-soft">
+            {loading ? <Loader2 className="h-5 w-5 animate-spin text-gold-strong" /> : <Table2 className="h-5 w-5 text-gold-strong" />}
+          </span>
+          {loading ? (
+            <>
+              <p className="text-sm font-semibold text-ink">Updating the PivotTable…</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-muted">Getting the numbers from the data server.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold text-ink">To build a report, choose fields from the PivotTable Fields list</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-muted">Tick a field, or drag it into Filters, Columns, Rows or Values.</p>
+            </>
+          )}
         </div>
       </div>
+      </>
     );
   }
 
@@ -1224,19 +1280,13 @@ export default function PivotGrid({
   // the thinner, lighter tone keeps the grid legible (still a real bordered cell, not borderless)
   // without it dominating the page the way a literal flat worksheet's gridlines do.
   const cellBorder = "border border-slate-200";
-  // Header band gets its own border tone — a plain slate-200 line (fine on the white/gray body
-  // below) read as a dull mismatched outline on a saturated gold fill, so header cells use a
-  // gold-tinted border instead. See headerBg's own WHY comment just below for the fill itself.
-  const headerCellBorder = "border border-gold-strong/30";
-  // The table's own header band — a flat dark-ink block (tried 2026-10-12, rejected: "مش قادر
-  // تديني تصميم جدول يتماسى مع الشكل العام للسيستم") was a completely different material language
-  // than the rest of this app, which is built entirely on a gold-gradient/glass identity (see
-  // index.css: .btn-primary is this exact `from-gold to-gold-strong` gradient, .card is a white
-  // glass panel, .input-field has a gold focus ring — no component anywhere else in the app uses a
-  // solid dark-navy block). Reusing that SAME gradient for the header band, instead of inventing a
-  // new "BI dashboard" dark-header look from scratch, is what actually makes the table read as part
-  // of this app rather than a bolted-on generic datagrid.
-  const headerBg = "bg-gradient-to-r from-gold to-gold-strong";
+  // Header band (2026-10-20 UI refresh): a flat slate-100 band with slate-300 lines and ink text,
+  // closed off by a 2px gold rule under the last header row (the thead's own class below) — the app's
+  // surfaces went flat slate with gold as the one accent, so the header follows the same material.
+  // It replaces the gold gradient band (2026-10-12), whose white/muted text kept losing contrast.
+  // (A solid dark-ink band was tried and rejected 2026-10-12 as foreign to the app.)
+  const headerCellBorder = "border border-slate-300";
+  const headerBg = "bg-slate-100";
 
   // Excel's own worksheet row-number gutter (the gray "1, 2, 3…" column down the left edge of
   // every sheet, outside the PivotTable report itself) — requested live 2026-10-12 ("ليه مافيش ال
@@ -1246,13 +1296,10 @@ export default function PivotGrid({
   // body: the optional column-field-label row (only when columnFieldLabels is non-empty) plus one
   // row per column header level.
   const headerRowCount = (columnFieldLabels.length > 0 ? 1 : 0) + columnDepth;
-  // Two variants, not one — the gutter's header-row cells sit in the same gold header band as every
-  // other header cell, so they share that same fill; its body-row cells sit next to plain
-  // white/zebra rows and keep the original light-gray worksheet-gutter look (gray reads as neutral
-  // chrome here, consistent with how .input-field/.btn-secondary already use plain slate-200 borders
-  // elsewhere in this app — it's only the HEADER band that needs to match the gold identity).
-  const rowNumberHeaderClass = `${headerCellBorder} ${headerBg} px-2 py-2 text-center text-xs font-semibold text-white`;
-  const rowNumberBodyClass = `${cellBorder} bg-slate-100 px-2 py-1.5 text-center text-xs font-medium text-muted`;
+  // Two variants: the gutter's header-row cells share the header band; its body cells keep the
+  // light-gray worksheet-gutter look.
+  const rowNumberHeaderClass = `${headerCellBorder} ${headerBg} px-2 py-2 text-center text-xs font-medium text-slate-500`;
+  const rowNumberBodyClass = `${cellBorder} bg-slate-50 px-2 py-1.5 text-center text-xs font-medium text-slate-400`;
 
   // Excel's own arrow-key cell navigation — see selectedCell's own WHY comment above. Skips over
   // collapsed/hidden rows the same way the mouse already does (clicking a collapsed group's hidden
@@ -1310,6 +1357,78 @@ export default function PivotGrid({
     const position = navigableRows.indexOf(rowIndex);
     return position >= bounds.top && position <= bounds.bottom && colIndex >= bounds.left && colIndex <= bounds.right;
   };
+  // The selected range's Sum/Average/Count for the status bar (SelectionStatsReporter below).
+  const selectedRows = bounds ? navigableRows.slice(bounds.top, bounds.bottom + 1) : [];
+  const selectedValues = selectedRows.flatMap((r) => (cells[r] ?? []).slice(bounds.left, bounds.right + 1));
+  const baseStats = bounds ? selectionStats(selectedValues) : null;
+  // Plus what Home › Number needs (2026-10-20): the value fields the selection covers (a format
+  // applies to a whole value field, as in an Excel PivotTable) and the most decimals its numbers
+  // show in General (up to 2) — where Increase/Decrease Decimal starts from.
+  const rangeStats = baseStats && {
+    ...baseStats,
+    measures: [
+      ...new Set(
+        selectedRows.flatMap((r) =>
+          Array.from({ length: bounds.right - bounds.left + 1 }, (_, k) =>
+            measuresInRows ? measureIndexOf(rowHeaders[r], rowsMeasuresIndex, captionToIndex) : measureIndexOf(columnHeaders[bounds.left + k], columnsMeasuresIndex, captionToIndex),
+          ),
+        ),
+      ),
+    ]
+      .filter((m) => m !== null)
+      .sort((a, b) => a - b),
+    generalDecimals: Math.max(0, ...selectedValues.filter((v) => typeof v === "number" && Number.isFinite(v)).map((v) => (String(Math.round(v * 100) / 100).split(".")[1] ?? "").length)),
+    // The format type all selected cells share (the Number Format dropdown shows it), or null.
+    formatType: sharedFormatType(
+      selectedRows.flatMap((r) =>
+        Array.from({ length: bounds.right - bounds.left + 1 }, (_, k) => {
+          const c = bounds.left + k;
+          const m = measuresInRows ? measureIndexOf(rowHeaders[r], rowsMeasuresIndex, captionToIndex) : measureIndexOf(columnHeaders[c], columnsMeasuresIndex, captionToIndex);
+          return cellFormats?.[cellFormatKey(rowHeaders[r], columnHeaders[c])] ?? formatForColumn(m, valueFields);
+        }),
+      ),
+    ),
+  };
+
+  // A cell's format: its own (Home › Number on a selection) or its value field's.
+  const formatOfCell = (rowIndex, colIndex, measureIndex) => cellFormats?.[cellFormatKey(rowHeaders[rowIndex], columnHeaders[colIndex])] ?? formatForColumn(measureIndex, valueFields);
+  const measureOfCell = (rowIndex, colIndex) =>
+    measuresInRows ? measureIndexOf(rowHeaders[rowIndex], rowsMeasuresIndex, captionToIndex) : measureIndexOf(columnHeaders[colIndex], columnsMeasuresIndex, captionToIndex);
+  // The decimals a number shows in General (up to 2) — where Increase/Decrease Decimal starts.
+  const generalDecimalsOf = (v) => (typeof v === "number" && Number.isFinite(v) ? (String(Math.round(v * 100) / 100).split(".")[1] ?? "").length : 2);
+  const selectedCellList = bounds
+    ? selectedRows.flatMap((r) => Array.from({ length: bounds.right - bounds.left + 1 }, (_, k) => ({ row: r, col: bounds.left + k })))
+    : [];
+  // Handed to the ribbon through commandRef (CommandBinder, below).
+  const gridCommands = {
+    // Home › Number: fn(format, shownDecimals) → next format, for every selected cell.
+    applyNumberFormat: (fn) => {
+      if (!onCellFormatsChange || selectedCellList.length === 0) return;
+      const next = { ...(cellFormats ?? {}) };
+      for (const { row, col } of selectedCellList) {
+        next[cellFormatKey(rowHeaders[row], columnHeaders[col])] = fn(formatOfCell(row, col, measureOfCell(row, col)) ?? undefined, generalDecimalsOf(cells[row]?.[col]));
+      }
+      onCellFormatsChange(next);
+    },
+  };
+
+  // Clicking a column header selects its whole column (every value row), like clicking a column in
+  // Excel; Shift+click extends from the current anchor column (2026-10-20).
+  const selectColumns = (first, last, extend) => {
+    if (navigableRows.length === 0) return;
+    const top = navigableRows[0];
+    const bottom = navigableRows[navigableRows.length - 1];
+    if (extend && anchorCell) {
+      const target = last >= anchorCell.col ? last : first;
+      setAnchorCell({ row: top, col: anchorCell.col });
+      setSelectedCell({ row: bottom, col: target });
+    } else {
+      setAnchorCell({ row: top, col: first });
+      setSelectedCell({ row: bottom, col: last });
+    }
+    gridRef.current?.focus();
+  };
+  const columnSelected = (first, last) => Boolean(bounds) && bounds.top === 0 && bounds.bottom === navigableRows.length - 1 && first >= bounds.left && last <= bounds.right;
 
   // Copies the range as tab-separated text (what Excel puts on the clipboard), each value in its
   // displayed format; one row of the range per line.
@@ -1321,7 +1440,7 @@ export default function PivotGrid({
         const measureIndex = measuresInRows
           ? measureIndexOf(rowHeaders[rowIndex], rowsMeasuresIndex, captionToIndex)
           : measureIndexOf(columnHeaders[colIndex], columnsMeasuresIndex, captionToIndex);
-        return cellText(cells[rowIndex]?.[colIndex], formatForColumn(measureIndex, valueFields), pivotOptions);
+        return cellText(cells[rowIndex]?.[colIndex], formatOfCell(rowIndex, colIndex, measureIndex), pivotOptions);
       }).join("\t"),
     );
     try {
@@ -1335,6 +1454,8 @@ export default function PivotGrid({
 
   return (
     <>
+      {onSelectionStatsChange && <SelectionStatsReporter stats={rangeStats} onChange={onSelectionStatsChange} />}
+      {commandRef && <CommandBinder target={commandRef} value={gridCommands} />}
       {/* Excel's own Slicer control (Insert Slicer, PivotToolbar.jsx) — a separate button-grid
           widget bound to a field, living OUTSIDE the Report Filter area entirely even though it
           reads/writes the SAME request.filters entry (Members mode) a Report Filter row would.
@@ -1411,7 +1532,8 @@ export default function PivotGrid({
       {request && onChange && (() => {
         const shown = request.filters
           .map((filter, index) => ({ filter, index }))
-          .filter(({ filter }) => !request.slicerFields.includes(filter.field) && !request.timelineFields.includes(filter.field));
+          // Report Filter fields only — a Rows/Columns field's own filter is its header's funnel (2026-10-20).
+          .filter(({ filter }) => !request.slicerFields.includes(filter.field) && !request.timelineFields.includes(filter.field) && !request.rows.includes(filter.field) && !request.columns.includes(filter.field));
         if (shown.length === 0) return null;
         return (
           <div className="mb-2 grid w-fit max-w-full gap-x-3 gap-y-1">
@@ -1454,12 +1576,15 @@ export default function PivotGrid({
           stretching full-page (same reasoning as before this merge). */}
       <div
         ref={gridRef}
-        // bg/border/rounded-2xl/shadow-xl: this app's own glass-panel treatment (index.css
-        // `.glass-panel`/`.card`), applied directly here instead of via the `.card` class so the
-        // SAME element also owns the overflow (see this div's own WHY comment above). custom-
-        // scrollbar (index.css) swaps the plain OS scrollbar for this app's own thin gold-tinted
-        // one — already used by Modal.jsx for the exact same "match the system" reason.
-        // No backdrop-blur-xl here, unlike the real `.glass-panel` — this element is BOTH the
+        // bg/border/rounded-lg: the app's flat panel treatment (index.css `.glass-panel`), applied
+        // directly here instead of via the class so the SAME element also owns the overflow (see
+        // this div's own WHY comment above). custom-scrollbar (index.css) swaps in the app's thin
+        // scrollbar.
+        // fill (the Builder's workspace, 2026-10-20): the box takes all the space its flex-column
+        // parent leaves — a white "worksheet" the table sits in at the top-left, scrolling inside
+        // itself — instead of hugging the table (w-fit) under an 80vh cap, which left a big empty
+        // band beside/below a small pivot.
+        // No backdrop-blur-xl here — this element is BOTH the
         // overflow-auto scroll container AND the ancestor of the <thead>'s position:sticky (a few
         // lines down), and backdrop-filter on an element that's also a scrolling ancestor of a
         // sticky descendant is a known Chromium compositing bug: the browser has to re-composite the
@@ -1468,8 +1593,6 @@ export default function PivotGrid({
         // header for the whole gesture (confirmed live, 2026-10-12 — persisted even after fixing a
         // real but separate z-index bug AND adding will-change-transform, which is the normal first
         // fix for sticky-during-scroll glitches but doesn't address a backdrop-filter-specific one).
-        // bg-white/95 (vs. the usual /80) compensates by staying close to opaque on its own, without
-        // needing a blur to hide whatever's faintly showing through the remaining 5%.
         // A custom-drawn vertical-only scrollbar thumb (starting below the header instead of at its
         // top) was also tried here 2026-10-12 to fix the native thumb's travel range including the
         // header's own height — reverted the same day: hiding just the native VERTICAL scrollbar
@@ -1480,14 +1603,19 @@ export default function PivotGrid({
         // both bigger, separately-scoped tasks. boundedHeight=false (Modal.jsx's own preview) has no
         // sticky header to protect (see the thead's own WHY comment below) and no independent
         // scrolling of its own either, so overflow-hidden there is just the plain corner-clipping.
-        className={`w-fit max-w-full bg-white/95 border border-white/50 rounded-2xl shadow-xl custom-scrollbar outline-none ${
-          boundedHeight ? "max-h-[80vh] overflow-auto" : "overflow-hidden"
+        className={`rounded-lg border border-slate-200 bg-white shadow-sm custom-scrollbar outline-none ${
+          fill ? "min-h-[16rem] w-full flex-1 overflow-auto xl:min-h-0" : `w-fit max-w-full ${boundedHeight ? "max-h-[80vh] overflow-auto" : "overflow-hidden"}`
         }`}
         tabIndex={0}
         onKeyDown={handleGridKeyDown}
       >
         <table
-          className="border-collapse text-sm"
+          // Excel's sheet font (Segoe UI on Windows) for the worksheet itself (2026-10-20), so the
+          // numbers read like a spreadsheet; the app's chrome keeps the HMIS typeface.
+          className="select-none border-collapse bg-white font-['Segoe_UI_Variable_Text','Segoe_UI',system-ui,sans-serif] text-sm"
+          // View zoom (the status bar's zoom control, 2026-10-20) — CSS zoom re-lays the table out
+          // at the new size, so the scroll box's scrollbars track it (a transform wouldn't).
+          style={zoom !== 1 ? { zoom } : undefined}
           // PivotTable Options › Alt Text: the table's accessible name and description.
           aria-label={pivotOptions.altTextTitle || pivotOptions.name || undefined}
           aria-description={pivotOptions.altTextDescription || undefined}
@@ -1520,7 +1648,8 @@ export default function PivotGrid({
               `will-change-transform`) hints the browser to promote the header to its own compositing
               layer up front, instead of only reacting once scrolling starts — the standard fix for
               this exact class of "sticky element flickers/lags during scroll" bug. */}
-          <thead className={boundedHeight ? "sticky top-0 z-30 will-change-transform" : undefined}>
+          {/* [&>tr:last-child>th]: the 2px gold rule closing off the header band (see headerBg). */}
+          <thead className={`[&>tr:last-child>th]:border-b-2 [&>tr:last-child>th]:border-b-gold ${boundedHeight || fill ? "sticky top-0 z-30 will-change-transform" : ""}`}>
             {columnFieldLabels.length > 0 && (
               <tr>
                 <th className={rowNumberHeaderClass}>1</th>
@@ -1532,7 +1661,7 @@ export default function PivotGrid({
                     cell (with its own working FieldHeaderMenu dropdown) unpredictably instead of
                     just rendering at its practical minimum width (caught 2026-10-06, full codebase
                     review). */}
-                <th colSpan={Math.max(1, columnHeaders.length)} className={`${headerCellBorder} border-b-2 border-b-white/40 ${headerBg} px-2 py-2`}>
+                <th colSpan={Math.max(1, columnHeaders.length)} className={`${headerCellBorder} border-b-2 border-b-slate-300 ${headerBg} px-2 py-2`}>
                   <FieldCaption
                     label={columnFieldLabels.join(" › ")}
                     // A Columns drilldown sorts from here (A→Z/Z→A or by value), whatever else is on
@@ -1563,7 +1692,7 @@ export default function PivotGrid({
                       // was actually the SAME degenerate-depth-1 case as the color-contrast bug, not
                       // a second contrast issue).
                       group.start === group.end && !drilldownAlone ? (
-                        <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-white/40 ${headerBg} px-2 py-2`}>
+                        <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-gold ${headerBg} px-2 py-2`}>
                           <FieldCaption
                             label={rowFieldLayouts[group.start]?.customName || rowFieldLabels[group.start] || ""}
                             field={rows[group.start] ?? null}
@@ -1585,7 +1714,7 @@ export default function PivotGrid({
                         // merged case and a new partial merge — there's no confirmed screenshot of
                         // what a partial merge's own header shows, so this reuses the one convention
                         // already verified for the full-merge case rather than guessing a new one.
-                        <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-white/40 ${headerBg} px-2 py-2`}>
+                        <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-gold ${headerBg} px-2 py-2`}>
                           {drilldownAlone ? (
                             // A drilldown hierarchy sorts from here (Drilldown v2) — sort only, see
                             // FieldHeaderMenu's sortOnly WHY comment.
@@ -1630,14 +1759,24 @@ export default function PivotGrid({
                   const ownIndex = allAncestors.indexOf(uniqueName);
                   const ancestors = ownIndex >= 0 ? allAncestors.slice(0, ownIndex) : allAncestors;
                   const expanded = toggle ? (isColumnDrilldownMemberExpanded?.(uniqueName, column) ?? false) : false;
+                  const lastCol = cell.sourceIndex + Math.max(cell.span, 1) - 1;
                   return (
-                    <th key={cell.sourceIndex} colSpan={cell.span > 1 ? cell.span : undefined} className={`${headerCellBorder} ${headerBg} px-2 py-2`}>
+                    <th
+                      key={cell.sourceIndex}
+                      colSpan={cell.span > 1 ? cell.span : undefined}
+                      className={`${headerCellBorder} ${columnSelected(cell.sourceIndex, lastCol) ? "bg-gold-soft" : headerBg} cursor-pointer px-2 py-2 hover:bg-slate-200/70`}
+                      title="Click to select this column — Shift+click to extend"
+                      onClick={(e) => {
+                        if (e.target.closest("button")) return; // the drilldown +/- toggle
+                        selectColumns(cell.sourceIndex, lastCol, e.shiftKey);
+                      }}
+                    >
                       {toggle ? (
                         <span className={`flex items-center gap-1 ${cell.span > 1 && !pivotOptions.mergeLabels ? "justify-start" : "justify-center"}`}>
                           <button
                             type="button"
                             onClick={() => onToggleColumnDrilldownMember(uniqueName, column, ancestors)}
-                            className="text-white/70 hover:text-white"
+                            className="text-slate-500 hover:text-ink"
                             aria-label={expanded ? "Collapse" : "Expand"}
                           >
                             {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -1670,9 +1809,15 @@ export default function PivotGrid({
               // gray with no hover feedback read as flat/dead; the hover highlight is purely
               // cosmetic (selectedCell's own ring is still the real "this is the active cell"
               // signal) but makes the grid feel alive under the mouse the way a real spreadsheet does.
-              const rowTint = isTotalRow
-                ? "bg-gold/10 hover:bg-gold/15 border-t-2 border-gold/40"
-                : `${displayIndex % 2 === 1 ? "bg-slate-50/50" : "bg-white"} hover:bg-gold-soft/60`;
+              // Three distinct tiers (2026-10-20 UI refresh): body rows white/zebra; a subtotal is a
+              // slate-100 band; the Grand Total is the one gold-accented row (soft gold fill, a 2px
+              // gold rule above it) so it reads as the table's bottom line.
+              const rowTint =
+                displayRow.kind === "grand"
+                  ? "bg-gold-soft hover:bg-gold-soft/80 border-t-2 border-t-gold"
+                  : isTotalRow
+                    ? "bg-slate-100 hover:bg-slate-200/70"
+                    : `${displayIndex % 2 === 1 ? "bg-slate-50/60" : "bg-white"} hover:bg-gold-soft/50`;
 
               // Excel's +/- sits right next to an item's own label, for every field but the
               // innermost (2026-10-15 — it used to be the outermost field only): on its item row in
@@ -1697,7 +1842,9 @@ export default function PivotGrid({
               return (
                 <Fragment key={displayIndex}>
                 <tr className={`${rowTint} transition-colors`}>
-                  <td className={rowNumberBodyClass}>{headerRowCount + displayIndex + 1}</td>
+                  <td className={rowIndex !== null && selectedRows.includes(rowIndex) ? `${cellBorder} bg-slate-200 px-2 py-1.5 text-center text-xs font-semibold text-ink` : rowNumberBodyClass}>
+                    {headerRowCount + displayIndex + 1}
+                  </td>
                   {rowHeaderGroups.map((group, groupIndex) => {
                     const lines = displayRow.groupCells[groupIndex]?.lines ?? [];
                     // Same degenerate-depth-1 fix as the title row above — a drilldown hierarchy
@@ -1824,9 +1971,17 @@ export default function PivotGrid({
                           isTotalCell ? "font-bold text-ink" : "text-slate-700"
                         } ${isSelected ? "relative z-20 ring-2 ring-inset ring-gold-strong" : ""} ${isInRange ? "!bg-gold/25" : ""}`}
                         style={conditionalStyle ?? undefined}
-                        onClick={(e) => {
+                        // Excel's drag-to-select (2026-10-20): press on a cell and drag over others to
+                        // select the range — preventDefault keeps the browser from selecting the TEXT.
+                        onMouseDown={(e) => {
+                          if (e.button !== 0) return;
+                          e.preventDefault();
                           selectCell({ row: rowIndex, col: colIndex }, e.shiftKey);
+                          draggingRef.current = true;
                           gridRef.current?.focus();
+                        }}
+                        onMouseOver={() => {
+                          if (draggingRef.current) setSelectedCell({ row: rowIndex, col: colIndex });
                         }}
                         // Excel's double-click on a value cell = Show Details (2026-10-19); with "Enable
                         // show details" off, Excel answers with a message instead.
@@ -1858,7 +2013,7 @@ export default function PivotGrid({
                           });
                         }}
                       >
-                        {iconColor && <span style={{ color: iconColor }}>●</span>} {cellText(cell, formatForColumn(measureIndex, valueFields), pivotOptions)}
+                        {iconColor && <span style={{ color: iconColor }}>●</span>} {cellText(cell, formatOfCell(rowIndex, colIndex, measureIndex), pivotOptions)}
                       </td>
                     );
                   })}

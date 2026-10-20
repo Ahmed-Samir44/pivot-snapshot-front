@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Select from "react-select";
 import { X, GripVertical, Plus, Filter, Columns3, Rows3, Sigma, Loader2, ChevronDown, ChevronRight, ChevronLeft, Search, Folder, Table2, Settings } from "lucide-react";
 
@@ -20,8 +21,10 @@ import {
   clearDanglingMeasureReferences,
   clearDanglingBaseFieldReferences,
   reconcileDrilldowns,
+  FIELD_DRAG_MIME,
 } from "../../utils/dragDrop";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
+import { formatForShowValuesAs } from "../../utils/showValuesAsFormat";
 import { calculatedFieldFormula, calculatedItemFormula, formulaFieldReference, isCompleteCalculatedField } from "../../utils/calculatedFields";
 import { SUMMARY_FUNCTIONS, aggregationLabel } from "../../utils/aggregations";
 import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "../../utils/conditionalFormat";
@@ -54,18 +57,6 @@ export const SHOW_VALUES_AS_OPTIONS = [
 // is picked, matching real Excel's own behavior (Excel auto-applies a percentage format when you
 // choose a % Show Values As option) — without this, the default "General" format would show the
 // raw ratio (e.g. "0.38") instead of a readable percentage.
-export const PERCENT_SHOW_VALUES_AS = new Set([
-  "PercentOfGrandTotal",
-  "PercentOfRowTotal",
-  "PercentOfColumnTotal",
-  "PercentOfParentRow",
-  "PercentOfParentColumn",
-  "PercentDifferenceFrom",
-  "PercentRunningTotal",
-  "PercentOf",
-  "PercentOfParentTotal",
-]);
-
 // currencySymbol: "" (not any specific currency) — which symbol to show, if any, is a per-report
 // choice only the user makes. An earlier default of "EGP" was hardcoded here without ever having
 // been asked for; flagged live, 2026-10-06 ("ليه محدد ال currency egp ليه بتاخد قرارات من عندك").
@@ -461,7 +452,7 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
     // zonesColumnHeight — see FieldPicker's own WHY comment) instead of sizing to its own content;
     // only the scrollable list below (flex-1 min-h-0) actually grows/shrinks into whatever's left
     // after the header and search box above, which stay their natural height either way.
-    <div className="card flex h-full flex-col">
+    <div className="flex h-full flex-col">
       <div className="mb-1.5 flex items-center justify-between">
         <p className="text-xs font-bold uppercase tracking-wide text-muted">Fields</p>
         <button type="button" onClick={collapseAll} className="btn-secondary px-2 py-1 text-xs">
@@ -585,9 +576,27 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
             </div>
           </div>
         )}
-        {visibleTableNames.length === 0 && !showValuesPseudoField && (
-          <p className="px-2 py-2 text-xs text-muted">No matching fields.</p>
-        )}
+        {/* Empty states (2026-10-20): placeholder rows while the tables load, a calm note when the data
+            server hasn't answered, and "no match" only for a real search. */}
+        {visibleTableNames.length === 0 && !showValuesPseudoField &&
+          (tablesLoading ? (
+            <div className="space-y-2 p-2" aria-hidden="true">
+              {[70, 52, 84, 61, 76, 45].map((w) => (
+                <div key={w} className="flex items-center gap-2">
+                  <span className="h-3.5 w-3.5 animate-pulse rounded bg-slate-200" />
+                  <span className="h-3 animate-pulse rounded bg-slate-200" style={{ width: `${w}%` }} />
+                </div>
+              ))}
+            </div>
+          ) : query ? (
+            <p className="px-3 py-3 text-xs text-muted">No fields match “{tableSearch.trim()}”.</p>
+          ) : (
+            <div className="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
+              <Table2 className="h-6 w-6 text-slate-300" />
+              <p className="text-xs font-medium text-slate-600">No fields yet</p>
+              <p className="text-[11px] text-muted">They appear here as soon as the data server answers.</p>
+            </div>
+          ))}
       </div>
     </div>
   );
@@ -605,8 +614,30 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
 // that leftover space visually part of the card but not draggable-onto — caught live, 2026-09-23.
 // Needs its parent card to be a flex column (see FieldPicker's Filters/Values boxes) to have any
 // effect; harmless no-op otherwise.
+// True while a pivot field is being dragged anywhere on the page — the zones light up as targets
+// the moment a drag starts (2026-10-20 UI refresh), not only once the pointer is over one.
+function useFieldDragActive() {
+  const [active, setActive] = useState(false);
+  useEffect(() => {
+    const start = (e) => {
+      if (e.dataTransfer?.types?.includes(FIELD_DRAG_MIME)) setActive(true);
+    };
+    const stop = () => setActive(false);
+    document.addEventListener("dragstart", start);
+    document.addEventListener("dragend", stop);
+    document.addEventListener("drop", stop);
+    return () => {
+      document.removeEventListener("dragstart", start);
+      document.removeEventListener("dragend", stop);
+      document.removeEventListener("drop", stop);
+    };
+  }, []);
+  return active;
+}
+
 function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, emptyText = "Drag a field here", emptyIsDropTarget = true, children }) {
   const [dragOver, setDragOver] = useState(false);
+  const dragActive = useFieldDragActive();
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -633,18 +664,32 @@ function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, empty
     // AppShell.jsx's own padding instead (now fixed directly there), so none of those cuts were ever
     // actually necessary. Still a real fixed minimum (not shrink-to-content), so the "stays the same
     // size empty or full" Excel parity from the original 2026-10-04 decision holds.
+    // Drag feedback (2026-10-20): every zone gets a dashed slate outline while a field is in
+    // flight, and the one under the pointer turns soft gold with a solid gold ring.
     <div
-      className={`min-h-[6.5rem] flex-1 rounded-lg ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
-        isEmpty && emptyIsDropTarget ? "border-2 border-dashed border-slate-200 p-2" : ""
-      }`}
+      className={`min-h-[6.5rem] flex-1 rounded-md transition-colors ${
+        dragOver
+          ? "bg-gold-soft/70 ring-2 ring-inset ring-gold"
+          : dragActive
+            ? "bg-slate-50 outline-dashed outline-1 -outline-offset-1 outline-slate-300"
+            : ""
+      } ${isEmpty && emptyIsDropTarget ? "border border-dashed border-slate-300 p-2" : ""}`}
       onDragOver={(e) => {
         e.preventDefault();
         setDragOver(true);
       }}
-      onDragLeave={() => setDragOver(false)}
+      // Only a leave out of the zone itself counts — moving over a pill inside it fires dragleave on
+      // the zone too, which used to flicker the highlight off and on.
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false);
+      }}
       onDrop={handleDrop}
     >
-      {isEmpty ? <p className="text-xs text-muted">{emptyText}</p> : children}
+      {isEmpty ? (
+        <p className={`text-xs ${dragOver ? "font-medium text-gold-strong" : "text-slate-400"}`}>{dragOver ? "Drop to add" : emptyText}</p>
+      ) : (
+        children
+      )}
     </div>
   );
 }
@@ -2679,9 +2724,8 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows, col
               const patch = { showValuesAs: next };
               // Only auto-switch away from the untouched default — never overrides a format the
               // user already picked on purpose.
-              if (PERCENT_SHOW_VALUES_AS.has(next) && format.type === "General") {
-                patch.format = { ...format, type: "Percentage" };
-              }
+              const nextFormat = formatForShowValuesAs(format, draft.showValuesAs, next);
+              if (nextFormat) patch.format = nextFormat;
               // Excel pre-selects the first base field and, where it exists, "(previous)". A running
               // total / rank defaults to the INNERMOST Rows field — the run restarts for each outer
               // item (Running Total In Month restarts every year).
@@ -2770,7 +2814,6 @@ export default function FieldPicker({
   fieldsLoading,
   // Every field of every table (null until it loads) — the Field List search matches field names.
   allDimensions = null,
-  onReset,
   // Real Excel's per-field "Field Settings…" > Custom Name / Layout & Print (PLAN 6 Phase 2) — see
   // PivotBuilder.jsx's own fieldLayouts state WHY comment for why this is a sibling pair of props,
   // not part of value/onChange.
@@ -2780,6 +2823,9 @@ export default function FieldPicker({
   // Compact/Repeat state (what it inherits when it has no override of its own), like Excel does.
   reportLayout = "Compact",
   repeatItemLabels = false,
+  // Where the pane tools (the gear) go — the task pane header, like Excel (2026-10-20); null keeps
+  // them above the areas as before.
+  toolsTarget = null,
 }) {
   // Measures the Rows/Columns/Values/Filters zones column's OWN rendered height, so the Fields tree
   // card next to it can match it exactly in EITHER direction (requested live 2026-10-12, "خلي الـ
@@ -3157,13 +3203,20 @@ export default function FieldPicker({
     value.rows.includes(field) || value.columns.includes(field) || value.values.some((v) => v.field === field) || value.filters.some((f) => f.field === field);
 
   // The gear (Excel's "Tools" button at the top of the Field List) and Reset.
+  // The Filters area holds Report Filter fields only, like Excel (2026-10-20, found by the feature
+  // test): a filter on a Rows/Columns field, or a slicer's/timeline's, shows as the funnel on that
+  // field instead and is edited from its header menu or widget.
+  const isReportFilter = (filter) =>
+    !value.rows.includes(filter.field) && !value.columns.includes(filter.field) && !value.slicerFields.includes(filter.field) && !value.timelineFields.includes(filter.field);
+  const reportFilterCount = value.filters.filter(isReportFilter).length;
+
   const paneControls = (
     <>
       <Popover
         align="right"
         trigger={(toggle) => (
-          <button type="button" onClick={toggle} className="btn-secondary px-2 py-1.5 text-xs" title="Field List layout and sort order" aria-label="Field List tools">
-            <Settings className="h-3.5 w-3.5" />
+          <button type="button" onClick={toggle} className={toolsTarget ? "rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-ink" : "btn-secondary px-2 py-1.5 text-xs"} title="Field List layout and sort order" aria-label="Field List tools">
+            <Settings className={toolsTarget ? "h-4 w-4" : "h-3.5 w-3.5"} />
           </button>
         )}
       >
@@ -3182,7 +3235,7 @@ export default function FieldPicker({
                   updatePane({ layout: opt.value });
                   close();
                 }}
-                className={`rounded-lg px-2 py-1.5 text-left ${pane.layout === opt.value ? "bg-gold/20 font-semibold text-gold-strong" : "hover:bg-gold/10"}`}
+                className={`rounded-lg px-2 py-1.5 text-left ${pane.layout === opt.value ? "bg-gold-soft font-semibold text-gold-strong" : "hover:bg-slate-100"}`}
               >
                 {opt.label}
               </button>
@@ -3199,7 +3252,7 @@ export default function FieldPicker({
                   updatePane({ sortOrder: opt.value });
                   close();
                 }}
-                className={`rounded-lg px-2 py-1.5 text-left ${pane.sortOrder === opt.value ? "bg-gold/20 font-semibold text-gold-strong" : "hover:bg-gold/10"}`}
+                className={`rounded-lg px-2 py-1.5 text-left ${pane.sortOrder === opt.value ? "bg-gold-soft font-semibold text-gold-strong" : "hover:bg-slate-100"}`}
               >
                 {opt.label}
               </button>
@@ -3207,9 +3260,6 @@ export default function FieldPicker({
           </div>
         )}
       </Popover>
-      <button type="button" onClick={onReset} className="btn-secondary px-3 py-1.5 text-xs">
-        Reset
-      </button>
     </>
   );
 
@@ -3238,7 +3288,7 @@ export default function FieldPicker({
     // right edge (flagged live, 2026-10-04: "ليه طالع برا الكارد"). minmax(0, …) lets each column
     // actually shrink to the space it's given, so `truncate` inside it can do its job.
     <div className={pane.layout === "sideBySide" ? "grid grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)] items-start gap-2" : "flex flex-col gap-2"}>
-      {pane.layout === "fieldsOnly" && <div className="flex justify-end gap-1">{paneControls}</div>}
+      {toolsTarget ? createPortal(paneControls, toolsTarget) : pane.layout === "fieldsOnly" && <div className="flex justify-end gap-1">{paneControls}</div>}
       {/* Height set explicitly from the zones column's OWN measured height (zonesColumnHeight,
           above) once known — min 200px as a sane floor for the very first render (before the
           ResizeObserver's first callback fires) and for the unlikely case of an almost-empty zones
@@ -3288,14 +3338,14 @@ export default function FieldPicker({
             2026-10-12 on explicit request ("شيل دا"): this sidebar is tight on vertical space now
             that the save/export controls also live in it (see PivotBuilder.jsx's own WHY comment),
             so literal Excel-instructional-text parity lost out to reclaiming the row for it. */}
-        <div className="mb-1 flex justify-end gap-1">{paneControls}</div>
+        {!toolsTarget && <div className="mb-1 flex justify-end gap-1">{paneControls}</div>}
         {/* Stacked / areas-only have the pane's full width: Excel's 2 by 2 areas. */}
         <div className={`grid gap-1.5 ${pane.layout === "sideBySide" ? "grid-cols-1" : "grid-cols-2"}`}>
-          <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+          <div className="flex flex-col rounded-lg border border-slate-200 bg-white p-2">
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
                 <Filter className="h-3.5 w-3.5" />
-                Filters {value.filters.length > 0 && <span className="text-gold">({value.filters.length})</span>}
+                Filters {reportFilterCount > 0 && <span className="text-gold">({reportFilterCount})</span>}
               </span>
               <Popover
                 align="right"
@@ -3340,10 +3390,10 @@ export default function FieldPicker({
               // field isn't in dimensionOptions, showing no match in its own Select while the
               // broken value stayed set (caught live, 2026-09-28).
               isFieldAccepted={(field) => dimensionOptions.some((opt) => opt.value === field)}
-              isEmpty={value.filters.length === 0}
+              isEmpty={reportFilterCount === 0}
             >
               <div className="flex flex-wrap gap-1.5">
-                {value.filters.map((filter, index) => (
+                {value.filters.map((filter, index) => !isReportFilter(filter) ? null : (
                   <FilterPill
                     key={index}
                     filter={filter}
@@ -3571,7 +3621,7 @@ export default function FieldPicker({
               then covers Show Values As/Format/Conditional format, and pills can still be
               drag-reordered among themselves since that order affects the generated MDX (see
               handleValueRowDrop). */}
-          <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+          <div className="flex flex-col rounded-lg border border-slate-200 bg-white p-2">
             {/* Same header shape as Filters/Columns/Rows now — icon, label, count, a "+" Popover
                 for the bulk-add path — rather than an always-visible "Choose measures…" control
                 that made this box look and behave differently from the other three even though

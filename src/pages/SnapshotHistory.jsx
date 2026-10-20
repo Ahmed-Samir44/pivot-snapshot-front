@@ -210,6 +210,8 @@ export default function SnapshotHistory() {
   const [loadingVersionId, setLoadingVersionId] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
+  // Why the last export is plain values instead of an Excel PivotTable (see excelPivot.js), or null.
+  const [exportNotice, setExportNotice] = useState(null);
   // { labels, data } for the open Compare modal; `comparing` while the fetch runs.
   const [comparison, setComparison] = useState(null);
   const [comparing, setComparing] = useState(false);
@@ -365,7 +367,7 @@ export default function SnapshotHistory() {
       // worth loading for someone who actually clicks Export).
       const { exportPivotToExcel } = await import("../utils/exportExcel");
       const pivotName = definitions.find((d) => d.id === selectedDefinitionId)?.name ?? "Pivot";
-      await exportPivotToExcel({
+      const exported = await exportPivotToExcel({
         result: previewVersion.result,
         rows: previewVersion.rows,
         columns: previewVersion.columns,
@@ -384,9 +386,12 @@ export default function SnapshotHistory() {
         // PivotTable Options and the Report Filter area, from the saved builder state (versions
         // saved before 2026-10-18 have no options — Excel's defaults).
         pivotOptions: { ...DEFAULT_PIVOT_OPTIONS, ...(parseBuilderState(previewVersion.builderStateJson)?.pivotOptions ?? {}) },
+        // Formats set on individual cells (Home › Number) when this version was saved.
+        cellFormats: parseBuilderState(previewVersion.builderStateJson)?.cellFormats ?? null,
         filters: (parseBuilderState(previewVersion.builderStateJson)?.request?.filters ?? []).filter((f) => f.field),
         filterFieldLabels: Object.fromEntries((parseBuilderState(previewVersion.builderStateJson)?.request?.filters ?? []).map((f) => [f.field, formatDimensionName(f.field)])),
       });
+      setExportNotice(exported.pivotTable ? null : `Exported as values, not a PivotTable: ${exported.reason}.`);
     } catch (err) {
       setExportError(err.message);
     } finally {
@@ -719,8 +724,10 @@ export default function SnapshotHistory() {
                 {exporting ? "Exporting…" : "Export to Excel"}
               </button>
               {exportError && <span className="text-sm font-medium text-red-700">{exportError}</span>}
+              {exportNotice && <span className="text-xs text-amber-700">{exportNotice}</span>}
             </div>
             <PivotGrid
+              cellFormats={parseBuilderState(previewVersion.builderStateJson)?.cellFormats ?? null}
               result={previewVersion.result}
               rows={previewVersion.rows}
               columns={previewVersion.columns}

@@ -94,6 +94,17 @@ export function top10Parts(mode) {
 }
 
 // Whether a rule-based filter has everything its mode needs (mirrors MdxPivotQueryBuilder.ValidateFilterShape).
+// Whether a filter actually narrows anything and can be sent — a Members filter with no members is
+// a field left at (All), which the backend rejects. Used for the pivot query and Show Details alike
+// (2026-10-20: Show Details sent the (All) ones and failed with a 400 whenever a report filter sat at
+// (All)).
+export function isFilterComplete(filter) {
+  const mode = filter.mode ?? "Members";
+  if (mode === "Members") return filter.includedMembers.length > 0;
+  if (mode === "Exclude") return true;
+  return isRuleFilterComplete(filter);
+}
+
 export function isRuleFilterComplete(filter) {
   const mode = filter.mode;
   if (isLabelMode(mode) || isDateMode(mode)) return Boolean(filter.labelText) && (!isRangeMode(mode) || Boolean(filter.labelTextTo));
