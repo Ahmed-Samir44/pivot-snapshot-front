@@ -1282,7 +1282,7 @@ function AxisGroupingEditor({ label, fields, dimensions, dateGroupings, numericG
     const previousDate = dateGroupings.find((g) => g.field === field);
     const nextDate = dateGroupings.filter((g) => g.field !== field);
     const nextNumeric = numericGroupings.filter((g) => g.field !== field);
-    if (mode === "Day" || mode === "Month" || mode === "Quarter" || mode === "Year") {
+    if (["Day", "Month", "Quarter", "Year", "MonthOfYear", "QuarterOfYear"].includes(mode)) {
       // Switching unit keeps Starting at / Ending at, like Excel's dialog.
       nextDate.push({ field, unit: mode, start: previousDate?.start ?? null, end: previousDate?.end ?? null });
     } else if (mode === "Numeric") {
@@ -1323,9 +1323,13 @@ function AxisGroupingEditor({ label, fields, dimensions, dateGroupings, numericG
               ) : (
                 <>
                   <option value="Day">Group by Days</option>
-                  <option value="Month">Group by Month</option>
-                  <option value="Quarter">Group by Quarter</option>
+                  {/* Excel's Years+Months / Years+Quarters ("January 2024")… */}
+                  <option value="Month">Group by Month (each year)</option>
+                  <option value="Quarter">Group by Quarter (each year)</option>
                   <option value="Year">Group by Year</option>
+                  {/* …and Months / Quarters alone: every January together, whatever the year. */}
+                  <option value="MonthOfYear">Group by Month (all years together)</option>
+                  <option value="QuarterOfYear">Group by Quarter (all years together)</option>
                 </>
               )}
             </select>
@@ -2492,7 +2496,10 @@ const PREVIOUS_BASE_ITEM = "(previous)";
 const NEXT_BASE_ITEM = "(next)";
 const RELATIVE_BASE_ITEMS = [PREVIOUS_BASE_ITEM, NEXT_BASE_ITEM];
 // The modes that use a Base field; all but % of Parent Total also need a Base item.
-const BASE_FIELD_MODES = ["PercentOf", "DifferenceFrom", "PercentDifferenceFrom", "PercentOfParentTotal"];
+// Running Total In / % Running Total In / Rank take a base field too (2026-10-20 — the run restarts
+// for each group of the other row fields), but it's optional: none = one run over the whole table.
+const RUN_BASE_FIELD_MODES = ["RunningTotal", "PercentRunningTotal", "Rank", "RankAscending"];
+const BASE_FIELD_MODES = ["PercentOf", "DifferenceFrom", "PercentDifferenceFrom", "PercentOfParentTotal", ...RUN_BASE_FIELD_MODES];
 const RELATIVE_ITEM_MODES = ["PercentOf", "DifferenceFrom", "PercentDifferenceFrom"];
 
 // A plain bordered list box, Excel's own control for these choices (not a dropdown) — one row per
@@ -2599,7 +2606,7 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows, col
   };
   // A mode with a Base field needs one picked, and one with a Base item needs that too (the backend
   // rejects them otherwise).
-  const canApply = !(usesBase && !draft.baseField) && !(usesBaseItem && !draft.baseItem);
+  const canApply = !(usesBase && !draft.baseField && !RUN_BASE_FIELD_MODES.includes(draft.showValuesAs)) && !(usesBaseItem && !draft.baseItem);
 
   return (
     <div className="space-y-3">
@@ -2675,8 +2682,11 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows, col
               if (PERCENT_SHOW_VALUES_AS.has(next) && format.type === "General") {
                 patch.format = { ...format, type: "Percentage" };
               }
-              // Excel pre-selects the first base field and, where it exists, "(previous)".
-              if (BASE_FIELD_MODES.includes(next) && !draft.baseField) patch.baseField = rows.find((f) => f !== MEASURES_PLACEHOLDER) ?? null;
+              // Excel pre-selects the first base field and, where it exists, "(previous)". A running
+              // total / rank defaults to the INNERMOST Rows field — the run restarts for each outer
+              // item (Running Total In Month restarts every year).
+              if (RUN_BASE_FIELD_MODES.includes(next) && !draft.baseField) patch.baseField = [...rows].reverse().find((f) => f !== MEASURES_PLACEHOLDER) ?? null;
+              else if (BASE_FIELD_MODES.includes(next) && !draft.baseField) patch.baseField = rows.find((f) => f !== MEASURES_PLACEHOLDER) ?? null;
               if (RELATIVE_ITEM_MODES.includes(next)) {
                 if (!draft.baseItem) patch.baseItem = PREVIOUS_BASE_ITEM;
               } else if (RELATIVE_BASE_ITEMS.includes(draft.baseItem)) {

@@ -926,7 +926,8 @@ export default function PivotBuilder() {
   // Excel's "Show Report Filter Pages" (2026-10-20): one copy of the pivot per item of a Report Filter
   // field, each filtered to that item. Excel makes worksheets — here, sheets of one downloaded
   // workbook. One query per item, one at a time (the shared cube), capped at MAX_FILTER_PAGES.
-  const MAX_FILTER_PAGES = 50;
+  // Raised 50 → 100 (2026-10-20); each page is one query on the shared cube, run one at a time.
+  const MAX_FILTER_PAGES = 100;
   // The Report Filter area's fields: filters on fields not on Rows/Columns, minus slicer/timeline
   // fields (the grid draws those as widgets, not in the Report Filter area).
   const reportFilterFieldsOf = (req) =>

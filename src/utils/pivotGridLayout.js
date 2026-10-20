@@ -136,7 +136,9 @@ export function buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts 
       const inGroup = level === -1 ? g.start === 0 : level >= g.start && level <= g.end;
       if (inGroup) {
         lines.push({ text: caption, indent: level === -1 ? 0 : indentFor(g, level, row), level: Math.max(level, 0) });
-      } else if (measuresLevel > level && measuresLevel >= g.start && measuresLevel <= g.end) {
+      } else if (measuresLevel > level && measuresLevel >= g.start && measuresLevel <= g.end && !(level === -1 && caption.includes(row.labels[measuresLevel] ?? "\u0000"))) {
+        // (A Grand Total row's caption already names its measure — "Total Total Revenue" — so the
+        // measure isn't repeated in its own column too, like Excel's "Total Sum of Revenue".)
         lines.push({ text: row.labels[measuresLevel] ?? "", indent: isMerged(g) ? measuresLevel - g.start : 0, level: measuresLevel });
       }
       return { lines };
@@ -354,29 +356,37 @@ export function applyCollapse(displayRows, collapsedKeys, rowHeaderGroups) {
     const itemPath = row.path.slice(0, level + 1);
     const inItem = (r) => r.path.length > level && itemPath.every((p, k) => r.path[k] === p);
     let j = i;
-    let totalRow = null;
+    // Every total row of the item — one per measure when Σ Values sits in Rows below the item
+    // (2026-10-20: only the first was kept, so collapsing "Egypt" lost its No Of Cases subtotal).
+    const totalRows = [];
     while (j < displayRows.length && inItem(displayRows[j])) {
       const r = displayRows[j];
-      if (!totalRow && r.level === level && r.sourceIndex !== null && (r.kind === "subtotal" || r.kind === "header")) totalRow = r;
+      if (r.level === level && r.sourceIndex !== null && (r.kind === "subtotal" || r.kind === "header")) totalRows.push(r);
       j += 1;
     }
 
     // Its own label, plus any outer label not already shown on a row above (tabular form, where an
-    // outer item has no header row of its own).
+    // outer item has no header row of its own) — on the first row; every row keeps its total row's
+    // own inner labels (the measure's name).
     const visible = computeVisibleLevels(itemPath, prevPath);
-    out.push({
-      kind: "collapsed",
-      sourceIndex: totalRow?.sourceIndex ?? null,
-      level,
-      path: itemPath,
-      groupCells: rowHeaderGroups.map((g) => {
-        const lines = [];
-        for (let l = g.start; l <= Math.min(g.end, level); l++) {
-          if (l === level || visible[l]) lines.push({ text: itemPath[l] === "" ? "(blank)" : itemPath[l], indent: g.start < g.end ? l - g.start : 0, level: l });
-        }
-        return { lines };
-      }),
-      blankLineAfter: displayRows[j - 1].blankLineAfter,
+    (totalRows.length > 0 ? totalRows : [null]).forEach((totalRow, k) => {
+      out.push({
+        kind: "collapsed",
+        sourceIndex: totalRow?.sourceIndex ?? null,
+        level,
+        path: itemPath,
+        groupCells: rowHeaderGroups.map((g, groupIndex) => {
+          const lines = [];
+          if (k === 0) {
+            for (let l = g.start; l <= Math.min(g.end, level); l++) {
+              if (l === level || visible[l]) lines.push({ text: itemPath[l] === "" ? "(blank)" : itemPath[l], indent: g.start < g.end ? l - g.start : 0, level: l });
+            }
+          }
+          if (totalRows.length > 1) lines.push(...(totalRow.groupCells[groupIndex]?.lines ?? []).filter((line) => line.level > level));
+          return { lines };
+        }),
+        blankLineAfter: k === totalRows.length - 1 || totalRows.length === 0 ? displayRows[j - 1].blankLineAfter : false,
+      });
     });
     prevPath = itemPath;
     i = j - 1;

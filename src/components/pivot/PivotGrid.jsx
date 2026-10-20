@@ -849,6 +849,12 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
                   valuePatch.baseField = request.rows.find((f) => f !== MEASURES_PLACEHOLDER) ?? null;
                   valuePatch.baseItem = opt.value === "PercentOfParentTotal" ? "" : "(previous)";
                 }
+                // Running Total In / Rank: along the innermost Rows field, restarting for each outer
+                // item (2026-10-20); with one Rows field that's the whole table, as before.
+                if (["RunningTotal", "PercentRunningTotal", "Rank", "RankAscending"].includes(opt.value)) {
+                  valuePatch.baseField = [...request.rows].reverse().find((f) => f !== MEASURES_PLACEHOLDER) ?? null;
+                  valuePatch.baseItem = "";
+                }
                 if (PERCENT_SHOW_VALUES_AS.has(opt.value) && format.type === "General") {
                   valuePatch.format = { ...format, type: "Percentage" };
                 }
