@@ -231,7 +231,13 @@ export async function exportPivotToExcel({
   // `for (let level = 0; level < columnDepth; level++)` loop to render at all. Missing here meant
   // the exported .xlsx silently dropped the row headers' own title row for a Values-less pivot,
   // even though the live grid correctly showed it (caught 2026-10-06, full codebase review).
-  const columnHeaderRows = buildColumnHeaderRows(columnHeaders, columnsDrillSlot, measuresIndexOf(columns));
+  const allColumnHeaderRows = buildColumnHeaderRows(columnHeaders, columnsDrillSlot, measuresIndexOf(columns));
+  // One value field with Columns fields: no row repeating its name under every column — like the
+  // live grid and Excel, the name goes in the top-left corner instead (2026-10-21).
+  const labelLevels = columnHeaders[0]?.labels.length ?? 0;
+  const singleValueRowIndex = valueFields.length === 1 && columnsDrillSlot < 0 && labelLevels > 1 && measuresIndexOf(columns) === labelLevels - 1 ? labelLevels - 1 : -1;
+  const columnHeaderRows = singleValueRowIndex >= 0 ? allColumnHeaderRows.filter((_, r) => r !== singleValueRowIndex) : allColumnHeaderRows;
+  const singleValueCaption = singleValueRowIndex >= 0 ? (columnHeaders.find((c) => !c.isTotal)?.labels[singleValueRowIndex] ?? "") : null;
   const columnDepth = columnHeaders.length > 0 ? columnHeaderRows.length : rowHeaders.length > 0 ? 1 : 0;
   // Where (if either) Σ Values sits — rowFieldLabels/columnFieldLabels already carry "Σ Values" at
   // that same position (PivotBuilder.jsx's fieldLabels helper maps the sentinel to that label), so
@@ -276,7 +282,14 @@ export async function exportPivotToExcel({
     const labelRow = sheet.getRow(currentRow);
     if (rowDepth + 1 <= totalCols) mergeCells(currentRow, rowDepth + 1, currentRow, totalCols);
     const cell = labelRow.getCell(rowDepth + 1);
-    cell.value = showCaptions ? columnFieldLabels.join(" › ") : "";
+    // The hidden value row takes its "Σ Values" caption with it.
+    const shownColumnLabels = singleValueCaption !== null ? columnFieldLabels.filter((_, i) => i !== columnsMeasuresIndex) : columnFieldLabels;
+    cell.value = showCaptions ? shownColumnLabels.join(" › ") : "";
+    if (singleValueCaption && rowDepth > 0) {
+      const corner = labelRow.getCell(1);
+      corner.value = singleValueCaption;
+      corner.font = { bold: true };
+    }
     cell.font = { italic: true, color: { argb: "FF64748B" } };
     cell.alignment = { horizontal: "center" };
     currentRow += 1;

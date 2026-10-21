@@ -64,6 +64,25 @@ describe("exportPivotToExcel into a workbook (Show Report Filter Pages)", () => 
     expect(flat).toContain("Grand Total");
   });
 
+  it("with one value field and a Columns field, puts the value name in the corner instead of a repeated row", async () => {
+    const workbook = createWorkbook();
+    const crossed = {
+      rowHeaders: [{ labels: ["AMH"], isTotal: false }],
+      columnHeaders: [
+        { labels: ["Egypt", "Revenue"], isTotal: false },
+        { labels: ["KSA", "Revenue"], isTotal: false },
+      ],
+      cells: [[1, 2]],
+    };
+    await exportPivotToExcel(options({ workbook, result: crossed, rows: ["[BU]"], columns: ["[Country]", "[Measures]"], rowFieldLabels: ["BU"], columnFieldLabels: ["Country", "Σ Values"] }));
+    const rows = [];
+    workbook.worksheets[0].eachRow((row) => rows.push(row.values.slice(1)));
+    // (ExcelJS reports a merged range's value on each of its cells.)
+    expect(rows[0].slice(0, 2)).toEqual(["Revenue", "Country"]);
+    expect(rows.flat().filter((v) => v === "Revenue")).toHaveLength(1);
+    expect(rows.flat()).not.toContain("Σ Values");
+  });
+
   it("repeats the row label columns on every printed page, and the header rows with print titles", async () => {
     const workbook = createWorkbook();
     await exportPivotToExcel(options({ workbook, pivotOptions: { ...DEFAULT_PIVOT_OPTIONS, printTitles: true, altTextTitle: "Revenue by country" } }));

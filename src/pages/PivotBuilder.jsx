@@ -5,6 +5,7 @@ import MessageBar from "../components/layout/MessageBar";
 import Toasts from "../components/layout/Toasts";
 import { isCubeTemporarilyDown } from "../services/apiError";
 import { useRetryCountdown } from "../utils/useRetryCountdown";
+import { useUndoHistory } from "../utils/useUndoHistory";
 import AppShell from "../components/layout/AppShell";
 import FieldPicker from "../components/pivot/FieldPicker";
 import PivotToolbar from "../components/pivot/PivotToolbar";
@@ -263,6 +264,31 @@ function writeStored(key, value) {
 // MdxPivotQueryBuilder.ValidateFilters for the authoritative per-mode rules this mirrors).
 // (2026-10-20: GreaterThan/LessThan/Between used to fall through to the member-list check and were
 // silently DROPPED from every query — a value filter has no members. isRuleFilterComplete knows every mode.)
+// Excel only shows Σ Values in an area when there are 2+ value fields; with one it isn't there, so a
+// field dropped next to it effectively comes first. Keeping Σ Values LAST on its axis in that case
+// gives Excel's layout (the value caption under the column items, not a band above them) and keeps
+// a new field from landing behind it (2026-10-21).
+function measuresLastWhenSingleValue(request) {
+  if (request.values.length > 1) return request;
+  // Moving Σ Values shifts the levels after it down by one — per-level sorts follow their field.
+  const move = (fields, levelSorts) => {
+    const at = fields.indexOf(MEASURES_PLACEHOLDER);
+    if (at < 0 || at === fields.length - 1) return null;
+    return {
+      fields: [...fields.filter((f) => f !== MEASURES_PLACEHOLDER), MEASURES_PLACEHOLDER],
+      levelSorts: levelSorts.map((ls) => (ls.level > at ? { ...ls, level: ls.level - 1 } : ls)),
+    };
+  };
+  const rows = move(request.rows, request.rowLevelSorts);
+  const columns = move(request.columns, request.columnLevelSorts);
+  if (!rows && !columns) return request;
+  return {
+    ...request,
+    ...(rows ? { rows: rows.fields, rowLevelSorts: rows.levelSorts } : {}),
+    ...(columns ? { columns: columns.fields, columnLevelSorts: columns.levelSorts } : {}),
+  };
+}
+
 // (isFilterComplete itself lives in utils/filterModes.js — Show Details uses it too.)
 
 // Everything in `request` EXCEPT each value's `format`/`conditionalFormat` — those two are pure
@@ -299,7 +325,7 @@ export default function PivotBuilder() {
   // goes through, instead of auditing every FieldPicker/PivotToolbar/PivotGrid prop individually.
   const setRequest = (updater) => {
     setRequestRaw((prev) => {
-      const next = normalizeMeasuresPlacement(typeof updater === "function" ? updater(prev) : updater);
+      const next = measuresLastWhenSingleValue(normalizeMeasuresPlacement(typeof updater === "function" ? updater(prev) : updater));
       // Real Excel's own default the moment an axis gets its first field — every PivotTable row AND
       // column area starts sorted Ascending (A→Z / chronological) by label, never "whatever order
       // the cube happens to return" (confirmed live, 2026-10-06: "انا اتقالي انه في ال excel دايما
@@ -317,19 +343,23 @@ export default function PivotBuilder() {
       // lets a Sort and LevelSorts coexist on different axes).
       let withDefaultSort = next;
       {
-        const rowsJustGotFirstField = prev.rows.length === 0 && withDefaultSort.rows.length > 0;
+        // The sort goes on the axis's first REAL field — level 0 can be Σ Values, which can't be sorted
+        // (2026-10-21, found by the feature test: dragging a field into Columns after Σ Values failed
+        // with "ColumnLevelSorts references level 0, which is where [Measures] sits").
+        const firstRealLevel = (fields) => fields.findIndex((f) => f !== MEASURES_PLACEHOLDER);
+        const rowsJustGotFirstField = prev.rows.filter((f) => f !== MEASURES_PLACEHOLDER).length === 0 && firstRealLevel(withDefaultSort.rows) >= 0;
         // Not for a drilldown slot (Drilldown v3: starting a drilldown on empty Rows makes it the
         // first Rows field) — a per-level sort can't apply to a drilldown axis (the backend rejects
         // it); the hierarchy keeps its own natural order unless sorted from its header.
         if (rowsJustGotFirstField && withDefaultSort.sort?.axis !== "Rows" && withDefaultSort.rowLevelSorts.length === 0 && !withDefaultSort.rowsHierarchyDrilldown) {
-          withDefaultSort = { ...withDefaultSort, rowLevelSorts: [{ level: 0, direction: "Ascending", byMeasureField: null }] };
+          withDefaultSort = { ...withDefaultSort, rowLevelSorts: [{ level: firstRealLevel(withDefaultSort.rows), direction: "Ascending", byMeasureField: null }] };
         }
         const prevColumnFieldCount = prev.columns.filter((f) => f !== MEASURES_PLACEHOLDER).length;
         const nextColumnFieldCount = withDefaultSort.columns.filter((f) => f !== MEASURES_PLACEHOLDER).length;
         const columnsJustGotFirstField = prevColumnFieldCount === 0 && nextColumnFieldCount > 0;
         // Same exception as Rows for a Columns drilldown slot (C4).
         if (columnsJustGotFirstField && withDefaultSort.sort?.axis !== "Columns" && withDefaultSort.columnLevelSorts.length === 0 && !withDefaultSort.columnsHierarchyDrilldown) {
-          withDefaultSort = { ...withDefaultSort, columnLevelSorts: [{ level: 0, direction: "Ascending", byMeasureField: null }] };
+          withDefaultSort = { ...withDefaultSort, columnLevelSorts: [{ level: firstRealLevel(withDefaultSort.columns), direction: "Ascending", byMeasureField: null }] };
         }
       }
       // A manually-set label/custom-order Sort (byMeasureField AND customOrder both null) is only
@@ -507,6 +537,7 @@ export default function PivotBuilder() {
   // (gridCommandRef).
   const [cellFormats, setCellFormats] = useState(() => readPersistedBuilderState()?.cellFormats ?? {});
   const gridCommandRef = useRef(null);
+
   const [showPivotOptions, setShowPivotOptions] = useState(false);
   // Excel's value-cell context menu has "Hide Field List" — toggles the FIELDS sidebar's own
   // visibility, with a small floating button to bring it back (Excel keeps the same toggle on the
@@ -530,6 +561,36 @@ export default function PivotBuilder() {
   // applies them in one go. Unchecking applies whatever is pending. Not persisted, like Excel's.
   const [deferLayout, setDeferLayout] = useState(false);
   const [pendingRequest, setPendingRequest] = useState(null);
+
+  // Excel's Undo / Redo (Ctrl+Z / Ctrl+Y, and the Home tab's buttons) over everything that describes
+  // the PivotTable (2026-10-21). Restored with setRequestRaw so the state comes back exactly, not
+  // re-normalized (setRequest adds default sorts on an axis's first field).
+  const history = useUndoHistory(
+    { request, reportLayout, repeatItemLabels, fieldLayouts, pivotOptions, cellFormats },
+    (snapshot) => {
+      setPendingRequest(null);
+      setRequestRaw(snapshot.request);
+      setReportLayout(snapshot.reportLayout);
+      setRepeatItemLabels(snapshot.repeatItemLabels);
+      setFieldLayouts(snapshot.fieldLayouts);
+      setPivotOptions(snapshot.pivotOptions);
+      setCellFormats(snapshot.cellFormats);
+    },
+  );
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k !== "z" && k !== "y") return;
+      // Typing in a box keeps the browser's own text undo.
+      if (e.target.closest?.("input, textarea, select, [contenteditable='true']")) return;
+      e.preventDefault();
+      if (k === "y" || e.shiftKey) history.redo();
+      else history.undo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   const applyPendingLayout = () => {
     if (pendingRequest) setRequest(pendingRequest);
     setPendingRequest(null);
@@ -863,6 +924,16 @@ export default function PivotBuilder() {
   // stay in the field list, as in Excel). It applies at once even under Defer Layout Update, like
   // Excel's ribbon command. The snapshot's own name/style/chart settings aren't part of the
   // PivotTable, so they're left alone too.
+  // Excel's "click here to cancel" on a long refresh (2026-10-21): stops waiting for the running query
+  // (the server cancels it on the cube too) and offers Retry.
+  const handleCancelQuery = () => {
+    queryTokenRef.current += 1;
+    queryAbortControllerRef.current?.abort();
+    setLoading(false);
+    setErrorTemporary(false);
+    setError("The query was cancelled.");
+  };
+
   const handleClearAll = () => {
     queryTokenRef.current += 1;
     queryAbortControllerRef.current?.abort();
@@ -1264,6 +1335,7 @@ export default function PivotBuilder() {
               }}
               // Home › Number (2026-10-20): like Excel, formats just the selected cells (the grid
               // applies it — see cellFormats). Display-only: no re-query.
+              history={history}
               numberFormat={{
                 selection: selectionSummary,
                 onApply: (fn) => gridCommandRef.current?.applyNumberFormat(fn),
@@ -1534,6 +1606,7 @@ export default function PivotBuilder() {
       />
       <StatusBar
         loading={loading}
+        onCancel={handleCancelQuery}
         pendingLayout={deferLayout && Boolean(pendingRequest)}
         stats={selectionSummary}
         zoom={zoom}

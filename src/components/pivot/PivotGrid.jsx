@@ -406,7 +406,7 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
                 }}
                 className="rounded-lg px-2 py-1.5 text-left text-muted hover:bg-slate-100"
               >
-                Clear Filter
+                Clear Filter From &quot;{choice?.label ?? label}&quot;
               </button>
             )}
             <button type="button" onClick={() => setPanel("filter")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
@@ -1076,10 +1076,122 @@ export default function PivotGrid({
   // placeholder inside the PivotTable's own bounds ("To build a report, choose fields from the
   // PivotTable Field List"). Matching that instead of rendering nothing (flagged live, 2026-10-04,
   // against a side-by-side screenshot of a brand-new real Excel PivotTable).
+  // Slicers, timelines and the Report Filter area — drawn at the SAME place whether or not there's a
+  // result (see both returns below), so React keeps them mounted while the pivot re-queries: they
+  // used to vanish during every refresh and come back reset (a timeline switched to Years jumped
+  // back to Months and re-loaded its items — 2026-10-21, found by the feature test). Excel keeps
+  // them on screen while it refreshes.
+  const filterWidgets = (
+    <>
+        {/* Excel's own Slicer control (Insert Slicer, PivotToolbar.jsx) — a separate button-grid
+            widget bound to a field, living OUTSIDE the Report Filter area entirely even though it
+            reads/writes the SAME request.filters entry (Members mode) a Report Filter row would.
+            Rendered here instead (not as a Report Filter row below) for any field in
+            request.slicerFields, which is also why that field is excluded from the Report Filter
+            rows just below — Excel never shows both a Slicer AND a Report Filter row for the same
+            field at once. */}
+        {request && onChange && request.slicerFields.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {request.slicerFields.map((field) => {
+              const filter = request.filters.find((f) => f.field === field) ?? null;
+              return (
+                <Slicer
+                  key={field}
+                  field={field}
+                  displayName={dimensionOptions.find((d) => d.value === field)?.label ?? field}
+                  filter={filter}
+                  onChange={(nextFilter) => {
+                    const next = request.filters.some((f) => f.field === field)
+                      ? request.filters.map((f) => (f.field === field ? nextFilter : f))
+                      : [...request.filters, nextFilter];
+                    onChange({ ...request, filters: next });
+                  }}
+                  onRemove={() =>
+                    onChange({
+                      ...request,
+                      slicerFields: request.slicerFields.filter((f) => f !== field),
+                      filters: request.filters.filter((f) => f.field !== field),
+                    })
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
+        {/* Excel's own Timeline control (Insert Timeline, PivotToolbar.jsx) — same relationship to
+            request.filters as the Slicer block above, see Timeline.jsx's own WHY comment. */}
+        {request && onChange && request.timelineFields.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {request.timelineFields.map((field) => {
+              const filter = request.filters.find((f) => f.field === field) ?? null;
+              return (
+                <Timeline
+                  key={field}
+                  field={field}
+                  displayName={dimensionOptions.find((d) => d.value === field)?.label ?? field}
+                  filter={filter}
+                  onChange={(nextFilter) => {
+                    const next = request.filters.some((f) => f.field === field)
+                      ? request.filters.map((f) => (f.field === field ? nextFilter : f))
+                      : [...request.filters, nextFilter];
+                    onChange({ ...request, filters: next });
+                  }}
+                  onRemove={() =>
+                    onChange({
+                      ...request,
+                      timelineFields: request.timelineFields.filter((f) => f !== field),
+                      filters: request.filters.filter((f) => f.field !== field),
+                    })
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
+        {/* Excel's own Report Filter area sits ABOVE the PivotTable itself, not just in a side
+            panel — see FilterHeaderRow's own WHY comment. Reads/writes the LIVE request.filters
+            (not lastQuery), same as every other header-level Sort/Filter control in this file —
+            still needs Run query to take effect, not a special case. A field already shown as a
+            Slicer or Timeline widget above is excluded here — Excel never shows the same field as
+            both a dedicated widget AND a Report Filter row at once. */}
+        {/* Laid out by PivotTable Options > Layout & Format: Down, Then Over / Over, Then Down with N
+            fields per column/row (filterAreaSlot — the same placement as the snapshot and export). */}
+        {request && onChange && (() => {
+          const shown = request.filters
+            .map((filter, index) => ({ filter, index }))
+            // Report Filter fields only — a Rows/Columns field's own filter is its header's funnel (2026-10-20).
+            .filter(({ filter }) => !request.slicerFields.includes(filter.field) && !request.timelineFields.includes(filter.field) && !request.rows.includes(filter.field) && !request.columns.includes(filter.field));
+          if (shown.length === 0) return null;
+          return (
+            <div className="mb-2 grid w-fit max-w-full gap-x-3 gap-y-1">
+              {shown.map(({ filter, index }, position) => {
+                const slot = filterAreaSlot(position, shown.length, pivotOptions);
+                return (
+                  <FilterHeaderRow
+                    key={index}
+                    filter={filter}
+                    index={index}
+                    request={request}
+                    onChange={onChange}
+                    dimensionOptions={dimensionOptions}
+                    selectedValueOptions={selectedValueOptions}
+                    style={{ gridColumn: slot.column + 1, gridRow: slot.row + 1 }}
+                  />
+                );
+              })}
+            </div>
+          );
+        })()}
+    </>
+  );
+
   if (!result) {
     return (
       <>
       {onSelectionStatsChange && <SelectionStatsReporter stats={null} onChange={onSelectionStatsChange} />}
+      {/* Same slots as the main return: (command binder), filter widgets — see filterWidgets. */}
+      {null}
+      {filterWidgets}
       <div
         className={`flex min-h-[22rem] items-center justify-center rounded-lg border border-slate-200 bg-white ${fill ? "flex-1" : ""}`}
       >
@@ -1140,7 +1252,15 @@ export default function PivotGrid({
   // 2026-10-05, the first time this zero-Values case became reachable at all.
   // Columns drilldown (C2): a drilldown slot adds one header row per member depth — the shared
   // buildColumnHeaderRows (mirrored by the backend's ColumnHeaderLayout) decides rows and spans.
-  const columnHeaderRows = buildColumnHeaderRows(columnHeaders, columnsDrillSlot, columnsMeasuresIndex);
+  const allColumnHeaderRows = buildColumnHeaderRows(columnHeaders, columnsDrillSlot, columnsMeasuresIndex);
+  // One value field with Columns fields: Excel shows no row repeating the value's name under every
+  // column — the name sits once in the top-left corner (2026-10-21). Only when Σ Values is the LAST
+  // column level (its usual place, and always so with one value — PivotBuilder keeps it there), so
+  // the Grand Total caption on the first row is never the one dropped.
+  const labelLevels = columnHeaders[0]?.labels.length ?? 0;
+  const hideSingleValueRow = valueFields.length === 1 && columnsDrillSlot < 0 && labelLevels > 1 && columnsMeasuresIndex === labelLevels - 1;
+  const columnHeaderRows = hideSingleValueRow ? allColumnHeaderRows.filter((_, r) => r !== columnsMeasuresIndex) : allColumnHeaderRows;
+  const singleValueCaption = hideSingleValueRow ? (columnHeaders.find((c) => !c.isTotal)?.labels[columnsMeasuresIndex] ?? valueFields[0]?.field ?? "") : null;
   const columnDepth = columnHeaders.length > 0 ? columnHeaderRows.length : rowHeaders.length > 0 ? 1 : 0;
 
   const toggleGroup = (key) => {
@@ -1456,105 +1576,7 @@ export default function PivotGrid({
     <>
       {onSelectionStatsChange && <SelectionStatsReporter stats={rangeStats} onChange={onSelectionStatsChange} />}
       {commandRef && <CommandBinder target={commandRef} value={gridCommands} />}
-      {/* Excel's own Slicer control (Insert Slicer, PivotToolbar.jsx) — a separate button-grid
-          widget bound to a field, living OUTSIDE the Report Filter area entirely even though it
-          reads/writes the SAME request.filters entry (Members mode) a Report Filter row would.
-          Rendered here instead (not as a Report Filter row below) for any field in
-          request.slicerFields, which is also why that field is excluded from the Report Filter
-          rows just below — Excel never shows both a Slicer AND a Report Filter row for the same
-          field at once. */}
-      {request && onChange && request.slicerFields.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2">
-          {request.slicerFields.map((field) => {
-            const filter = request.filters.find((f) => f.field === field) ?? null;
-            return (
-              <Slicer
-                key={field}
-                field={field}
-                displayName={dimensionOptions.find((d) => d.value === field)?.label ?? field}
-                filter={filter}
-                onChange={(nextFilter) => {
-                  const next = request.filters.some((f) => f.field === field)
-                    ? request.filters.map((f) => (f.field === field ? nextFilter : f))
-                    : [...request.filters, nextFilter];
-                  onChange({ ...request, filters: next });
-                }}
-                onRemove={() =>
-                  onChange({
-                    ...request,
-                    slicerFields: request.slicerFields.filter((f) => f !== field),
-                    filters: request.filters.filter((f) => f.field !== field),
-                  })
-                }
-              />
-            );
-          })}
-        </div>
-      )}
-      {/* Excel's own Timeline control (Insert Timeline, PivotToolbar.jsx) — same relationship to
-          request.filters as the Slicer block above, see Timeline.jsx's own WHY comment. */}
-      {request && onChange && request.timelineFields.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2">
-          {request.timelineFields.map((field) => {
-            const filter = request.filters.find((f) => f.field === field) ?? null;
-            return (
-              <Timeline
-                key={field}
-                field={field}
-                displayName={dimensionOptions.find((d) => d.value === field)?.label ?? field}
-                filter={filter}
-                onChange={(nextFilter) => {
-                  const next = request.filters.some((f) => f.field === field)
-                    ? request.filters.map((f) => (f.field === field ? nextFilter : f))
-                    : [...request.filters, nextFilter];
-                  onChange({ ...request, filters: next });
-                }}
-                onRemove={() =>
-                  onChange({
-                    ...request,
-                    timelineFields: request.timelineFields.filter((f) => f !== field),
-                    filters: request.filters.filter((f) => f.field !== field),
-                  })
-                }
-              />
-            );
-          })}
-        </div>
-      )}
-      {/* Excel's own Report Filter area sits ABOVE the PivotTable itself, not just in a side
-          panel — see FilterHeaderRow's own WHY comment. Reads/writes the LIVE request.filters
-          (not lastQuery), same as every other header-level Sort/Filter control in this file —
-          still needs Run query to take effect, not a special case. A field already shown as a
-          Slicer or Timeline widget above is excluded here — Excel never shows the same field as
-          both a dedicated widget AND a Report Filter row at once. */}
-      {/* Laid out by PivotTable Options > Layout & Format: Down, Then Over / Over, Then Down with N
-          fields per column/row (filterAreaSlot — the same placement as the snapshot and export). */}
-      {request && onChange && (() => {
-        const shown = request.filters
-          .map((filter, index) => ({ filter, index }))
-          // Report Filter fields only — a Rows/Columns field's own filter is its header's funnel (2026-10-20).
-          .filter(({ filter }) => !request.slicerFields.includes(filter.field) && !request.timelineFields.includes(filter.field) && !request.rows.includes(filter.field) && !request.columns.includes(filter.field));
-        if (shown.length === 0) return null;
-        return (
-          <div className="mb-2 grid w-fit max-w-full gap-x-3 gap-y-1">
-            {shown.map(({ filter, index }, position) => {
-              const slot = filterAreaSlot(position, shown.length, pivotOptions);
-              return (
-                <FilterHeaderRow
-                  key={index}
-                  filter={filter}
-                  index={index}
-                  request={request}
-                  onChange={onChange}
-                  dimensionOptions={dimensionOptions}
-                  selectedValueOptions={selectedValueOptions}
-                  style={{ gridColumn: slot.column + 1, gridRow: slot.row + 1 }}
-                />
-              );
-            })}
-          </div>
-        );
-      })()}
+      {filterWidgets}
       {notice && (
         <p role="status" className="mb-2 w-fit rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
           {notice}
@@ -1653,7 +1675,9 @@ export default function PivotGrid({
             {columnFieldLabels.length > 0 && (
               <tr>
                 <th className={rowNumberHeaderClass}>1</th>
-                <th colSpan={rowHeaderColumnCount} className={`${headerCellBorder} ${headerBg}`} />
+                <th colSpan={rowHeaderColumnCount} className={`${headerCellBorder} ${headerBg} px-3 py-2 text-left`}>
+                  {singleValueCaption && <span className="text-sm font-semibold text-ink">{singleValueCaption}</span>}
+                </th>
                 {/* Math.max(1, ...) — columnHeaders can legitimately be EMPTY (a Columns field
                     configured but the last Value field removed, see columnDepth's own WHY comment
                     above) while a Columns field is still configured (columnFieldLabels.length > 0
@@ -1667,7 +1691,17 @@ export default function PivotGrid({
                     // A Columns drilldown sorts from here (A→Z/Z→A or by value), whatever else is on
                     // Columns — the backend counts it as the axis's one sortable field. Sort only,
                     // same as the Rows drilldown's "Row Labels" header.
-                    field={columnsDrillSlot >= 0 ? columns[columnsDrillSlot] : columns.length === 1 ? columns[0] : null}
+                    field={columnsDrillSlot >= 0 ? columns[columnsDrillSlot] : null}
+                    // Otherwise Excel's "Column Labels" arrow: every real Columns field, picked from
+                    // its "Select field:" box when there are several. Σ Values is left out — it used
+                    // to count as a field here, so one field + Σ Values got no arrow at all (2026-10-21).
+                    fieldChoices={
+                      columnsDrillSlot >= 0
+                        ? null
+                        : columns
+                            .map((f, l) => ({ field: f, level: l, label: columnFieldLabels[l] || f }))
+                            .filter((c) => c.field && c.field !== MEASURES_PLACEHOLDER)
+                    }
                     axis="Columns"
                     request={request}
                     onChange={onChange}

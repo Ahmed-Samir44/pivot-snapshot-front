@@ -7,6 +7,7 @@ import { Plus, ChevronDown } from "lucide-react";
 import Popover from "./Popover";
 import { parseCubeBracketSegments, formatCubeBracketLabel, formatDimensionName } from "../../utils/cubeMeta";
 import { setFieldDragPayload, readFieldDragPayload } from "../../utils/dragDrop";
+import { useFieldDragActive } from "../../utils/useFieldDragActive";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
 import { effectiveSubtotalPosition } from "../../utils/subtotals";
 import { SUMMARY_FUNCTIONS, aggregationLabel } from "../../utils/aggregations";
@@ -468,6 +469,7 @@ export default function HierarchicalCubePathSelect({
   };
 
   const [dragOver, setDragOver] = useState(false);
+  const dragActive = useFieldDragActive();
 
   const handleDragStart = (e, fullPath) => {
     if (!dragSourceKey) return;
@@ -605,15 +607,19 @@ export default function HierarchicalCubePathSelect({
           الطول"). Both were cut to 2.75rem chasing a whole-page scrollbar bug that, in the end,
           turned out to be caused by AppShell.jsx's own padding instead — once that was fixed
           directly there, both got restored past the original 6rem, to 6.5rem, on request. */}
+      {/* Same drag feedback as the Filters/Values areas (2026-10-21): every area outlined while a field
+          is in flight, the one under the pointer soft gold with "Drop to add", and no flicker when
+          the pointer crosses a pill inside it. */}
       <ul
-        className={`flex min-h-[6.5rem] flex-1 flex-wrap content-start gap-1.5 rounded-lg ${value.length === 0 ? "items-center" : "items-start"} ${dragOver ? "bg-gold/10 ring-2 ring-gold ring-inset" : ""} ${
-          value.length === 0 ? "border-2 border-dashed border-slate-200 px-2" : ""
-        }`}
+        data-zone={dragSourceKey}
+        className={`flex min-h-[6.5rem] flex-1 flex-wrap content-start gap-1.5 rounded-md transition-colors ${value.length === 0 ? "items-center" : "items-start"} ${
+          dragOver ? "bg-gold-soft/70 ring-2 ring-inset ring-gold" : dragActive ? "bg-slate-50 outline-dashed outline-1 -outline-offset-1 outline-slate-300" : ""
+        } ${value.length === 0 ? "border border-dashed border-slate-300 px-2" : ""}`}
         onDragOver={dragSourceKey && onFieldDropped ? handleDragOver : undefined}
-        onDragLeave={dragSourceKey && onFieldDropped ? () => setDragOver(false) : undefined}
+        onDragLeave={dragSourceKey && onFieldDropped ? (e) => !e.currentTarget.contains(e.relatedTarget) && setDragOver(false) : undefined}
         onDrop={dragSourceKey && onFieldDropped ? handleDrop : undefined}
       >
-        {value.length === 0 && <span className="text-xs text-muted">Drop a field here</span>}
+        {value.length === 0 && <span className={`text-xs ${dragOver ? "font-medium text-gold-strong" : "text-slate-400"}`}>{dragOver ? "Drop to add" : "Drop a field here"}</span>}
         {value.map((fullPath, index) => (
           <PlacedFieldPill
             key={fullPath}

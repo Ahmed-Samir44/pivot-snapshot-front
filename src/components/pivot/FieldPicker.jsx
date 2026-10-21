@@ -21,8 +21,8 @@ import {
   clearDanglingMeasureReferences,
   clearDanglingBaseFieldReferences,
   reconcileDrilldowns,
-  FIELD_DRAG_MIME,
 } from "../../utils/dragDrop";
+import { useFieldDragActive } from "../../utils/useFieldDragActive";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
 import { formatForShowValuesAs } from "../../utils/showValuesAsFormat";
 import { calculatedFieldFormula, calculatedItemFormula, formulaFieldReference, isCompleteCalculatedField } from "../../utils/calculatedFields";
@@ -614,27 +614,6 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
 // that leftover space visually part of the card but not draggable-onto — caught live, 2026-09-23.
 // Needs its parent card to be a flex column (see FieldPicker's Filters/Values boxes) to have any
 // effect; harmless no-op otherwise.
-// True while a pivot field is being dragged anywhere on the page — the zones light up as targets
-// the moment a drag starts (2026-10-20 UI refresh), not only once the pointer is over one.
-function useFieldDragActive() {
-  const [active, setActive] = useState(false);
-  useEffect(() => {
-    const start = (e) => {
-      if (e.dataTransfer?.types?.includes(FIELD_DRAG_MIME)) setActive(true);
-    };
-    const stop = () => setActive(false);
-    document.addEventListener("dragstart", start);
-    document.addEventListener("dragend", stop);
-    document.addEventListener("drop", stop);
-    return () => {
-      document.removeEventListener("dragstart", start);
-      document.removeEventListener("dragend", stop);
-      document.removeEventListener("drop", stop);
-    };
-  }, []);
-  return active;
-}
-
 function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, emptyText = "Drag a field here", emptyIsDropTarget = true, children }) {
   const [dragOver, setDragOver] = useState(false);
   const dragActive = useFieldDragActive();
@@ -667,6 +646,7 @@ function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, empty
     // Drag feedback (2026-10-20): every zone gets a dashed slate outline while a field is in
     // flight, and the one under the pointer turns soft gold with a solid gold ring.
     <div
+      data-zone={zoneKey}
       className={`min-h-[6.5rem] flex-1 rounded-md transition-colors ${
         dragOver
           ? "bg-gold-soft/70 ring-2 ring-inset ring-gold"
@@ -851,10 +831,16 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
       setDraft({ field: draft.field, mode: "DatePeriod", includedMembers: [], labelText: nextMode.slice("DatePeriod:".length), n: 10, byMeasureField: null, value: null, valueTo: null });
       return;
     }
-    setDraft({ field: draft.field, mode: nextMode, includedMembers: [], labelText: "", n: 10, byMeasureField: null, value: null, valueTo: null });
+    // Value Filters / Top 10 open on the PivotTable's first value field, like Excel's dialogs ("by
+    // Sum of Revenue"), so OK works without picking it first (2026-10-21).
+    const byValue = nextMode === "TopN" || nextMode === "BottomN" || isTop10Mode(nextMode) || isValueCompareMode(nextMode);
+    const byMeasureField = byValue ? (selectedValueOptions?.[0]?.value ?? null) : null;
+    setDraft({ field: draft.field, mode: nextMode, includedMembers: [], labelText: "", n: 10, byMeasureField, value: null, valueTo: null });
   };
 
   const handleOk = () => {
+    // The Report Filter's "(All)" is an empty Members list: saved as is — the field stays in the
+    // Filters area showing "(All)", like Excel, instead of being removed.
     if (emptyMeansAll && draft.includedMembers.length === 0) {
       // Everything checked = no filter: drop an existing filter rather than save an empty one.
       const hadFilter = (filter.mode ?? "Members") !== "Members" || (filter.includedMembers?.length ?? 0) > 0;
@@ -976,6 +962,7 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
               placeholder={loadingMembers ? "Loading members…" : "Type to search members…"}
               isLoading={loadingMembers}
               showSelectMultiple={!showAdvancedFilters}
+              showAllItem={!showAdvancedFilters && mode === "Members"}
               onInputChange={(text, actionMeta) => {
                 // Only a real keystroke should update the search term — react-select also fires
                 // this on "menu-close"/"input-blur"/"set-value" with a value we don't want (e.g.
@@ -2873,6 +2860,15 @@ export default function FieldPicker({
   }, [pane.layout]);
 
   const dimensionOptions = dimensions.map((d) => ({ value: d.field, label: d.displayName }));
+  // Any field of the cube can be dropped into an area — including one found by search whose table
+  // isn't open in the list (2026-10-21, found by the feature test: such a drop was silently refused,
+  // though ticking the same field worked).
+  const knownFieldIds = new Set([...dimensions, ...(allDimensions ?? [])].map((d) => d.field));
+  const isKnownField = (field) => knownFieldIds.has(field);
+  // Like Excel, the Σ Values field only shows in Columns/Rows once there are 2+ value fields; with
+  // one it's hidden (and PivotBuilder keeps it last, where it changes nothing). An edit made without
+  // it gets it back from normalizeMeasuresPlacement (2026-10-21).
+  const visibleAxisFields = (fields) => (value.values.length >= 2 ? fields : fields.filter((f) => f !== MEASURES_PLACEHOLDER));
   const measureOptions = measures.map((m) => ({ value: m.field, label: m.displayName }));
   // A calculated field's own LeftField/RightField must reference a real cube measure only (no
   // chaining calculated-on-calculated — see the backend's CalculatedField), but once FULLY
@@ -3389,7 +3385,7 @@ export default function FieldPicker({
               // dimension-only zone; without this a dropped measure landed as a FilterRow whose
               // field isn't in dimensionOptions, showing no match in its own Select while the
               // broken value stayed set (caught live, 2026-09-28).
-              isFieldAccepted={(field) => dimensionOptions.some((opt) => opt.value === field)}
+              isFieldAccepted={isKnownField}
               isEmpty={reportFilterCount === 0}
             >
               <div className="flex flex-wrap gap-1.5">
@@ -3422,7 +3418,7 @@ export default function FieldPicker({
               label="Columns"
               icon={Columns3}
               options={dimensions.map((d) => d.field)}
-              value={value.columns}
+              value={visibleAxisFields(value.columns)}
               onChange={(columns) => {
                 // moveField's own "remove from every destination-capable zone first, then add to
                 // the target" logic only runs for drag-and-drop (onFieldDropped below) — THIS
@@ -3464,7 +3460,7 @@ export default function FieldPicker({
               }}
               dragSourceKey="columns"
               onFieldDropped={moveField}
-              isFieldAccepted={(field) => field === MEASURES_PLACEHOLDER || dimensionOptions.some((opt) => opt.value === field)}
+              isFieldAccepted={(field) => field === MEASURES_PLACEHOLDER || isKnownField(field)}
               contextMenuTargets={[
                 { zoneKey: "filters", label: "Move to Report Filter" },
                 { zoneKey: "rows", label: "Move to Row Labels" },
@@ -3503,7 +3499,7 @@ export default function FieldPicker({
               label="Rows"
               icon={Rows3}
               options={dimensions.map((d) => d.field)}
-              value={value.rows}
+              value={visibleAxisFields(value.rows)}
               onChange={(rows) => {
                 // Mirror of the Columns handler above's own WHY comment — same exclusivity gap, same
                 // fix, for the Rows side of the same "+" Add popover.
@@ -3546,7 +3542,7 @@ export default function FieldPicker({
               onFieldDropped={moveField}
               // See the Columns instance's own WHY comment above — same reasoning, Rows also
               // accepts the Σ Values sentinel.
-              isFieldAccepted={(field) => field === MEASURES_PLACEHOLDER || dimensionOptions.some((opt) => opt.value === field)}
+              isFieldAccepted={(field) => field === MEASURES_PLACEHOLDER || isKnownField(field)}
               contextMenuTargets={[
                 { zoneKey: "filters", label: "Move to Report Filter" },
                 { zoneKey: "columns", label: "Move to Column Labels" },
@@ -3672,7 +3668,7 @@ export default function FieldPicker({
               // it defaults to Count instead of Sum (confirmed live, 2026-10-05, against a normal
               // Excel/Power Pivot PivotTable). dimensionOptions covers this; the Σ Values sentinel
               // itself still isn't a real field, so it stays rejected (never in either list).
-              isFieldAccepted={(field) => valueFieldOptions.some((opt) => opt.value === field) || dimensionOptions.some((opt) => opt.value === field)}
+              isFieldAccepted={(field) => valueFieldOptions.some((opt) => opt.value === field) || isKnownField(field)}
               isEmpty={value.values.length === 0}
             >
               <div className="flex flex-wrap gap-1.5">

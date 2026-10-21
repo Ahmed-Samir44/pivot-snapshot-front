@@ -43,6 +43,23 @@ function bucketLabel(key, granularity) {
   return key;
 }
 
+// A bucket's first and last day, as ISO "yyyy-mm-dd" — what a DateBetween filter takes.
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function bucketRange(key, granularity) {
+  if (granularity === "Years") return [new Date(Number(key), 0, 1), new Date(Number(key), 11, 31)];
+  if (granularity === "Quarters") {
+    const [year, q] = key.split(" Q").map(Number);
+    return [new Date(year, (q - 1) * 3, 1), new Date(year, q * 3, 0)];
+  }
+  if (granularity === "Months") {
+    const [year, month] = key.split("-").map(Number);
+    return [new Date(year, month - 1, 1), new Date(year, month, 0)];
+  }
+  const [year, month, day] = key.split("-").map(Number);
+  const d = new Date(year, month - 1, day);
+  return [d, d];
+}
+
 // Excel's own Timeline control (Insert > Timeline) — a date-range picker bound to one field,
 // distinct from a plain Slicer in that it groups members into Years/Quarters/Months/Days "boxes"
 // you click (or shift-click to extend) to select a CONTIGUOUS range, instead of toggling individual
@@ -98,10 +115,21 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
     return keys;
   }, [dated, granularity]);
 
-  // Which buckets the CURRENT filter's includedMembers already cover — lets the timeline re-derive
-  // its own highlighted range after a page reload instead of forgetting the selection.
+  // Which buckets the CURRENT filter covers — lets the timeline re-derive its own highlighted range
+  // after a page reload instead of forgetting the selection. A date range (what the timeline sets
+  // since 2026-10-21) covers the buckets inside it; an older saved member list, its members' buckets.
   const includedMembers = filter?.includedMembers ?? [];
+  const isRange = filter?.mode === "DateBetween" && Boolean(filter.labelText) && Boolean(filter.labelTextTo);
+  const rangeFrom = isRange ? filter.labelText : null;
+  const rangeTo = isRange ? filter.labelTextTo : null;
+  const hasSelection = isRange || includedMembers.length > 0;
   const selectedBuckets = useMemo(() => {
+    if (rangeFrom && rangeTo) {
+      return new Set(buckets.filter((b) => {
+        const [start, end] = bucketRange(b, granularity);
+        return iso(start) >= rangeFrom && iso(end) <= rangeTo;
+      }));
+    }
     if (includedMembers.length === 0) return new Set();
     const included = new Set(includedMembers);
     const keys = new Set();
@@ -109,18 +137,21 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
       if (included.has(caption)) keys.add(bucketKey(date, granularity));
     }
     return keys;
-  }, [includedMembers, dated, granularity]);
+  }, [includedMembers, dated, granularity, buckets, rangeFrom, rangeTo]);
 
   const selectedIndexes = buckets.map((b, i) => (selectedBuckets.has(b) ? i : -1)).filter((i) => i >= 0);
   const rangeLo = selectedIndexes.length > 0 ? Math.min(...selectedIndexes) : null;
   const rangeHi = selectedIndexes.length > 0 ? Math.max(...selectedIndexes) : null;
 
+  // A DATE RANGE from the first bucket's first day to the last one's last day, like Excel's timeline
+  // (2026-10-21) — it used to be the list of member dates in those buckets, which missed any date
+  // the member list didn't have (found by the feature test: 2026 came out 2,640.25 short).
   const applyRange = (loIndex, hiIndex) => {
     const lo = Math.min(loIndex, hiIndex);
     const hi = Math.max(loIndex, hiIndex);
-    const selectedKeys = new Set(buckets.slice(lo, hi + 1));
-    const nextIncluded = dated.filter(({ date }) => selectedKeys.has(bucketKey(date, granularity))).map((m) => m.caption);
-    onChange({ field, mode: "Members", includedMembers: nextIncluded });
+    const [start] = bucketRange(buckets[lo], granularity);
+    const [, end] = bucketRange(buckets[hi], granularity);
+    onChange({ field, mode: "DateBetween", includedMembers: [], labelText: iso(start), labelTextTo: iso(end) });
   };
 
   const handleBucketClick = (index, shiftKey) => {
@@ -161,7 +192,7 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
           <button
             type="button"
             onClick={clearFilter}
-            disabled={includedMembers.length === 0}
+            disabled={!hasSelection}
             title="Clear Filter"
             className="rounded p-0.5 text-muted hover:bg-slate-200 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
           >

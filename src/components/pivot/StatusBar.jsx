@@ -8,7 +8,7 @@ const statFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }
 // state on the left, Average / Count / Sum of the selected cells (shown, like Excel, once 2+ cells
 // are selected — a single cell already shows its own value), then the view controls (Field List
 // toggle and zoom) on the right.
-export default function StatusBar({ loading, pendingLayout, stats, zoom, onZoomChange, fieldListShown, onToggleFieldList }) {
+export default function StatusBar({ onCancel = null, loading, pendingLayout, stats, zoom, onZoomChange, fieldListShown, onToggleFieldList }) {
   const zoomIndex = ZOOM_LEVELS.indexOf(zoom);
   const stepZoom = (delta) => {
     const index = zoomIndex >= 0 ? zoomIndex : ZOOM_LEVELS.indexOf(1);
@@ -23,6 +23,11 @@ export default function StatusBar({ loading, pendingLayout, stats, zoom, onZoomC
           <>
             <Loader2 className="h-3.5 w-3.5 animate-spin text-gold-strong" />
             Updating…
+            {onCancel && (
+              <button type="button" onClick={onCancel} className="ml-1 rounded px-1 font-medium text-gold-strong underline-offset-2 hover:underline" title="Stop this refresh">
+                Cancel
+              </button>
+            )}
           </>
         ) : pendingLayout ? (
           <span className="text-amber-700">Layout changes pending — Update to apply</span>

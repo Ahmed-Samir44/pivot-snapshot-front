@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, DecimalsArrowLeft, DecimalsArrowRight, DollarSign, Percent, Sigma, Rows3, Rows4, Calculator, ListPlus, LayoutGrid, CalendarRange, Settings2, SquarePlus, Heading, PanelRight, TableProperties, Eraser, Files } from "lucide-react";
+import { Redo2, Undo2, ChevronDown, ChevronUp, DecimalsArrowLeft, DecimalsArrowRight, DollarSign, Percent, Sigma, Rows3, Rows4, Calculator, ListPlus, LayoutGrid, CalendarRange, Settings2, SquarePlus, Heading, PanelRight, TableProperties, Eraser, Files } from "lucide-react";
 import Popover from "../forms/Popover";
 import { NUMBER_FORMAT_CHOICES, accountingStyle, changeDecimals, commaStyle, percentStyle, withFormatType } from "../../utils/numberFormatCommands";
 import { CalculatedFieldDialog, CalculatedItemDialog } from "./FieldPicker";
@@ -119,14 +119,16 @@ function RibbonButtonFace({ icon: Icon, label, badge = 0 }) {
 }
 
 // A plain (non-dropdown) ribbon button — Options, and the Show group's toggles (`pressed`).
-function RibbonPlainButton({ icon, label, onClick, pressed }) {
+function RibbonPlainButton({ icon, label, onClick, pressed, disabled = false, title }) {
   const compact = useContext(RibbonCompact);
   return (
     <button
       type="button"
       aria-pressed={pressed}
       onClick={onClick}
-      className={ribbonButtonClass(compact, pressed ? "bg-gold-soft ring-1 ring-inset ring-gold/50" : "hover:bg-slate-100")}
+      disabled={disabled}
+      title={title}
+      className={ribbonButtonClass(compact, (pressed ? "bg-gold-soft ring-1 ring-inset ring-gold/50" : "hover:bg-slate-100") + " disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent")}
     >
       <RibbonButtonFace icon={icon} label={label} />
     </button>
@@ -258,7 +260,7 @@ function RibbonGroup({ label, children }) {
 // onFieldLayoutsChange } — the Design tab's Report Layout / Blank Rows (2026-10-20); omitted, not drawn.
 // numberFormat: { selection (the grid's selected range summary, or null), onApply(fn) — formats the
 // selected cells } — Home › Number; omitted, the Home tab has no Number group.
-export default function PivotToolbar({ request, onChange, measureOptions, dimensions = [], allDimensions = null, pivotOptions = null, onPivotOptionsChange = null, onOpenPivotTableOptions = null, fieldListShown = true, onToggleFieldList = null, layout = null, actions = null, numberFormat = null }) {
+export default function PivotToolbar({ request, onChange, measureOptions, dimensions = [], allDimensions = null, pivotOptions = null, onPivotOptionsChange = null, onOpenPivotTableOptions = null, fieldListShown = true, onToggleFieldList = null, layout = null, actions = null, numberFormat = null, history = null }) {
   const [tab, setTab] = useState("analyze");
   // The name box's text while it's being typed (null = show the saved name); applied on blur/Enter.
   const [nameDraft, setNameDraft] = useState(null);
@@ -387,6 +389,13 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
           portal, so this doesn't clip them. */}
       {!collapsed && (
       <div ref={surfaceRef} role="tabpanel" className="custom-scrollbar flex items-stretch gap-0 overflow-x-auto bg-white px-1 py-1">
+        {/* Excel's Undo group, first on Home (2026-10-21) — Ctrl+Z / Ctrl+Y do the same. */}
+        {tab === "home" && history && (
+          <RibbonGroup label="Undo">
+            <RibbonPlainButton icon={Undo2} label="Undo" onClick={history.undo} disabled={!history.canUndo} title="Undo (Ctrl+Z)" />
+            <RibbonPlainButton icon={Redo2} label="Redo" onClick={history.redo} disabled={!history.canRedo} title="Redo (Ctrl+Y)" />
+          </RibbonGroup>
+        )}
         {tab === "home" && numberFormat && <NumberGroup {...numberFormat} />}
         {tab === "home" && !numberFormat && <p className="px-3 py-6 text-xs text-muted">Nothing here yet.</p>}
 

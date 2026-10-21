@@ -31,9 +31,14 @@ import { Search } from "lucide-react";
 // is grouping multiple members. Callers filtering a Row/Column field's own members (FieldHeaderMenu,
 // via FilterRow's `fieldLocked`) pass `showSelectMultiple={false}`, which also forces `allowMultiple`
 // permanently true (no toggle to turn it on otherwise).
-export default function MemberCheckboxList({ options, value, onChange, placeholder, isLoading = false, onInputChange, showSelectMultiple = true }) {
+//
+// `showAllItem` (2026-10-21): Excel's Report Filter list starts with "(All)" — the unfiltered state,
+// an empty `value`. Picking it clears the selection; the caller treats an empty list as no filter.
+export default function MemberCheckboxList({ options, value, onChange, placeholder, isLoading = false, onInputChange, showSelectMultiple = true, showAllItem = false }) {
   const [search, setSearch] = useState("");
-  const [allowMultipleState, setAllowMultiple] = useState(false);
+  // Opens ticked when the filter already holds several items (as Excel shows it) — unticked, the
+  // next click would silently replace them all with one.
+  const [allowMultipleState, setAllowMultiple] = useState(() => value.length > 1);
   const allowMultiple = showSelectMultiple ? allowMultipleState : true;
   const selected = new Set(value);
   // onInputChange present (FilterRow's own debounced getMembers re-fetch): `options` IS already the
@@ -83,6 +88,12 @@ export default function MemberCheckboxList({ options, value, onChange, placehold
           <p className="px-3 py-2 text-sm text-muted">No items</p>
         ) : (
           <>
+            {showAllItem && !allowMultiple && !search && (
+              <label className="flex cursor-pointer items-center gap-2 border-b border-slate-100 px-3 py-1.5 text-sm text-ink hover:bg-slate-50">
+                <input type="radio" className="h-4 w-4 accent-gold rounded-full" checked={value.length === 0} onChange={() => onChange([])} />
+                (All)
+              </label>
+            )}
             {allowMultiple && (
               <label className="flex cursor-pointer items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-sm font-semibold text-ink">
                 <input type="checkbox" className="h-4 w-4 accent-gold" checked={allVisibleSelected} onChange={toggleAll} />
