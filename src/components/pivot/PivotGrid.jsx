@@ -511,12 +511,13 @@ function cellHasDetails(request, valueField, row, column) {
 // Excel's right-click menu on a ROW LABEL (2026-10-20): Copy, Sort, Filter (Keep Only / Hide /
 // Clear Filter From), Expand/Collapse (the item, the entire field), Move (Up / Down / To Beginning /
 // To End — a manual order, LevelSort.CustomOrder), Remove the field. Flat sections instead of
-// Excel's flyout submenus.
+// Excel's flyout submenus. Refresh, PivotTable Options… and Hide Field List too (2026-10-21), as on
+// Excel's own row-label menu — the value-cell menu already had them.
 function MenuSection({ children }) {
   return <p className="px-2 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">{children}</p>;
 }
 
-function RowLabelContextMenu({ x, y, level, label, filterable = true, field, fieldLabel, request, onChange, onClose, fieldCollapse, onToggleItem, itemCollapsed, onMove }) {
+function RowLabelContextMenu({ x, y, level, label, filterable = true, field, fieldLabel, request, onChange, onClose, fieldCollapse, onToggleItem, itemCollapsed, onMove, onRefresh = null, onOpenPivotTableOptions = null, onHideFieldList = null }) {
   const allowMultipleFilters = Boolean(request.allowMultipleFiltersPerField);
   const manual = request.filters.find((f) => f.field === field && filterKind(f) === 0);
   const hasFilter = request.filters.some((f) => f.field === field);
@@ -548,6 +549,11 @@ function RowLabelContextMenu({ x, y, level, label, filterable = true, field, fie
         <button type="button" className={itemClass} onClick={run(() => navigator.clipboard?.writeText(label).catch(() => {}))}>
           Copy
         </button>
+        {onRefresh && (
+          <button type="button" className={itemClass} onClick={run(onRefresh)}>
+            Refresh
+          </button>
+        )}
         <MenuSection>Sort</MenuSection>
         <button type="button" className={itemClass} onClick={run(() => setSort("Ascending"))}>
           Sort A → Z
@@ -609,6 +615,17 @@ function RowLabelContextMenu({ x, y, level, label, filterable = true, field, fie
         <button type="button" className={itemClass} onClick={run(() => onChange(removeFieldEverywhere(request, field)))}>
           Remove &quot;{fieldLabel}&quot;
         </button>
+        {(onOpenPivotTableOptions || onHideFieldList) && <div className="my-1 border-t border-slate-100" />}
+        {onOpenPivotTableOptions && (
+          <button type="button" className={itemClass} onClick={run(onOpenPivotTableOptions)}>
+            PivotTable Options…
+          </button>
+        )}
+        {onHideFieldList && (
+          <button type="button" className={itemClass} onClick={run(onHideFieldList)}>
+            Hide Field List
+          </button>
+        )}
       </div>
     </ContextMenu>
   );
@@ -2109,6 +2126,9 @@ export default function PivotGrid({
           onToggleItem={labelMenu.collapseKey && collapsible.has(labelMenu.collapseKey) ? () => toggleGroup(labelMenu.collapseKey) : null}
           itemCollapsed={labelMenu.collapseKey ? collapsed.has(labelMenu.collapseKey) : false}
           onMove={(where) => moveItem(labelMenu.level, labelMenu.path, where)}
+          onRefresh={onRefresh ? () => onRefresh() : null}
+          onOpenPivotTableOptions={onOpenPivotTableOptions}
+          onHideFieldList={onHideFieldList ? () => onHideFieldList() : null}
         />
       )}
       {drillthrough && (

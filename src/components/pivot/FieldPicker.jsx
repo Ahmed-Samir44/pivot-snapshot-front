@@ -779,6 +779,10 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
   const [noneChecked, setNoneChecked] = useState(false);
   const emptyMeansAll = showAdvancedFilters && mode === "Members";
   const showsAllChecked = emptyMeansAll && draft.includedMembers.length === 0 && !noneChecked;
+  // Report Filter: with "Select Multiple Items" ticked an empty list is "nothing checked" (OK
+  // disabled, like Excel), not "(All)" — mirrors MemberCheckboxList's own initial state.
+  const [pageMultiple, setPageMultiple] = useState(() => (filter.includedMembers?.length ?? 0) > 1);
+  const pageNoneChecked = !showAdvancedFilters && mode === "Members" && pageMultiple && draft.includedMembers.length === 0;
 
   // A search typed for the PREVIOUS field shouldn't silently carry over and narrow the new
   // field's member list before the user has typed anything for it.
@@ -845,6 +849,13 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
       // Everything checked = no filter: drop an existing filter rather than save an empty one.
       const hadFilter = (filter.mode ?? "Members") !== "Members" || (filter.includedMembers?.length ?? 0) > 0;
       if (hadFilter) onRemove?.();
+      onClose?.();
+      return;
+    }
+    // Report Filter with every item checked is "(All)" again, as Excel shows it.
+    const everyMemberChecked = !memberSearch && memberOptions.length > 0 && memberOptions.every((m) => draft.includedMembers.includes(m));
+    if (!showAdvancedFilters && mode === "Members" && everyMemberChecked) {
+      onChange({ ...draft, includedMembers: [] });
       onClose?.();
       return;
     }
@@ -963,6 +974,7 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
               isLoading={loadingMembers}
               showSelectMultiple={!showAdvancedFilters}
               showAllItem={!showAdvancedFilters && mode === "Members"}
+              onAllowMultipleChange={setPageMultiple}
               onInputChange={(text, actionMeta) => {
                 // Only a real keystroke should update the search term — react-select also fires
                 // this on "menu-close"/"input-blur"/"set-value" with a value we don't want (e.g.
@@ -1170,7 +1182,7 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
             onClick={handleOk}
             // A rule filter missing its text/number/measure would be stored but never sent (the query
             // drops incomplete filters) — so OK waits until it's complete, like Excel's dialogs.
-            disabled={(emptyMeansAll && noneChecked) || (isMoreFilterMode && !isRuleFilterComplete(draft))}
+            disabled={(emptyMeansAll && noneChecked) || pageNoneChecked || (isMoreFilterMode && !isRuleFilterComplete(draft))}
             className="btn-primary px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
           >
             OK

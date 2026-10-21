@@ -34,7 +34,7 @@ import { Search } from "lucide-react";
 //
 // `showAllItem` (2026-10-21): Excel's Report Filter list starts with "(All)" — the unfiltered state,
 // an empty `value`. Picking it clears the selection; the caller treats an empty list as no filter.
-export default function MemberCheckboxList({ options, value, onChange, placeholder, isLoading = false, onInputChange, showSelectMultiple = true, showAllItem = false }) {
+export default function MemberCheckboxList({ options, value, onChange, placeholder, isLoading = false, onInputChange, showSelectMultiple = true, showAllItem = false, onAllowMultipleChange }) {
   const [search, setSearch] = useState("");
   // Opens ticked when the filter already holds several items (as Excel shows it) — unticked, the
   // next click would silently replace them all with one.
@@ -128,7 +128,12 @@ export default function MemberCheckboxList({ options, value, onChange, placehold
             type="checkbox"
             className="h-3.5 w-3.5 accent-gold"
             checked={allowMultipleState}
-            onChange={(e) => setAllowMultiple(e.target.checked)}
+            onChange={(e) => {
+              setAllowMultiple(e.target.checked);
+              onAllowMultipleChange?.(e.target.checked);
+              // From "(All)", Excel shows every item checked — so unticking one leaves the rest.
+              if (e.target.checked && showAllItem && value.length === 0 && !search) onChange(options);
+            }}
           />
           Select Multiple Items
         </label>
