@@ -72,6 +72,13 @@ function parseBuilderState(builderStateJson) {
   }
 }
 
+// The column caption row's field names — a field's Custom Name (Field Settings) wins, as in the Builder.
+function columnCaptions(version, fieldLayouts = []) {
+  return hideMeasuresLabelIfSingleValue(version.columns, version.values.length).map(
+    (id) => (fieldLayouts ?? []).find((f) => f.field === id)?.customName || formatDimensionName(id),
+  );
+}
+
 // A plain Set-backed multi-select for one list — its own little state machine (toggle one, toggle
 // all, clear) reused across all four lists (Active/Deactivated × Pivots/Versions) instead of
 // writing the same three functions four times.
@@ -372,7 +379,7 @@ export default function SnapshotHistory() {
         rows: previewVersion.rows,
         columns: previewVersion.columns,
         rowFieldLabels: previewVersion.rows.map(formatDimensionName),
-        columnFieldLabels: hideMeasuresLabelIfSingleValue(previewVersion.columns, previewVersion.values.length).map(formatDimensionName),
+        columnFieldLabels: columnCaptions(previewVersion, parseBuilderState(previewVersion.builderStateJson)?.fieldLayouts),
         valueFields: previewVersion.values,
         filename: `${pivotName}_v${previewVersion.versionNumber}`,
         // Same layout as the preview grid above, so the export matches what's on screen.
@@ -732,7 +739,7 @@ export default function SnapshotHistory() {
               rows={previewVersion.rows}
               columns={previewVersion.columns}
               rowFieldLabels={previewVersion.rows.map(formatDimensionName)}
-              columnFieldLabels={hideMeasuresLabelIfSingleValue(previewVersion.columns, previewVersion.values.length).map(formatDimensionName)}
+              columnFieldLabels={columnCaptions(previewVersion, builderState?.fieldLayouts)}
               valueFields={previewVersion.values}
               layout={builderState?.reportLayout ?? "Tabular"}
               repeatItemLabels={builderState?.repeatItemLabels ?? false}

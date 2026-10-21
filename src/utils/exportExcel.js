@@ -36,8 +36,16 @@ function excelNumberFormat(format) {
   // dangling `"" ` that would still show a stray leading space in the exported cell.
   const symbol = (format?.currencySymbol ?? "").replace(/"/g, "");
   const currencyPrefix = symbol ? `"${symbol}" ` : "";
-  if (type === "Number") return `#,##0${decimalPart}`;
-  if (type === "Currency") return `${currencyPrefix}#,##0${decimalPart}`;
+  // Excel's own Negative numbers codes: a second section for negatives ([Red] and/or parentheses).
+  const withNegatives = (positive) => {
+    const style = format?.negativeNumbers ?? "Minus";
+    if (style === "Red") return `${positive};[Red]${positive}`;
+    if (style === "Parentheses") return `${positive};(${positive})`;
+    if (style === "RedParentheses") return `${positive};[Red](${positive})`;
+    return positive;
+  };
+  if (type === "Number") return withNegatives(`${format?.useThousandsSeparator === false ? "0" : "#,##0"}${decimalPart}`);
+  if (type === "Currency") return withNegatives(`${currencyPrefix}#,##0${decimalPart}`);
   if (type === "Percentage") return `#,##0${decimalPart}%`;
   // Excel's own accounting format section syntax (positive;negative;zero): the negative section
   // in parentheses is what gives Accounting its own distinct look from Currency. The explicit

@@ -211,10 +211,13 @@ function readPersistedBuilderState() {
 // Name") for the grid's header row, instead of leaving it blank. A field whose table isn't loaded in
 // the field list (collapsed, or restored from a saved pivot) is formatted from its own identifier
 // instead of shown raw ("[Dim X].[Y].[Y]" — seen 2026-10-19), the same way Snapshot History labels it.
-function fieldLabels(fieldIds, dimensions) {
+// fieldLayouts: a field's Field Settings › Custom Name wins, as in Excel (2026-10-21, for Columns).
+function fieldLabels(fieldIds, dimensions, fieldLayouts = []) {
   if (!fieldIds) return [];
   return fieldIds.map((id) =>
-    id === MEASURES_PLACEHOLDER ? "Σ Values" : (dimensions.find((d) => d.field === id)?.displayName ?? formatDimensionName(id)),
+    id === MEASURES_PLACEHOLDER
+      ? "Σ Values"
+      : (fieldLayouts.find((f) => f.field === id)?.customName || (dimensions.find((d) => d.field === id)?.displayName ?? formatDimensionName(id))),
   );
 }
 
@@ -1049,7 +1052,7 @@ export default function PivotBuilder() {
     rows: query.rows,
     columns: query.columns,
     rowFieldLabels: fieldLabels(query.rows, dimensions),
-    columnFieldLabels: fieldLabels(hideMeasuresLabelIfSingleValue(query.columns, query.values.length), dimensions),
+    columnFieldLabels: fieldLabels(hideMeasuresLabelIfSingleValue(query.columns, query.values.length), dimensions, fieldLayouts),
     valueFields: displayValues,
     // Same layout as the live grid, so the export draws the same rows.
     layout: reportLayout,
@@ -1377,7 +1380,7 @@ export default function PivotBuilder() {
               rows={lastQuery?.rows}
               columns={lastQuery?.columns}
               rowFieldLabels={fieldLabels(lastQuery?.rows, dimensions)}
-              columnFieldLabels={fieldLabels(hideMeasuresLabelIfSingleValue(lastQuery?.columns, lastQuery?.values?.length ?? 0), dimensions)}
+              columnFieldLabels={fieldLabels(hideMeasuresLabelIfSingleValue(lastQuery?.columns, lastQuery?.values?.length ?? 0), dimensions, fieldLayouts)}
               valueFields={displayValues}
               dimensions={dimensions}
               layout={reportLayout}
@@ -1466,7 +1469,8 @@ export default function PivotBuilder() {
               request={editingRequest}
               onChange={editRequest}
               onRefresh={runQuery}
-              onHideFieldList={() => setShowFieldList(false)}
+              onHideFieldList={() => setShowFieldList((v) => !v)}
+              fieldListShown={showFieldList}
               pivotOptions={pivotOptions}
               onOpenPivotTableOptions={() => setShowPivotOptions(true)}
               fill

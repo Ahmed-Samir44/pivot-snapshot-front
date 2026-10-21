@@ -229,7 +229,8 @@ function PlacedFieldPill({
                 </div>
               )}
 
-              {fieldLayout && (
+              {/* nameOnly (Columns): just the Custom Name — these layout options are Rows-only. */}
+              {fieldLayout && !fieldLayout.nameOnly && (
                 <div className="px-2 pb-2">
                   <p className="pb-1 text-xs font-bold uppercase tracking-wide text-muted">Layout</p>
                   {(() => {

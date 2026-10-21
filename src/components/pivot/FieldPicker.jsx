@@ -10,7 +10,7 @@ import MultiSelectField from "../forms/MultiSelectField";
 import MemberCheckboxList from "../forms/MemberCheckboxList";
 import Popover from "../forms/Popover";
 import { getMembers } from "../../services/cubeMetaApi";
-import { formatNumber } from "../../utils/numberFormat";
+import { formatNumber, isRedNegative, NEGATIVE_NUMBER_STYLES } from "../../utils/numberFormat";
 import { LABEL_FILTERS, VALUE_FILTERS, DATE_FILTERS, DATE_PERIODS, TOP_10_MODES, TOP_10_MODE_SET, isLabelMode, isDateMode, isTop10Mode, isRangeMode, isValueCompareMode, top10Parts, isRuleFilterComplete } from "../../utils/filterModes";
 import { formatDimensionName } from "../../utils/cubeMeta";
 import {
@@ -2127,6 +2127,8 @@ const SPECIAL_FORMAT_TYPES = [
 // has no single cell to point at (it configures the WHOLE field, every row), so a fixed example
 // plays that same role instead.
 const NUMBER_FORMAT_SAMPLE_VALUE = 1234.5;
+// Excel's Negative numbers list previews -1234.10.
+const NEGATIVE_SAMPLE_VALUE = 1234.1;
 
 // The one-line description Excel's Format Cells shows under the Sample for each category (its own
 // wording where the user's screenshot showed it — "General format cells have no specific number
@@ -2213,6 +2215,17 @@ export function NumberFormatEditor({ format: initialFormat, onUpdateFormat, onBa
               />
             </div>
           )}
+          {format.type === "Number" && (
+            <label className="flex items-center gap-2 text-xs text-ink">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 accent-gold"
+                checked={format.useThousandsSeparator !== false}
+                onChange={(e) => update({ useThousandsSeparator: e.target.checked })}
+              />
+              Use 1000 Separator (,)
+            </label>
+          )}
           {needsCurrencySymbol && (
             <div>
               <span className="mb-1 block text-xs font-medium text-muted">Symbol</span>
@@ -2247,6 +2260,29 @@ export function NumberFormatEditor({ format: initialFormat, onUpdateFormat, onBa
                   className="input-field mt-1.5 w-full py-1.5 text-sm"
                 />
               )}
+            </div>
+          )}
+          {/* Excel's "Negative numbers" list (Number and Currency), each shown as it will look. */}
+          {(format.type === "Number" || format.type === "Currency") && (
+            <div>
+              <span className="mb-1 block text-xs font-medium text-muted">Negative numbers:</span>
+              <ul className="rounded-md border border-slate-200">
+                {NEGATIVE_NUMBER_STYLES.map((style) => {
+                  const sample = { ...format, negativeNumbers: style };
+                  const selected = (format.negativeNumbers ?? "Minus") === style;
+                  return (
+                    <li key={style}>
+                      <button
+                        type="button"
+                        onClick={() => update({ negativeNumbers: style })}
+                        className={`block w-full px-2 py-1 text-left text-xs ${selected ? "bg-gold/15 font-semibold" : "hover:bg-slate-100"} ${isRedNegative(-NEGATIVE_SAMPLE_VALUE, sample) ? "text-[#FF0000]" : "text-ink"}`}
+                      >
+                        {formatNumber(-NEGATIVE_SAMPLE_VALUE, sample)}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
           {needsSpecialType && (
@@ -3502,6 +3538,19 @@ export default function FieldPicker({
                     }
                   : undefined
               }
+              // Field Settings › Custom Name for a Columns field too, like Excel (2026-10-21) — it
+              // renames the column caption row; the Rows-only layout options stay hidden.
+              fieldLayout={{
+                overrides: fieldLayouts,
+                nameOnly: true,
+                onChange: (field, patch) => {
+                  const existing = fieldLayouts.find((f) => f.field === field) ?? {};
+                  const next = { ...existing, ...patch };
+                  const withoutField = fieldLayouts.filter((f) => f.field !== field);
+                  const isDefault = !next.customName && next.compact == null && next.repeatItemLabels == null && !next.insertBlankLine;
+                  onFieldLayoutsChange(isDefault ? withoutField : [...withoutField, { field, ...next }]);
+                },
+              }}
             />
           </div>
 

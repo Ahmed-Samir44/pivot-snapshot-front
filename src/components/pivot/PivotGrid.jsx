@@ -8,7 +8,7 @@ import Timeline from "./Timeline";
 import GroupItemsPanel from "./GroupItemsPanel";
 import { FieldSortDialog, FilterRow, NumberFormatEditor, ValueFieldSettingsPanel, ConditionalFormatEditor, SHOW_VALUES_AS_OPTIONS, DEFAULT_FORMAT } from "./FieldPicker";
 import { formatForShowValuesAs } from "../../utils/showValuesAsFormat";
-import { formatForColumn } from "../../utils/numberFormat";
+import { formatForColumn, isRedNegative } from "../../utils/numberFormat";
 import { DEFAULT_PIVOT_OPTIONS, cellText, filterAreaSlot, filterValueSummary } from "../../utils/pivotOptions";
 import { filterKind, setFieldFilter, FILTER_KIND_LABELS } from "../../utils/filterKinds";
 import { LABEL_FILTERS, VALUE_FILTERS, DATE_FILTERS, isLabelMode, isDateMode, datePeriodLabel, isRangeMode, isTop10Mode, top10Parts, isFilterComplete } from "../../utils/filterModes";
@@ -517,7 +517,7 @@ function MenuSection({ children }) {
   return <p className="px-2 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">{children}</p>;
 }
 
-function RowLabelContextMenu({ x, y, level, label, filterable = true, field, fieldLabel, request, onChange, onClose, fieldCollapse, onToggleItem, itemCollapsed, onMove, onRefresh = null, onOpenPivotTableOptions = null, onHideFieldList = null }) {
+function RowLabelContextMenu({ x, y, level, label, filterable = true, field, fieldLabel, request, onChange, onClose, fieldCollapse, onToggleItem, itemCollapsed, onMove, onRefresh = null, onOpenPivotTableOptions = null, onHideFieldList = null, fieldListShown = true }) {
   const allowMultipleFilters = Boolean(request.allowMultipleFiltersPerField);
   const manual = request.filters.find((f) => f.field === field && filterKind(f) === 0);
   const hasFilter = request.filters.some((f) => f.field === field);
@@ -623,7 +623,7 @@ function RowLabelContextMenu({ x, y, level, label, filterable = true, field, fie
         )}
         {onHideFieldList && (
           <button type="button" className={itemClass} onClick={run(onHideFieldList)}>
-            Hide Field List
+            {fieldListShown ? "Hide Field List" : "Show Field List"}
           </button>
         )}
       </div>
@@ -633,7 +633,7 @@ function RowLabelContextMenu({ x, y, level, label, filterable = true, field, fie
 
 // showDetailsEnabled: PivotTable Options > Data > "Enable show details" — off, Show Details stays
 // in the menu but grayed out, like Excel.
-function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, measureIndex, sortAxis, row, column, onShowDetails, onRefresh, displayValue, onHideFieldList, onOpenPivotTableOptions, showDetailsEnabled = true, onCopyRange = null }) {
+function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, measureIndex, sortAxis, row, column, onShowDetails, onRefresh, displayValue, onHideFieldList, onOpenPivotTableOptions, showDetailsEnabled = true, onCopyRange = null, fieldListShown = true }) {
   const [panel, setPanel] = useState("root");
   const format = valueField.format ?? DEFAULT_FORMAT;
   const isDimensionField = valueField.field.startsWith("[");
@@ -764,7 +764,7 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
             onClick={() => { onClose(); onHideFieldList(); }}
             className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
           >
-            Hide Field List
+            {fieldListShown ? "Hide Field List" : "Show Field List"}
           </button>
         </div>
       ) : panel === "sort" ? (
@@ -940,7 +940,10 @@ export default function PivotGrid({
   request = null,
   onChange = null,
   onRefresh = null,
+  // Toggles the field list (the menus' "Hide Field List" / "Show Field List", as in Excel);
+  // fieldListShown picks the wording.
   onHideFieldList = null,
+  fieldListShown = true,
   // false when this grid is already nested inside another scrollable container (e.g. Modal.jsx's
   // own max-h-[90vh] overflow-auto card, used for the saved-snapshot interactive preview) — without
   // this, the grid's own 80vh scroll box nested inside the Modal's 90vh one produced two visible
@@ -1433,6 +1436,16 @@ export default function PivotGrid({
   // body: the optional column-field-label row (only when columnFieldLabels is non-empty) plus one
   // row per column header level.
   const headerRowCount = (columnFieldLabels.length > 0 ? 1 : 0) + columnDepth;
+  // Sheet row numbers: a blank line after an item is a real worksheet row in Excel, numbered like
+  // any other, so every row after it shifts down by one (2026-10-21).
+  const sheetRowNumbers = [];
+  {
+    let blankLinesSoFar = 0;
+    displayRows.forEach((d, i) => {
+      sheetRowNumbers[i] = headerRowCount + i + 1 + blankLinesSoFar;
+      if (d.blankLineAfter) blankLinesSoFar += 1;
+    });
+  }
   // Two variants: the gutter's header-row cells share the header band; its body cells keep the
   // light-gray worksheet-gutter look.
   const rowNumberHeaderClass = `${headerCellBorder} ${headerBg} px-2 py-2 text-center text-xs font-medium text-slate-500`;
@@ -1894,7 +1907,7 @@ export default function PivotGrid({
                 <Fragment key={displayIndex}>
                 <tr className={`${rowTint} transition-colors`}>
                   <td className={rowIndex !== null && selectedRows.includes(rowIndex) ? `${cellBorder} bg-slate-200 px-2 py-1.5 text-center text-xs font-semibold text-ink` : rowNumberBodyClass}>
-                    {headerRowCount + displayIndex + 1}
+                    {sheetRowNumbers[displayIndex]}
                   </td>
                   {rowHeaderGroups.map((group, groupIndex) => {
                     const lines = displayRow.groupCells[groupIndex]?.lines ?? [];
@@ -2064,7 +2077,13 @@ export default function PivotGrid({
                           });
                         }}
                       >
-                        {iconColor && <span style={{ color: iconColor }}>●</span>} {cellText(cell, formatOfCell(rowIndex, colIndex, measureIndex), pivotOptions)}
+                        {iconColor && <span style={{ color: iconColor }}>●</span>}{" "}
+                        {/* Number/Currency "Negative numbers" in red, as Excel draws them. */}
+                        {isRedNegative(cell, formatOfCell(rowIndex, colIndex, measureIndex)) ? (
+                          <span className="text-[#FF0000]">{cellText(cell, formatOfCell(rowIndex, colIndex, measureIndex), pivotOptions)}</span>
+                        ) : (
+                          cellText(cell, formatOfCell(rowIndex, colIndex, measureIndex), pivotOptions)
+                        )}
                       </td>
                     );
                   })}
@@ -2073,7 +2092,8 @@ export default function PivotGrid({
                     buildDisplayRows after the LAST row of a flagged item (its subtotal included). */}
                 {displayRow.blankLineAfter && (
                   <tr>
-                    <td colSpan={1 + rowHeaderColumnCount + Math.max(1, columnHeaders.length)} className="h-2 border-0 p-0" />
+                    <td className={rowNumberBodyClass}>{sheetRowNumbers[displayIndex] + 1}</td>
+                    <td colSpan={rowHeaderColumnCount + Math.max(1, columnHeaders.length)} className="border-0 px-2 py-1.5">&nbsp;</td>
                   </tr>
                 )}
                 </Fragment>
@@ -2111,6 +2131,7 @@ export default function PivotGrid({
           // review).
           displayValue={cellText(cellMenu.rawValue, (request.values[cellMenu.measureIndex] ?? cellMenu.valueField)?.format, pivotOptions)}
           onHideFieldList={() => onHideFieldList?.()}
+          fieldListShown={fieldListShown}
           onOpenPivotTableOptions={onOpenPivotTableOptions}
           showDetailsEnabled={pivotOptions.enableShowDetails !== false}
           onCopyRange={isMultiCellRange ? copyRange : null}
@@ -2129,6 +2150,7 @@ export default function PivotGrid({
           onRefresh={onRefresh ? () => onRefresh() : null}
           onOpenPivotTableOptions={onOpenPivotTableOptions}
           onHideFieldList={onHideFieldList ? () => onHideFieldList() : null}
+          fieldListShown={fieldListShown}
         />
       )}
       {drillthrough && (

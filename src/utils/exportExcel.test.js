@@ -53,6 +53,14 @@ describe("exportPivotToExcel into a workbook (Show Report Filter Pages)", () => 
     expect(formats).toEqual(["#,##0.0%", "General"]);
   });
 
+  it("exports the Number options as Excel's own codes (separator, red/parenthesised negatives)", async () => {
+    const workbook = createWorkbook();
+    await exportPivotToExcel(options({ workbook, valueFields: [{ field: "Revenue", showValuesAs: "Normal", format: { type: "Number", decimalPlaces: 1, useThousandsSeparator: false, negativeNumbers: "RedParentheses" } }] }));
+    const formats = new Set();
+    workbook.worksheets[0].eachRow((row) => row.eachCell((cell) => cell.value === 10 && formats.add(cell.numFmt)));
+    expect([...formats]).toEqual(["0.0;[Red](0.0)"]);
+  });
+
   it("writes real numbers, an error cell as #DIV/0!, and the Grand Total row", async () => {
     const workbook = createWorkbook();
     await exportPivotToExcel(options({ workbook }));

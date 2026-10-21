@@ -16,8 +16,25 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function withThousands(value, decimals) {
-  return value.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+function withThousands(value, decimals, useGrouping = true) {
+  return value.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals, useGrouping });
+}
+
+// Excel's Number/Currency "Negative numbers" list (2026-10-21): -1,234.10 (Minus), red 1,234.10
+// (Red), (1,234.10) (Parentheses), red (1,234.10) (RedParentheses). Red drops the minus sign, as in
+// Excel; the colour itself is the grid's job (isRedNegative).
+export const NEGATIVE_NUMBER_STYLES = ["Minus", "Red", "Parentheses", "RedParentheses"];
+const supportsNegativeStyle = (type) => type === "Number" || type === "Currency";
+
+export function isRedNegative(value, format) {
+  return typeof value === "number" && value < 0 && supportsNegativeStyle(format?.type) && (format?.negativeNumbers ?? "Minus").startsWith("Red");
+}
+
+function withNegativeStyle(value, format, render) {
+  const style = format?.negativeNumbers ?? "Minus";
+  if (value >= 0 || style === "Minus") return render(value);
+  if (style === "Red") return render(Math.abs(value));
+  return `(${render(Math.abs(value))})`;
 }
 
 function pad2(n) {
@@ -281,10 +298,12 @@ export function formatNumber(value, format) {
   const currencyPrefix = symbol ? `${symbol} ` : "";
 
   if (type === "Number") {
-    return withThousands(value, decimals);
+    // "Use 1000 Separator (,)" — on unless turned off (formats saved before it existed had it on).
+    const grouping = format?.useThousandsSeparator !== false;
+    return withNegativeStyle(value, format, (v) => withThousands(v, decimals, grouping));
   }
   if (type === "Currency") {
-    return `${currencyPrefix}${withThousands(value, decimals)}`;
+    return withNegativeStyle(value, format, (v) => `${currencyPrefix}${withThousands(v, decimals)}`);
   }
   if (type === "Percentage") {
     // *100 here — mirrors the backend's NumberFormatter exactly (fixed 2026-10-05, see its own WHY
