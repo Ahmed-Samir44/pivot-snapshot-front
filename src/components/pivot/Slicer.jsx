@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
-import { X, Search, FilterX } from "lucide-react";
+import { FilterX, ListChecks } from "lucide-react";
 import { getMembers } from "../../services/cubeMetaApi";
-import { widgetTitle } from "./Timeline";
+import ContextMenu from "../forms/ContextMenu";
+import { widgetTitle } from "../../utils/widgetTitle";
 
-// Excel's own Slicer: a floating button-grid control bound to one field — every member is its own
-// clickable toggle button (selected = highlighted), with a small search box and a "clear filter"
-// action, living OUTSIDE the Filters/Report-Filter-row area entirely (Insert > Slicer, not part of
-// the Filters drop zone). This app already has everything a Slicer needs to actually FILTER with —
-// a Slicer is just a different widget bound to the SAME request.filters entry (Members mode) the
-// Report Filter row/sidebar Filters zone already read and write — so this renders a filter's
-// included-members state as buttons instead of a dropdown, nothing new on the data side.
+// Excel's own Slicer: a floating button list bound to one field, living OUTSIDE the Filters/Report-
+// Filter-row area (Insert > Slicer). It reads and writes the SAME request.filters entry (Members
+// mode) a Report Filter row would — just shown as buttons instead of a dropdown.
+//
+// Matched to Excel exactly (2026-10-25, the user: "like Excel — don't assume anything"): a header
+// with the field name and only Multi-Select and Clear Filter; no search box; every item highlighted
+// while the field is unfiltered; a click selects that item ALONE, Ctrl+click (or Multi-Select on)
+// adds/removes items; right-click for Clear Filter / Remove, as Excel has no close button.
 export default function Slicer({ field, displayName, filter, onChange, onRemove }) {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -17,8 +19,11 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
   // empty (2026-10-25): it gets its own message, a Retry, and an automatic retry after 15s.
   const [failed, setFailed] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
-  const [search, setSearch] = useState("");
+  const [multiSelect, setMultiSelect] = useState(false);
+  const [menu, setMenu] = useState(null);
   const includedMembers = filter?.includedMembers ?? [];
+  const filtered = includedMembers.length > 0;
+  const title = widgetTitle(displayName);
 
   useEffect(() => {
     let cancelled = false;
@@ -26,71 +31,78 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
     setLoading(true);
     setFailed(false);
     let retryId = null;
-    const timeoutId = setTimeout(() => {
-      getMembers(field, search || undefined, controller.signal)
-        .then((result) => {
-          if (!cancelled) setMembers(result);
-        })
-        .catch((err) => {
-          if (cancelled || err.name === "AbortError") return;
-          setFailed(true);
-          retryId = setTimeout(() => setRetryToken((t) => t + 1), 15000);
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    }, 300);
+    getMembers(field, undefined, controller.signal)
+      .then((result) => {
+        if (!cancelled) setMembers(result);
+      })
+      .catch((err) => {
+        if (cancelled || err.name === "AbortError") return;
+        setFailed(true);
+        retryId = setTimeout(() => setRetryToken((t) => t + 1), 15000);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
-      clearTimeout(timeoutId);
       clearTimeout(retryId);
       controller.abort();
     };
-  }, [field, search, retryToken]);
-
-  const toggleMember = (member) => {
-    const next = includedMembers.includes(member) ? includedMembers.filter((m) => m !== member) : [...includedMembers, member];
-    onChange({ field, mode: "Members", includedMembers: next });
-  };
+  }, [field, retryToken]);
 
   const clearFilter = () => onChange({ field, mode: "Members", includedMembers: [] });
 
+  // Excel: a plain click keeps only that item; Ctrl+click or Multi-Select toggles it. Toggling off
+  // the last selected item, or selecting every item, is the same as no filter.
+  const clickItem = (member, ctrlKey) => {
+    let next;
+    if (multiSelect || ctrlKey) {
+      const current = filtered ? includedMembers : members;
+      next = current.includes(member) ? current.filter((m) => m !== member) : [...current, member];
+    } else {
+      next = [member];
+    }
+    if (next.length === 0 || (members.length > 0 && members.every((m) => next.includes(m)))) clearFilter();
+    else onChange({ field, mode: "Members", includedMembers: next });
+  };
+
+  const headerButton = "rounded p-1 text-muted hover:bg-slate-100 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40";
+
   return (
-    <div className="flex w-56 shrink-0 flex-col rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
-        <span className="truncate text-xs font-bold text-ink" title={displayName}>
-          {widgetTitle(displayName)}
+    <div
+      className="flex w-52 shrink-0 flex-col rounded-lg border border-slate-300 bg-white shadow-sm"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY });
+      }}
+    >
+      <div className="flex items-center justify-between gap-2 px-2.5 pb-1.5 pt-2">
+        <span className="truncate text-sm font-semibold text-ink" title={displayName}>
+          {title}
         </span>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             type="button"
-            onClick={clearFilter}
-            disabled={includedMembers.length === 0}
-            title="Clear Filter"
-            className="rounded p-0.5 text-muted hover:bg-slate-200 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={() => setMultiSelect((v) => !v)}
+            aria-pressed={multiSelect}
+            title="Multi-Select (Alt+S)"
+            className={`${headerButton} ${multiSelect ? "bg-primary-soft text-primary-strong ring-1 ring-inset ring-primary/40" : ""}`}
           >
-            <FilterX className="h-3.5 w-3.5" />
+            <ListChecks className="h-4 w-4" />
           </button>
-          <button type="button" onClick={onRemove} title="Remove Slicer" className="rounded p-0.5 text-muted hover:bg-slate-200 hover:text-ink">
-            <X className="h-3.5 w-3.5" />
+          <button type="button" onClick={clearFilter} disabled={!filtered} title="Clear Filter (Alt+C)" className={headerButton}>
+            <FilterX className="h-4 w-4" />
           </button>
         </div>
       </div>
 
-      <div className="border-b border-slate-200 p-1.5">
-        <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1">
-          <Search className="h-3.5 w-3.5 shrink-0 text-muted" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search…"
-            className="w-full bg-transparent text-xs outline-none"
-          />
-        </div>
-      </div>
-
-      <div className="custom-scrollbar flex max-h-48 flex-col gap-1 overflow-y-auto p-1.5">
+      <div
+        className="custom-scrollbar flex max-h-52 flex-col gap-1 overflow-y-auto px-2 pb-2"
+        onKeyDown={(e) => {
+          if (e.altKey && e.key.toLowerCase() === "s") setMultiSelect((v) => !v);
+          if (e.altKey && e.key.toLowerCase() === "c") clearFilter();
+        }}
+      >
         {loading && members.length === 0 ? (
           <p className="py-2 text-center text-xs text-muted">Loading…</p>
         ) : failed && members.length === 0 ? (
@@ -104,16 +116,17 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
           <p className="py-2 text-center text-xs text-muted">No items</p>
         ) : (
           members.map((member) => {
-            const selected = includedMembers.includes(member);
+            // Unfiltered, every item shows as selected — Excel's slicer look.
+            const selected = !filtered || includedMembers.includes(member);
             return (
               <button
                 key={member}
                 type="button"
-                onClick={() => toggleMember(member)}
-                title={member}
+                onClick={(e) => clickItem(member, e.ctrlKey || e.metaKey)}
+                title={member === "" ? "(blank)" : member}
                 aria-pressed={selected}
-                className={`truncate rounded-md border px-2 py-1.5 text-left text-xs ${
-                  selected ? "border-primary bg-primary font-semibold text-white" : "border-slate-200 bg-white text-ink hover:border-primary/40 hover:bg-primary-50"
+                className={`truncate rounded border px-2 py-1.5 text-left text-xs ${
+                  selected ? "border-primary/60 bg-primary-100 text-ink" : "border-slate-200 bg-white text-slate-400 hover:border-slate-300"
                 }`}
               >
                 {/* A member with an empty caption reads "(blank)", like Excel (display only). */}
@@ -123,6 +136,34 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
           })
         )}
       </div>
+
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+          <div className="flex flex-col text-sm">
+            <button
+              type="button"
+              disabled={!filtered}
+              onClick={() => {
+                clearFilter();
+                setMenu(null);
+              }}
+              className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Clear Filter From &quot;{title}&quot;
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMenu(null);
+                onRemove();
+              }}
+              className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10"
+            >
+              Remove &quot;{title}&quot;
+            </button>
+          </div>
+        </ContextMenu>
+      )}
     </div>
   );
 }
