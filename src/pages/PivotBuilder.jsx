@@ -300,9 +300,13 @@ function measuresLastWhenSingleValue(request) {
 // totals, showItemsWithNoData, calculatedFields/Items, and even a value's
 // showValuesAs — that one DOES need a fresh query since it's computed server-side). Used to detect
 // "the user changed something that actually invalidates the table currently on screen."
+// slicerFields/timelineFields are left out too (2026-10-25): they only say which widgets are on the
+// sheet (the backend never reads them) — inserting a slicer re-ran the whole query, which Excel
+// doesn't do; a slicer's actual selection lives in `filters` and still refreshes the table.
 function structuralSignature(req) {
+  const { slicerFields: _slicers, timelineFields: _timelines, ...rest } = req;
   return JSON.stringify({
-    ...req,
+    ...rest,
     values: req.values.map(({ format: _format, conditionalFormat: _conditionalFormat, ...structural }) => structural),
   });
 }

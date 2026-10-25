@@ -16,7 +16,9 @@ function InsertFieldsDialog({ title, fields, emptyText, onOk, onCancel }) {
   const visible = fields.filter((d) => d.displayName.toLowerCase().includes(search.toLowerCase()));
   const toggle = (field) => setChecked((current) => (current.includes(field) ? current.filter((f) => f !== field) : [...current, field]));
   return (
-    <div className="w-60 space-y-2">
+    // w-full, not a fixed w-60: the ribbon popover is at least 22rem wide, so a 15rem dialog left an
+    // empty strip down its right side (2026-10-25); filling it also shows more of long field names.
+    <div className="w-full space-y-2">
       <p className="text-sm font-semibold text-ink">{title}</p>
       <input type="text" autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search fields…" className="input-field w-full py-1.5 text-sm" />
       <div className="h-56 overflow-y-auto rounded-md border border-slate-200 bg-white p-1">
@@ -610,7 +612,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
             {actions && (
               <RibbonButton icon={Files} label="Report Filter Pages" badge={0}>
                 {(close) => (
-                  <div className="w-60 space-y-2 text-sm">
+                  <div className="w-full space-y-2 text-sm">
                     <p className="font-semibold text-ink">Show Report Filter Pages</p>
                     {actions.reportFilterFields.length === 0 ? (
                       <p className="text-xs text-muted">Add a field to the Filters area (and run the pivot) first.</p>

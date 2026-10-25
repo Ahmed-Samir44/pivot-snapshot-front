@@ -69,6 +69,9 @@ function bucketRange(key, granularity) {
 export default function Timeline({ field, displayName, filter, onChange, onRemove }) {
   const [allMembers, setAllMembers] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Same failed-load handling as Slicer (2026-10-25): it used to say "no date-shaped members".
+  const [failed, setFailed] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
   // Matches real Excel's own default the moment you add a date field — it auto-groups into a
   // Year/Quarter/Month/Day hierarchy starting at Month, never listing every raw day up front
   // (confirmed live 2026-10-06, after an unfiltered day-level member fetch crashed the cube — see
@@ -79,17 +82,25 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setFailed(false);
+    let retryId = null;
     getMembers(field)
       .then((members) => {
         if (!cancelled) setAllMembers(members);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFailed(true);
+        retryId = setTimeout(() => setRetryToken((t) => t + 1), 15000);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
+      clearTimeout(retryId);
     };
-  }, [field]);
+  }, [field, retryToken]);
 
   const dated = useMemo(
     () => allMembers.map((caption) => ({ caption, date: parseMemberDate(caption) })).filter((m) => m.date !== null),
@@ -207,6 +218,13 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
       <div className="flex gap-1 overflow-x-auto p-2">
         {loading ? (
           <p className="py-2 text-xs text-muted">Loading…</p>
+        ) : failed && allMembers.length === 0 ? (
+          <div className="w-full flex flex-col items-center gap-1.5 py-2 text-center text-xs text-rose-700">
+            <span>Couldn't load the items — the data server is busy.</span>
+            <button type="button" onClick={() => setRetryToken((t) => t + 1)} className="rounded border border-rose-300 px-2 py-0.5 font-medium hover:bg-rose-50">
+              Retry
+            </button>
+          </div>
         ) : buckets.length === 0 ? (
           <p className="py-2 text-xs text-muted">This field has no date-shaped members.</p>
         ) : (
