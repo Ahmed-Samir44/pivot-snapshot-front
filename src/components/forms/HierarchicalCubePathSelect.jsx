@@ -183,10 +183,10 @@ function PlacedFieldPill({
                     { key: "none", label: "None", active: effectivePosition === "Off" },
                     { key: "custom", label: "Custom", active: effectivePosition !== "Off" && Boolean(currentFunctions) },
                   ].filter((opt) => !(fieldSettings.noCustom && opt.key === "custom")).map((opt) => (
-                    <label key={opt.key} className="flex cursor-pointer items-center gap-2 rounded-lg py-1.5 text-left hover:bg-gold/10">
+                    <label key={opt.key} className="flex cursor-pointer items-center gap-2 rounded-lg py-1.5 text-left hover:bg-primary/10">
                       <input
                         type="radio"
-                        className="h-3.5 w-3.5 accent-gold"
+                        className="h-3.5 w-3.5 accent-primary"
                         checked={opt.active}
                         onChange={() => {
                           // Real Excel: Automatic/Custom always turn THIS field's subtotal on, None
@@ -214,7 +214,7 @@ function PlacedFieldPill({
                         <label key={fn} className="flex cursor-pointer items-center gap-2 py-0.5 text-left text-xs">
                           <input
                             type="checkbox"
-                            className="h-3.5 w-3.5 accent-gold"
+                            className="h-3.5 w-3.5 accent-primary"
                             checked={currentFunctions.includes(fn)}
                             onChange={(e) => {
                               const next = e.target.checked ? [...currentFunctions, fn] : currentFunctions.filter((f) => f !== fn);
@@ -252,7 +252,7 @@ function PlacedFieldPill({
                     <label key={opt.key} className="flex cursor-pointer items-center gap-2 py-1 text-left">
                       <input
                         type="checkbox"
-                        className="h-3.5 w-3.5 accent-gold"
+                        className="h-3.5 w-3.5 accent-primary"
                         checked={opt.value}
                         onChange={(e) => fieldLayout.onChange(fullPath, { [opt.key]: e.target.checked === opt.inherited ? null : e.target.checked })}
                       />
@@ -267,7 +267,7 @@ function PlacedFieldPill({
                   <label className="flex cursor-pointer items-center gap-2 py-1 text-left">
                     <input
                       type="checkbox"
-                      className="h-3.5 w-3.5 accent-gold"
+                      className="h-3.5 w-3.5 accent-primary"
                       checked={Boolean(fieldShowNoData.fields?.includes(fullPath))}
                       onChange={(e) => fieldShowNoData.onChange(fullPath, e.target.checked)}
                     />
@@ -295,7 +295,7 @@ function PlacedFieldPill({
                       item.onSelect();
                       if (!item.keepOpen) closeMenu();
                     }}
-                    className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10 disabled:cursor-not-allowed disabled:text-muted/50 disabled:hover:bg-transparent"
+                    className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10 disabled:cursor-not-allowed disabled:text-muted/50 disabled:hover:bg-transparent"
                   >
                     {item.label}
                   </button>
@@ -313,13 +313,13 @@ const selectStyles = {
   menuPortal: (base) => ({ ...base, zIndex: 10000 }),
   control: (base) => ({
     ...base,
-    borderRadius: "10px",
+    borderRadius: "8px", // --ds-radius-control
     borderColor: "#e2e8f0",
-    "&:hover": { borderColor: "#AE8C67" },
+    "&:hover": { borderColor: "#126e5c" },
   }),
   multiValue: (base) => ({
     ...base,
-    backgroundColor: "#AE8C67",
+    backgroundColor: "#126e5c",
     borderRadius: "8px",
   }),
   multiValueLabel: (base) => ({
@@ -330,7 +330,7 @@ const selectStyles = {
   multiValueRemove: (base) => ({
     ...base,
     color: "white",
-    "&:hover": { backgroundColor: "#9a7b57" },
+    "&:hover": { backgroundColor: "#0d594b" },
   }),
 };
 
@@ -533,7 +533,7 @@ export default function HierarchicalCubePathSelect({
       <div className="mb-1.5 flex min-w-0 items-center justify-between gap-1">
         <span className="flex min-w-0 items-center gap-1.5 truncate text-xs font-bold uppercase tracking-wide text-muted">
           {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
-          {label} {value.length > 0 && <span className="text-gold">({value.length})</span>}
+          {label} {value.length > 0 && <span className="text-primary">({value.length})</span>}
         </span>
         <Popover
           align={align}
@@ -541,7 +541,7 @@ export default function HierarchicalCubePathSelect({
             <button
               type="button"
               onClick={toggle}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold hover:bg-gold/25"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25"
               aria-label={`Add a field to ${label}`}
               title={`Add a field to ${label}`}
             >
@@ -616,13 +616,13 @@ export default function HierarchicalCubePathSelect({
       <ul
         data-zone={dragSourceKey}
         className={`flex min-h-[6.5rem] flex-1 flex-wrap content-start gap-1.5 rounded-md transition-colors ${value.length === 0 ? "items-center" : "items-start"} ${
-          dragOver ? "bg-gold-soft/70 ring-2 ring-inset ring-gold" : dragActive ? "bg-slate-50 outline-dashed outline-1 -outline-offset-1 outline-slate-300" : ""
+          dragOver ? "bg-primary-soft/70 ring-2 ring-inset ring-primary" : dragActive ? "bg-slate-50 outline-dashed outline-1 -outline-offset-1 outline-slate-300" : ""
         } ${value.length === 0 ? "border border-dashed border-slate-300 px-2" : ""}`}
         onDragOver={dragSourceKey && onFieldDropped ? handleDragOver : undefined}
         onDragLeave={dragSourceKey && onFieldDropped ? (e) => !e.currentTarget.contains(e.relatedTarget) && setDragOver(false) : undefined}
         onDrop={dragSourceKey && onFieldDropped ? handleDrop : undefined}
       >
-        {value.length === 0 && <span className={`text-xs ${dragOver ? "font-medium text-gold-strong" : "text-slate-400"}`}>{dragOver ? "Drop to add" : "Drop a field here"}</span>}
+        {value.length === 0 && <span className={`text-xs ${dragOver ? "font-medium text-primary-strong" : "text-slate-400"}`}>{dragOver ? "Drop to add" : "Drop a field here"}</span>}
         {value.map((fullPath, index) => (
           <PlacedFieldPill
             key={fullPath}

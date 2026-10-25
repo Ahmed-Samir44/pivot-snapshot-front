@@ -2,32 +2,75 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Shared component classes. Flat enterprise surfaces (2026-10-20 UI refresh, Fluent/Slate style):
-   white panels with a slate-200 hairline and a barely-there shadow on a slate-50 canvas — no
-   gradients, glass blur or hover scaling, which competed with the data. The HMIS Analytics gold
-   stays as the ONE accent (primary action, focus ring, active state), used sparingly. */
+/* Synapse/HMIS Design System (2026-10-25, the guidelines the user shared): its --ds-* tokens,
+   teal primary lane for actions/navigation/focus, 8px control radius, the system's button shadow
+   and focus ring, and the shell's atmosphere background. The PivotTable grid, ribbon and field list
+   keep their compact Excel layout (the user's choice: "align, keep the Excel feel"). Tailwind's
+   theme (tailwind.config.js) carries the same values for utility classes. */
+:root {
+  --ds-color-primary: #126e5c;
+  --ds-color-primary-deep: #023635;
+  --ds-color-primary-soft: #d9f8ec;
+  --ds-color-primary-mint: #40ffb8;
+  --ds-color-primary-line: rgba(18, 110, 92, 0.14);
+  --ds-color-surface-raised: #ffffff;
+  --ds-color-surface-muted: #f5f7f6;
+  --ds-color-surface-recessed: #f1f5f9;
+  --ds-color-surface-selected: #eff8f4;
+  --ds-color-text-primary: #0f172a;
+  --ds-color-text-secondary: #64748b;
+  --ds-color-border-strong: rgba(26, 74, 66, 0.14);
+  --ds-radius-control: 8px;
+  --ds-radius-squircle-sm: 12px;
+  --ds-radius-squircle-lg: 16px;
+  --ds-focus-ring: 0 0 0 3px rgba(18, 110, 92, 0.18);
+  --ds-ease-settle: cubic-bezier(0.16, 1, 0.3, 1);
+  --ds-duration-fast: 180ms;
+  --ds-duration-base: 300ms;
+}
+
 @layer base {
   body {
-    @apply bg-slate-50 text-ink font-sans antialiased;
+    @apply text-ink font-sans antialiased;
+    background-color: var(--ds-color-surface-muted);
   }
 }
 
 @layer components {
+  /* The application shell's atmosphere (the design system: "structural, not screen decoration" —
+     applied once, on the shell): soft mint and purple washes over the light neutral base. */
+  .ds-shell-bg {
+    background:
+      radial-gradient(1100px 520px at 0% 0%, rgba(64, 255, 184, 0.1), transparent 62%),
+      radial-gradient(900px 480px at 100% 0%, rgba(141, 115, 222, 0.07), transparent 60%),
+      var(--ds-color-surface-muted);
+    background-attachment: fixed;
+  }
+
   /* Name kept so every existing caller picks up the flat look without a rename. */
   .glass-panel {
     @apply bg-white border border-slate-200 rounded-lg shadow-sm;
   }
 
+  /* Buttons: 8px control radius, the system's teal button shadow, a 3px translucent teal focus ring;
+     disabled = reduced opacity + not-allowed (never colour alone). */
   .btn-primary {
-    @apply bg-gold text-white font-semibold py-2 px-4 rounded-md border border-gold-strong/40 shadow-sm transition-colors duration-150 hover:bg-gold-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 focus-visible:ring-offset-1;
+    @apply bg-primary text-white font-semibold py-2 px-4 rounded-control border border-primary-deep/40 shadow-button transition-[background-color,box-shadow] duration-150 ease-settle hover:bg-primary-strong hover:shadow-button-hover focus-visible:outline-none disabled:shadow-none;
+  }
+  .btn-primary:focus-visible,
+  .btn-secondary:focus-visible {
+    box-shadow: var(--ds-focus-ring);
   }
 
   .btn-secondary {
-    @apply bg-white text-ink font-medium py-2 px-4 rounded-md border border-slate-300 shadow-sm transition-colors duration-150 hover:bg-slate-50 hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 focus-visible:ring-offset-1;
+    @apply bg-white text-ink font-medium py-2 px-4 rounded-control border border-slate-300 shadow-sm transition-colors duration-150 ease-settle hover:bg-slate-50 hover:border-slate-400 focus-visible:outline-none;
   }
 
   .input-field {
-    @apply w-full px-3 py-2 rounded-md border border-slate-300 bg-white text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-gold/40 focus:border-gold transition-colors duration-150;
+    @apply w-full px-3 py-2 rounded-control border border-slate-300 bg-white text-sm placeholder:text-slate-400 focus:outline-none focus:border-primary transition-colors duration-150;
+  }
+  .input-field:focus {
+    box-shadow: var(--ds-focus-ring);
   }
 
   .card {
@@ -35,8 +78,8 @@
   }
 
   /* Thin scrollbar replacing the OS default, so a scrollbar never squares off a rounded box.
-     Neutral slate (was gold) — a scrollbar is chrome, not an accent. Firefox (scrollbar-*) and
-     Chromium (::-webkit-scrollbar-*) need separate rules. */
+     Neutral slate — a scrollbar is chrome, not an accent. Firefox (scrollbar-*) and Chromium
+     (::-webkit-scrollbar-*) need separate rules. */
   .custom-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: theme('colors.slate.300') transparent;
@@ -53,5 +96,18 @@
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     @apply bg-slate-400;
+  }
+}
+
+/* The design system: every motion honours prefers-reduced-motion (skeleton sweeps, spinners,
+   transitions). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

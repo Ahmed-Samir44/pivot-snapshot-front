@@ -21,10 +21,10 @@ export default function StatusBar({ onCancel = null, loading, pendingLayout, sta
       <span className="flex items-center gap-1.5" role="status">
         {loading ? (
           <>
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-gold-strong" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary-strong" />
             Updating…
             {onCancel && (
-              <button type="button" onClick={onCancel} className="ml-1 rounded px-1 font-medium text-gold-strong underline-offset-2 hover:underline" title="Stop this refresh">
+              <button type="button" onClick={onCancel} className="ml-1 rounded px-1 font-medium text-primary-strong underline-offset-2 hover:underline" title="Stop this refresh">
                 Cancel
               </button>
             )}
@@ -76,7 +76,7 @@ export default function StatusBar({ onCancel = null, loading, pendingLayout, sta
             step={1}
             value={zoomIndex >= 0 ? zoomIndex : ZOOM_LEVELS.indexOf(1)}
             onChange={(e) => onZoomChange(ZOOM_LEVELS[Number(e.target.value)])}
-            className="h-1 w-24 cursor-pointer accent-gold"
+            className="h-1 w-24 cursor-pointer accent-primary"
             aria-label="Zoom level"
             aria-valuetext={`${Math.round(zoom * 100)}%`}
           />

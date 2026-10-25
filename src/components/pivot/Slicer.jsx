@@ -95,7 +95,7 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
                 onClick={() => toggleMember(member)}
                 title={member}
                 className={`truncate rounded px-1.5 py-1 text-left text-xs ${
-                  selected ? "bg-gold text-white font-semibold" : "bg-slate-50 text-ink hover:bg-slate-100"
+                  selected ? "bg-primary text-white font-semibold" : "bg-slate-50 text-ink hover:bg-slate-100"
                 }`}
               >
                 {member}

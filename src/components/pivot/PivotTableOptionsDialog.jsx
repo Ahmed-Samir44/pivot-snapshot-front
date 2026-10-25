@@ -3,9 +3,9 @@ import Modal from "../forms/Modal";
 import { DEFAULT_PIVOT_OPTIONS } from "../../utils/pivotOptions";
 
 const selectClass =
-  "rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent";
+  "rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent";
 const textClass =
-  "rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent disabled:bg-slate-100 disabled:text-muted";
+  "rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:bg-slate-100 disabled:text-muted";
 
 const TABS = [
   { key: "layout", label: "Layout & Format" },
@@ -28,7 +28,7 @@ function Section({ title, children }) {
 function Check({ label, checked, onChange, children }) {
   return (
     <label className="flex items-center gap-2 text-sm text-ink">
-      <input type="checkbox" className="h-4 w-4 accent-gold" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" className="h-4 w-4 accent-primary" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       <span className="min-w-[10rem]">{label}</span>
       {children}
     </label>

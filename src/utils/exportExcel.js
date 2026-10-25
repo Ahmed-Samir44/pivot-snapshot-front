@@ -15,7 +15,7 @@ function toArgb(hex) {
   return `FF${hex.replace("#", "").toUpperCase()}`;
 }
 
-const SUBTOTAL_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF6E9D8" } }; // ~bg-gold/10
+const SUBTOTAL_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9F3EA" } }; // primary-100, the grid's total tint (was tan until 2026-10-25)
 const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } }; // slate-100
 
 // Same clamp/decimal handling as numberFormat.js's formatNumber, but producing an EXCEL number

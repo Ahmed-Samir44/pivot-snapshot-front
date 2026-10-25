@@ -19,7 +19,9 @@ const BAR_GAP = 8;
 // PivotChartRenderer.cs.
 const MAX_VALUE_LABELS = 12;
 // Must stay in sync with PivotChartRenderer.cs's identical array (saved snapshot vs. live preview).
-const SLICE_COLORS = ["#AE8C67", "#6a7380", "#63BE7B", "#F8696B", "#FFEB84", "#638EC6", "#9a7b57", "#1f2430", "#c9a876", "#8a94a3"];
+// Synapse/HMIS teal scale alternating with its neutrals (2026-10-25, replacing the gold set), so
+// neighbouring slices/series stay distinguishable.
+const SLICE_COLORS = ["#126e5c", "#64748b", "#4bb69a", "#0a463c", "#82d2ba", "#94a3b8", "#278f76", "#334155", "#b7e7d7", "#cbd5e1"];
 
 // One CATEGORY per detail row, named by its whole path ("Egypt / ER" — 2026-10-18: it used to be
 // labels[0] alone, so with 2+ Rows fields every bar read "Egypt"). One SERIES per detail COLUMN — every value field and

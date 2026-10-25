@@ -74,7 +74,7 @@ export default function VersionCompare({ comparison, versionLabels }) {
           onChange={(e) => setSearch(e.target.value)}
         />
         <label className="flex cursor-pointer items-center gap-2">
-          <input type="checkbox" className="h-4 w-4 accent-gold" checked={changedOnly} onChange={(e) => setChangedOnly(e.target.checked)} />
+          <input type="checkbox" className="h-4 w-4 accent-primary" checked={changedOnly} onChange={(e) => setChangedOnly(e.target.checked)} />
           Changed only
         </label>
         <span className="text-xs text-muted">

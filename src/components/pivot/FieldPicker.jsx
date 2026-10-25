@@ -63,7 +63,7 @@ export const SHOW_VALUES_AS_OPTIONS = [
 export const DEFAULT_FORMAT = { type: "General", decimalPlaces: 2, currencySymbol: "" };
 
 const nativeSelectClass =
-  "rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent";
+  "rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent";
 
 
 // Excel's Field List: every cube DIMENSION field in one place, dragged from here into whichever
@@ -198,7 +198,7 @@ function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleF
         checked={isPlaced(field)}
         onChange={(e) => onFieldCheckToggle(field, e.target.checked)}
         onClick={(e) => e.stopPropagation()}
-        className="h-3 w-3 shrink-0 accent-gold"
+        className="h-3 w-3 shrink-0 accent-primary"
       />
       {/* Clicking the name ticks the field too, like Excel's own Field List. */}
       <span className="cursor-pointer truncate" onClick={() => onFieldCheckToggle(field, !isPlaced(field))}>
@@ -280,7 +280,7 @@ function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleF
                 ) : (
                   <ChevronRight className="h-3 w-3 shrink-0 text-muted" />
                 )}
-                <Folder className="h-3 w-3 shrink-0 text-gold" />
+                <Folder className="h-3 w-3 shrink-0 text-primary" />
                 <span className="truncate text-xs text-ink">{folderName}</span>
               </button>
               {isOpen && (
@@ -477,7 +477,7 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
             value={tableSearch}
             onChange={(e) => setTableSearch(e.target.value)}
             placeholder="Search"
-            className="w-full rounded-md border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-xs focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
+            className="w-full rounded-md border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-xs focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
           />
         </div>
       )}
@@ -533,7 +533,7 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
                     Field List exactly (confirmed live 2026-10-05): a table that has measures gets
                     the Σ glyph even when it's ALSO a browsable dimension (e.g. "Fact Billing"). */}
                 {measuresByGroup.has(name) ? (
-                  <Sigma className="h-3.5 w-3.5 shrink-0 text-gold-strong" />
+                  <Sigma className="h-3.5 w-3.5 shrink-0 text-primary-strong" />
                 ) : (
                   <Table2 className="h-3.5 w-3.5 shrink-0 text-muted" />
                 )}
@@ -649,7 +649,7 @@ function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, empty
       data-zone={zoneKey}
       className={`min-h-[6.5rem] flex-1 rounded-md transition-colors ${
         dragOver
-          ? "bg-gold-soft/70 ring-2 ring-inset ring-gold"
+          ? "bg-primary-soft/70 ring-2 ring-inset ring-primary"
           : dragActive
             ? "bg-slate-50 outline-dashed outline-1 -outline-offset-1 outline-slate-300"
             : ""
@@ -666,7 +666,7 @@ function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, empty
       onDrop={handleDrop}
     >
       {isEmpty ? (
-        <p className={`text-xs ${dragOver ? "font-medium text-gold-strong" : "text-slate-400"}`}>{dragOver ? "Drop to add" : emptyText}</p>
+        <p className={`text-xs ${dragOver ? "font-medium text-primary-strong" : "text-slate-400"}`}>{dragOver ? "Drop to add" : emptyText}</p>
       ) : (
         children
       )}
@@ -1008,7 +1008,7 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
             >
               <input
                 type="checkbox"
-                className="h-3.5 w-3.5 accent-gold"
+                className="h-3.5 w-3.5 accent-primary"
                 checked={mode === "Exclude"}
                 disabled={Boolean(memberSearch)}
                 onChange={(e) => {
@@ -1612,7 +1612,7 @@ export function FieldSortDialog({ field, axis, level, request, onChange, onBack,
 
   const radio = (key, label) => (
     <label className="flex cursor-pointer items-center gap-2 text-xs text-ink">
-      <input type="radio" className="h-3.5 w-3.5 accent-gold" checked={mode === key} onChange={() => setMode(key)} />
+      <input type="radio" className="h-3.5 w-3.5 accent-primary" checked={mode === key} onChange={() => setMode(key)} />
       {label}
     </label>
   );
@@ -1679,7 +1679,7 @@ function MoreSortOptions({ fieldName, summary, byField, byValue, firstKey, byIte
       <div>
         <p className="text-xs font-semibold text-ink">AutoSort</p>
         <label className="flex items-center gap-2 text-xs text-muted" title="This app always re-sorts when the report is updated">
-          <input type="checkbox" className="h-3.5 w-3.5 accent-gold" checked disabled readOnly />
+          <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked disabled readOnly />
           Sort automatically every time the report is updated
         </label>
       </div>
@@ -1696,13 +1696,13 @@ function MoreSortOptions({ fieldName, summary, byField, byValue, firstKey, byIte
       <div className={byValue ? "" : "opacity-60"}>
         <p className="text-xs font-semibold text-ink">Sort By</p>
         <label className="flex items-center gap-2 text-xs text-ink">
-          <input type="radio" className="h-3.5 w-3.5 accent-gold" checked={byValue && !draftByItem} disabled={!byValue} onChange={() => setDraftByItem(null)} />
+          <input type="radio" className="h-3.5 w-3.5 accent-primary" checked={byValue && !draftByItem} disabled={!byValue} onChange={() => setDraftByItem(null)} />
           Grand Total
         </label>
         <label className={`flex items-center gap-2 text-xs ${byValue && columnChoice ? "text-ink" : "text-muted"}`}>
           <input
             type="radio"
-            className="h-3.5 w-3.5 accent-gold"
+            className="h-3.5 w-3.5 accent-primary"
             checked={byValue && Boolean(draftByItem)}
             disabled={!byValue || !columnChoice}
             onChange={() => setDraftByItem(columnChoice)}
@@ -1828,7 +1828,7 @@ export function CalculatedFieldDialog({ calculatedFields, measureOptions, onAppl
                 type="button"
                 onClick={() => setSelectedField(f)}
                 onDoubleClick={() => insertField(f)}
-                className={`block w-full truncate px-2 py-0.5 text-left text-xs ${selectedField === f ? "bg-gold text-white" : "text-ink hover:bg-slate-100"}`}
+                className={`block w-full truncate px-2 py-0.5 text-left text-xs ${selectedField === f ? "bg-primary text-white" : "text-ink hover:bg-slate-100"}`}
               >
                 {f}
               </button>
@@ -2001,7 +2001,7 @@ export function CalculatedItemDialog({ calculatedItems, rows, columns, onApply, 
                 <button
                   type="button"
                   onClick={() => pickField(f)}
-                  className={`block w-full truncate px-2 py-0.5 text-left text-xs ${field === f ? "bg-gold text-white" : "text-ink hover:bg-slate-100"}`}
+                  className={`block w-full truncate px-2 py-0.5 text-left text-xs ${field === f ? "bg-primary text-white" : "text-ink hover:bg-slate-100"}`}
                 >
                   {formatDimensionName(f)}
                 </button>
@@ -2029,7 +2029,7 @@ export function CalculatedItemDialog({ calculatedItems, rows, columns, onApply, 
                       type="button"
                       onClick={() => setSelectedItem(m)}
                       onDoubleClick={() => insertItem(m)}
-                      className={`block w-full truncate px-2 py-0.5 text-left text-xs ${selectedItem === m ? "bg-gold text-white" : "text-ink hover:bg-slate-100"}`}
+                      className={`block w-full truncate px-2 py-0.5 text-left text-xs ${selectedItem === m ? "bg-primary text-white" : "text-ink hover:bg-slate-100"}`}
                     >
                       {m}
                     </button>
@@ -2174,7 +2174,7 @@ export function NumberFormatEditor({ format: initialFormat, onUpdateFormat, onBa
           the category's description and its options on the RIGHT, OK/Cancel at the bottom. */}
       <p className="text-sm font-semibold text-ink">Format Cells</p>
       <div className="border-b border-slate-200">
-        <span className="-mb-px inline-block border-b-2 border-gold px-0.5 pb-1.5 text-xs font-medium text-gold-strong">Number</span>
+        <span className="-mb-px inline-block border-b-2 border-primary px-0.5 pb-1.5 text-xs font-medium text-primary-strong">Number</span>
       </div>
 
       <div className="flex gap-3">
@@ -2186,7 +2186,7 @@ export function NumberFormatEditor({ format: initialFormat, onUpdateFormat, onBa
                 <button
                   type="button"
                   onClick={() => update({ type: category })}
-                  className={`block w-full px-2 py-1 text-left text-xs ${format.type === category ? "bg-gold text-white" : "text-ink hover:bg-slate-100"}`}
+                  className={`block w-full px-2 py-1 text-left text-xs ${format.type === category ? "bg-primary text-white" : "text-ink hover:bg-slate-100"}`}
                 >
                   {category}
                 </button>
@@ -2219,7 +2219,7 @@ export function NumberFormatEditor({ format: initialFormat, onUpdateFormat, onBa
             <label className="flex items-center gap-2 text-xs text-ink">
               <input
                 type="checkbox"
-                className="h-3.5 w-3.5 accent-gold"
+                className="h-3.5 w-3.5 accent-primary"
                 checked={format.useThousandsSeparator !== false}
                 onChange={(e) => update({ useThousandsSeparator: e.target.checked })}
               />
@@ -2275,7 +2275,7 @@ export function NumberFormatEditor({ format: initialFormat, onUpdateFormat, onBa
                       <button
                         type="button"
                         onClick={() => update({ negativeNumbers: style })}
-                        className={`block w-full px-2 py-1 text-left text-xs ${selected ? "bg-gold/15 font-semibold" : "hover:bg-slate-100"} ${isRedNegative(-NEGATIVE_SAMPLE_VALUE, sample) ? "text-[#FF0000]" : "text-ink"}`}
+                        className={`block w-full px-2 py-1 text-left text-xs ${selected ? "bg-primary/15 font-semibold" : "hover:bg-slate-100"} ${isRedNegative(-NEGATIVE_SAMPLE_VALUE, sample) ? "text-[#FF0000]" : "text-ink"}`}
                       >
                         {formatNumber(-NEGATIVE_SAMPLE_VALUE, sample)}
                       </button>
@@ -2505,7 +2505,7 @@ function ValuePill({
                         }
                   }
                   className={`rounded-lg px-2 py-1.5 text-left ${
-                    item.disabled ? "cursor-not-allowed text-muted/50" : "hover:bg-gold/10"
+                    item.disabled ? "cursor-not-allowed text-muted/50" : "hover:bg-primary/10"
                   }`}
                 >
                   {item.label}
@@ -2524,16 +2524,16 @@ function ValuePill({
                     item.onSelect();
                     close();
                   }}
-                  className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+                  className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10"
                 >
                   {item.label}
                 </button>
               ))}
               <div className="my-1 border-t border-slate-100" />
-              <button type="button" onClick={() => { onRemove(); close(); }} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+              <button type="button" onClick={() => { onRemove(); close(); }} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
                 Remove Field
               </button>
-              <button type="button" onClick={() => setPanel("settings")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+              <button type="button" onClick={() => setPanel("settings")} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
                 Value Field Settings…
               </button>
               {/* Separate top-level entry, a sibling of "Value Field Settings…" rather than a tab
@@ -2541,7 +2541,7 @@ function ValuePill({
                   Values By / Show Values As / Number Format; Conditional Formatting is a wholly
                   separate feature reached its own way, not part of that dialog (moved out here
                   2026-10-05, flagged live as "زيادة عن الإكسل" when it lived inside Settings). */}
-              <button type="button" onClick={() => setPanel("conditionalFormat")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+              <button type="button" onClick={() => setPanel("conditionalFormat")} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
                 Conditional Formatting…
               </button>
             </div>
@@ -2594,7 +2594,7 @@ function ListBox({ options, value, onSelect, disabled = false, className = "" })
             disabled={disabled}
             onClick={() => onSelect(opt.value)}
             className={`block w-full truncate px-2 py-0.5 text-left text-xs ${
-              opt.value === value ? (disabled ? "bg-slate-300 text-ink" : "bg-gold text-white") : disabled ? "text-muted" : "text-ink hover:bg-slate-100"
+              opt.value === value ? (disabled ? "bg-slate-300 text-ink" : "bg-primary text-white") : disabled ? "text-muted" : "text-ink hover:bg-slate-100"
             }`}
           >
             {opt.label}
@@ -2720,7 +2720,7 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows, col
             type="button"
             onClick={() => setSettingsTab(tab.key)}
             className={`-mb-px border-b-2 px-0.5 pb-1.5 text-xs font-medium ${
-              settingsTab === tab.key ? "border-gold text-gold-strong" : "border-transparent text-muted hover:text-ink"
+              settingsTab === tab.key ? "border-primary text-primary-strong" : "border-transparent text-muted hover:text-ink"
             }`}
           >
             {tab.label}
@@ -3279,7 +3279,7 @@ export default function FieldPicker({
                   updatePane({ layout: opt.value });
                   close();
                 }}
-                className={`rounded-lg px-2 py-1.5 text-left ${pane.layout === opt.value ? "bg-gold-soft font-semibold text-gold-strong" : "hover:bg-slate-100"}`}
+                className={`rounded-lg px-2 py-1.5 text-left ${pane.layout === opt.value ? "bg-primary-soft font-semibold text-primary-strong" : "hover:bg-slate-100"}`}
               >
                 {opt.label}
               </button>
@@ -3296,7 +3296,7 @@ export default function FieldPicker({
                   updatePane({ sortOrder: opt.value });
                   close();
                 }}
-                className={`rounded-lg px-2 py-1.5 text-left ${pane.sortOrder === opt.value ? "bg-gold-soft font-semibold text-gold-strong" : "hover:bg-slate-100"}`}
+                className={`rounded-lg px-2 py-1.5 text-left ${pane.sortOrder === opt.value ? "bg-primary-soft font-semibold text-primary-strong" : "hover:bg-slate-100"}`}
               >
                 {opt.label}
               </button>
@@ -3389,7 +3389,7 @@ export default function FieldPicker({
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
                 <Filter className="h-3.5 w-3.5" />
-                Filters {reportFilterCount > 0 && <span className="text-gold">({reportFilterCount})</span>}
+                Filters {reportFilterCount > 0 && <span className="text-primary">({reportFilterCount})</span>}
               </span>
               <Popover
                 align="right"
@@ -3397,7 +3397,7 @@ export default function FieldPicker({
                   <button
                     type="button"
                     onClick={toggle}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold hover:bg-gold/25"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25"
                     aria-label="Add filter"
                     title="Add filter"
                   >
@@ -3687,7 +3687,7 @@ export default function FieldPicker({
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
                 <Sigma className="h-3.5 w-3.5" />
-                Values {value.values.length > 0 && <span className="text-gold">({value.values.length})</span>}
+                Values {value.values.length > 0 && <span className="text-primary">({value.values.length})</span>}
               </span>
               <Popover
                 align="right"
@@ -3695,7 +3695,7 @@ export default function FieldPicker({
                   <button
                     type="button"
                     onClick={toggle}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold hover:bg-gold/25"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25"
                     aria-label="Add a value"
                     title="Add a value"
                   >

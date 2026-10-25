@@ -219,7 +219,7 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
                 onClick={(e) => handleBucketClick(index, e.shiftKey)}
                 title="Click to select, Shift+Click to extend the range"
                 className={`min-w-[3.5rem] shrink-0 rounded px-2 py-3 text-center text-xs font-medium ${
-                  isSelected ? "bg-gold text-white" : "bg-slate-50 text-ink hover:bg-slate-100"
+                  isSelected ? "bg-primary text-white" : "bg-slate-50 text-ink hover:bg-slate-100"
                 }`}
               >
                 {bucketLabel(bucket, granularity)}

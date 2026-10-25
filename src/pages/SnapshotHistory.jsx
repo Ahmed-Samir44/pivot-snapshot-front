@@ -108,7 +108,7 @@ function ListRow({ label, sublabel, onClick, trailingIcon: TrailingIcon, actions
         type="checkbox"
         checked={checked}
         onChange={onToggleCheck}
-        className="h-4 w-4 shrink-0 accent-gold"
+        className="h-4 w-4 shrink-0 accent-primary"
         aria-label={`Select ${label}`}
       />
       <button
@@ -116,7 +116,7 @@ function ListRow({ label, sublabel, onClick, trailingIcon: TrailingIcon, actions
         onClick={onClick}
         disabled={!onClick || loading}
         className={`flex flex-1 items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-left disabled:cursor-default disabled:hover:bg-transparent ${
-          highlighted ? "bg-gold/20 font-semibold" : "hover:bg-slate-50"
+          highlighted ? "bg-primary/20 font-semibold" : "hover:bg-slate-50"
         }`}
       >
         <span>
@@ -130,7 +130,7 @@ function ListRow({ label, sublabel, onClick, trailingIcon: TrailingIcon, actions
             2026-10-12: "بتاخد وقت طويل... بيخليها تتفتح كذا مرة" — no loading affordance at all
             meant every repeat click fired its own getVersion() call). */}
         {loading ? (
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gold-strong" aria-hidden="true" />
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary-strong" aria-hidden="true" />
         ) : (
           TrailingIcon && <TrailingIcon className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
         )}

@@ -77,7 +77,7 @@ export default function MemberCheckboxList({ options, value, onChange, placehold
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-gold">
+      <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-primary">
         <Search className="h-4 w-4 shrink-0 text-muted" />
         <input type="text" value={search} onChange={handleSearchChange} placeholder={placeholder} className="w-full text-sm outline-none" />
       </div>
@@ -90,13 +90,13 @@ export default function MemberCheckboxList({ options, value, onChange, placehold
           <>
             {showAllItem && !allowMultiple && !search && (
               <label className="flex cursor-pointer items-center gap-2 border-b border-slate-100 px-3 py-1.5 text-sm text-ink hover:bg-slate-50">
-                <input type="radio" className="h-4 w-4 accent-gold rounded-full" checked={value.length === 0} onChange={() => onChange([])} />
+                <input type="radio" className="h-4 w-4 accent-primary rounded-full" checked={value.length === 0} onChange={() => onChange([])} />
                 (All)
               </label>
             )}
             {allowMultiple && (
               <label className="flex cursor-pointer items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-sm font-semibold text-ink">
-                <input type="checkbox" className="h-4 w-4 accent-gold" checked={allVisibleSelected} onChange={toggleAll} />
+                <input type="checkbox" className="h-4 w-4 accent-primary" checked={allVisibleSelected} onChange={toggleAll} />
                 (Select All)
               </label>
             )}
@@ -104,7 +104,7 @@ export default function MemberCheckboxList({ options, value, onChange, placehold
               <label key={option} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-ink hover:bg-slate-50">
                 <input
                   type={allowMultiple ? "checkbox" : "radio"}
-                  className={allowMultiple ? "h-4 w-4 accent-gold" : "h-4 w-4 accent-gold rounded-full"}
+                  className={allowMultiple ? "h-4 w-4 accent-primary" : "h-4 w-4 accent-primary rounded-full"}
                   checked={selected.has(option)}
                   onChange={() => toggleOne(option)}
                 />
@@ -126,7 +126,7 @@ export default function MemberCheckboxList({ options, value, onChange, placehold
         <label className="flex cursor-pointer items-center gap-2 text-xs text-ink">
           <input
             type="checkbox"
-            className="h-3.5 w-3.5 accent-gold"
+            className="h-3.5 w-3.5 accent-primary"
             checked={allowMultipleState}
             onChange={(e) => {
               setAllowMultiple(e.target.checked);

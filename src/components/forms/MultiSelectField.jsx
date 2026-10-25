@@ -36,13 +36,13 @@ export default function MultiSelectField({ options, value, onChange, label, plac
           control: (base) => ({
             ...base,
             minHeight: "48px",
-            borderRadius: "12px",
+            borderRadius: "8px", // --ds-radius-control
             borderColor: "#e2e8f0",
-            "&:hover": { borderColor: "#AE8C67" },
+            "&:hover": { borderColor: "#126e5c" },
           }),
-          multiValue: (base) => ({ ...base, backgroundColor: "#AE8C67", borderRadius: "8px" }),
+          multiValue: (base) => ({ ...base, backgroundColor: "#126e5c", borderRadius: "8px" }),
           multiValueLabel: (base) => ({ ...base, color: "white", fontWeight: "600" }),
-          multiValueRemove: (base) => ({ ...base, color: "white", "&:hover": { backgroundColor: "#9a7b57" } }),
+          multiValueRemove: (base) => ({ ...base, color: "white", "&:hover": { backgroundColor: "#0d594b" } }),
         }}
       />
     </div>

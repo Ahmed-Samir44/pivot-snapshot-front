@@ -76,7 +76,7 @@ function FilterHeaderRow({ filter, index, request, onChange, dimensionOptions, s
             className="flex min-w-[10rem] flex-1 items-center justify-between gap-2 px-3 py-1.5 text-left text-xs text-ink hover:bg-slate-50"
           >
             <span className="truncate">{filterValueSummary(filter)}</span>
-            <FilterIcon className="h-3 w-3 shrink-0 text-gold" />
+            <FilterIcon className="h-3 w-3 shrink-0 text-primary" />
           </button>
         )}
       >
@@ -135,7 +135,7 @@ function HeaderCell({ children, muted = false, isTotal = false, alignLeft = fals
   return (
     <span
       className={`flex items-center ${alignLeft ? "justify-start" : "justify-center"} gap-1 text-sm ${
-        muted ? "font-medium text-slate-500" : isTotal ? "font-bold text-ink underline decoration-gold decoration-2 underline-offset-4" : "font-semibold text-ink"
+        muted ? "font-medium text-slate-500" : isTotal ? "font-bold text-ink underline decoration-primary decoration-2 underline-offset-4" : "font-semibold text-ink"
       }`}
     >
       {children}
@@ -272,13 +272,13 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
           // Same tones as HeaderCell on the neutral slate band (the 2026-10-13/14 contrast bugs came
           // from the old gold band: gray and gold text both vanished on it). Gold is the hover/
           // filtered accent only.
-          className={`flex w-full items-center justify-center gap-1 text-sm font-semibold hover:text-gold-strong ${
-            muted ? "text-slate-500" : isTotal ? "text-gold-strong" : "text-ink"
+          className={`flex w-full items-center justify-center gap-1 text-sm font-semibold hover:text-primary-strong ${
+            muted ? "text-slate-500" : isTotal ? "text-primary-strong" : "text-ink"
           }`}
           title={`Sort or filter ${label}`}
         >
           {label}
-          {hasFilter && <FilterIcon className="h-3 w-3 shrink-0 text-gold-strong" />}
+          {hasFilter && <FilterIcon className="h-3 w-3 shrink-0 text-primary-strong" />}
           <ChevronDown className="h-3.5 w-3.5 shrink-0" />
         </button>
       )}
@@ -289,7 +289,7 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
           <label className="mb-2 flex items-center gap-2 border-b border-slate-100 pb-2 text-xs font-medium text-ink">
             Select field:
             <select
-              className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-gold"
+              className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary"
               value={Math.min(choiceIndex, fieldChoices.length - 1)}
               onChange={(e) => {
                 setChoiceIndex(Number(e.target.value));
@@ -365,7 +365,7 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
                 setSort("Ascending");
                 close();
               }}
-              className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+              className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10"
             >
               Sort A → Z
             </button>
@@ -375,7 +375,7 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
                 setSort("Descending");
                 close();
               }}
-              className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+              className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10"
             >
               Sort Z → A
             </button>
@@ -393,7 +393,7 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
             )}
             {!sortOnly && (
               <>
-            <button type="button" onClick={() => setPanel("sort")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+            <button type="button" onClick={() => setPanel("sort")} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
               More Sort Options…
             </button>
             <div className="my-1 border-t border-slate-100" />
@@ -409,7 +409,7 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
                 Clear Filter From &quot;{choice?.label ?? label}&quot;
               </button>
             )}
-            <button type="button" onClick={() => setPanel("filter")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+            <button type="button" onClick={() => setPanel("filter")} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
               Filter…
             </button>
             {/* Excel's Expand/Collapse Entire Field (2026-10-20) — only for a field whose items have
@@ -424,7 +424,7 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
                     close();
                   }}
                   disabled={!fieldCollapse.isCollapsed(level)}
-                  className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Expand Entire Field
                 </button>
@@ -434,7 +434,7 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
                     fieldCollapse.collapse(level);
                     close();
                   }}
-                  className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+                  className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10"
                 >
                   Collapse Entire Field
                 </button>
@@ -442,14 +442,14 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
               </>
             )}
             {/* Excel's Group Selection / Ungroup (2026-10-20) — see GroupItemsPanel. */}
-            <button type="button" onClick={() => setPanel("group")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+            <button type="button" onClick={() => setPanel("group")} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
               {hasGroups ? "Groups…" : "Group Items…"}
             </button>
             <div className="my-1 border-t border-slate-100" />
             <label className="flex items-center gap-2 px-2 py-1.5 font-medium text-ink">
               <input
                 type="checkbox"
-                className="h-4 w-4 accent-gold"
+                className="h-4 w-4 accent-primary"
                 checked={showsNoDataItems}
                 onChange={(e) => toggleNoDataItems(e.target.checked)}
               />
@@ -540,7 +540,7 @@ function RowLabelContextMenu({ x, y, level, label, filterable = true, field, fie
         : { field, mode: "Exclude", includedMembers: [...new Set([...(manual?.mode === "Exclude" ? manual.includedMembers : []), label])] };
     onChange({ ...request, filters: setFieldFilter(request.filters, next, allowMultipleFilters) });
   };
-  const itemClass = "rounded-lg px-2 py-1.5 text-left hover:bg-gold/10 disabled:cursor-not-allowed disabled:opacity-40";
+  const itemClass = "rounded-lg px-2 py-1.5 text-left hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40";
   const short = label.length > 24 ? `${label.slice(0, 23)}…` : label;
 
   return (
@@ -672,7 +672,7 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
                 // to surface to the user for a plain copy-to-clipboard convenience action.
               }
             }}
-            className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+            className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10"
           >
             Copy
           </button>
@@ -689,16 +689,16 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
           >
             Format Cells…
           </button>
-          <button type="button" onClick={() => setPanel("numberFormat")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+          <button type="button" onClick={() => setPanel("numberFormat")} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
             Number Format…
           </button>
-          <button type="button" onClick={() => { onClose(); onRefresh(); }} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+          <button type="button" onClick={() => { onClose(); onRefresh(); }} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
             Refresh
           </button>
           <button
             type="button"
             onClick={() => setPanel("sort")}
-            className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+            className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-primary/10"
           >
             Sort <ChevronRight className="h-3.5 w-3.5 shrink-0" />
           </button>
@@ -713,13 +713,13 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
           >
             Quick Explore
           </button>
-          <button type="button" onClick={() => { removeValue(); onClose(); }} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+          <button type="button" onClick={() => { removeValue(); onClose(); }} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
             Remove &quot;{displayLabel}&quot;
           </button>
           <button
             type="button"
             onClick={() => setPanel("showValuesAs")}
-            className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+            className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-primary/10"
           >
             Show Values As <ChevronRight className="h-3.5 w-3.5 shrink-0" />
           </button>
@@ -729,7 +729,7 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
               disabled={!showDetailsEnabled}
               title={showDetailsEnabled ? undefined : "Turned off in PivotTable Options > Data > Enable show details."}
               onClick={() => { onClose(); onShowDetails(); }}
-              className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10 disabled:cursor-not-allowed disabled:text-muted/50 disabled:hover:bg-transparent"
+              className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10 disabled:cursor-not-allowed disabled:text-muted/50 disabled:hover:bg-transparent"
             >
               Show Details
             </button>
@@ -744,10 +744,10 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
           >
             Additional Actions <ChevronRight className="h-3.5 w-3.5 shrink-0" />
           </button>
-          <button type="button" onClick={() => setPanel("settings")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+          <button type="button" onClick={() => setPanel("settings")} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
             Value Field Settings…
           </button>
-          <button type="button" onClick={() => setPanel("conditionalFormat")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+          <button type="button" onClick={() => setPanel("conditionalFormat")} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
             Conditional Formatting…
           </button>
           {/* The full PivotTable Options dialog when the page provides one (2026-10-18); the small
@@ -755,14 +755,14 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
           <button
             type="button"
             onClick={() => (onOpenPivotTableOptions ? (onClose(), onOpenPivotTableOptions()) : setPanel("pivotTableOptions"))}
-            className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+            className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10"
           >
             PivotTable Options…
           </button>
           <button
             type="button"
             onClick={() => { onClose(); onHideFieldList(); }}
-            className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10"
+            className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10"
           >
             {fieldListShown ? "Hide Field List" : "Show Field List"}
           </button>
@@ -776,13 +776,13 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
           >
             <ChevronLeft className="h-3.5 w-3.5" /> Back
           </button>
-          <button type="button" onClick={() => { setSort("Ascending"); onClose(); }} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+          <button type="button" onClick={() => { setSort("Ascending"); onClose(); }} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
             Sort Smallest to Largest
           </button>
-          <button type="button" onClick={() => { setSort("Descending"); onClose(); }} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+          <button type="button" onClick={() => { setSort("Descending"); onClose(); }} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
             Sort Largest to Smallest
           </button>
-          <button type="button" onClick={() => setPanel("sortEditor")} className="rounded-lg px-2 py-1.5 text-left hover:bg-gold/10">
+          <button type="button" onClick={() => setPanel("sortEditor")} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
             More Sort Options…
           </button>
         </div>
@@ -822,7 +822,7 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
           <div>
             <span className="mb-1 block text-xs font-medium text-muted">Grand Totals</span>
             <select
-              className="w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent"
+              className="w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
               value={request.grandTotals}
               onChange={(e) => onChange({ ...request, grandTotals: e.target.value })}
             >
@@ -835,7 +835,7 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
           <div>
             <span className="mb-1 block text-xs font-medium text-muted">Subtotals</span>
             <select
-              className="w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent disabled:cursor-not-allowed disabled:opacity-40"
+              className="w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:cursor-not-allowed disabled:opacity-40"
               value={request.subtotals}
               // Same Σ Values-isn't-a-real-field exclusion as PivotToolbar.jsx's own Subtotals
               // dropdown (caught 2026-10-06, full codebase review). A drilldown hierarchy has
@@ -894,7 +894,7 @@ function ValueCellContextMenu({ x, y, onClose, request, onChange, valueField, me
                 onChange({ ...request, values });
                 onClose();
               }}
-              className={`rounded-lg px-2 py-1.5 text-left ${valueField.showValuesAs === opt.value ? "bg-gold/10 font-semibold" : "hover:bg-gold/10"}`}
+              className={`rounded-lg px-2 py-1.5 text-left ${valueField.showValuesAs === opt.value ? "bg-primary/10 font-semibold" : "hover:bg-primary/10"}`}
             >
               {opt.label}
             </button>
@@ -1217,8 +1217,8 @@ export default function PivotGrid({
       >
         {/* Excel's own placeholder for an empty PivotTable, as a card on the empty sheet. */}
         <div className="max-w-sm rounded-xl border border-slate-200 bg-white px-8 py-7 text-center shadow-sm">
-          <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-gold-soft">
-            {loading ? <Loader2 className="h-5 w-5 animate-spin text-gold-strong" /> : <Table2 className="h-5 w-5 text-gold-strong" />}
+          <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-primary-soft">
+            {loading ? <Loader2 className="h-5 w-5 animate-spin text-primary-strong" /> : <Table2 className="h-5 w-5 text-primary-strong" />}
           </span>
           {loading ? (
             <>
@@ -1708,7 +1708,7 @@ export default function PivotGrid({
               layer up front, instead of only reacting once scrolling starts — the standard fix for
               this exact class of "sticky element flickers/lags during scroll" bug. */}
           {/* [&>tr:last-child>th]: the 2px gold rule closing off the header band (see headerBg). */}
-          <thead className={`[&>tr:last-child>th]:border-b-2 [&>tr:last-child>th]:border-b-gold ${boundedHeight || fill ? "sticky top-0 z-30 will-change-transform" : ""}`}>
+          <thead className={`[&>tr:last-child>th]:border-b-2 [&>tr:last-child>th]:border-b-primary ${boundedHeight || fill ? "sticky top-0 z-30 will-change-transform" : ""}`}>
             {columnFieldLabels.length > 0 && (
               <tr>
                 <th className={rowNumberHeaderClass}>1</th>
@@ -1763,7 +1763,7 @@ export default function PivotGrid({
                       // was actually the SAME degenerate-depth-1 case as the color-contrast bug, not
                       // a second contrast issue).
                       group.start === group.end && !drilldownAlone ? (
-                        <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-gold ${headerBg} px-2 py-2`}>
+                        <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-primary ${headerBg} px-2 py-2`}>
                           <FieldCaption
                             label={rowFieldLayouts[group.start]?.customName || rowFieldLabels[group.start] || ""}
                             field={rows[group.start] ?? null}
@@ -1785,7 +1785,7 @@ export default function PivotGrid({
                         // merged case and a new partial merge — there's no confirmed screenshot of
                         // what a partial merge's own header shows, so this reuses the one convention
                         // already verified for the full-merge case rather than guessing a new one.
-                        <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-gold ${headerBg} px-2 py-2`}>
+                        <th key={group.start} rowSpan={columnDepth} className={`${headerCellBorder} border-b-2 border-b-primary ${headerBg} px-2 py-2`}>
                           {drilldownAlone ? (
                             // A drilldown hierarchy sorts from here (Drilldown v2) — sort only, see
                             // FieldHeaderMenu's sortOnly WHY comment.
@@ -1835,7 +1835,7 @@ export default function PivotGrid({
                     <th
                       key={cell.sourceIndex}
                       colSpan={cell.span > 1 ? cell.span : undefined}
-                      className={`${headerCellBorder} ${columnSelected(cell.sourceIndex, lastCol) ? "bg-gold-soft" : headerBg} cursor-pointer px-2 py-2 hover:bg-slate-200/70`}
+                      className={`${headerCellBorder} ${columnSelected(cell.sourceIndex, lastCol) ? "bg-primary-soft" : headerBg} cursor-pointer px-2 py-2 hover:bg-slate-200/70`}
                       title="Click to select this column — Shift+click to extend"
                       onClick={(e) => {
                         if (e.target.closest("button")) return; // the drilldown +/- toggle
@@ -1885,10 +1885,10 @@ export default function PivotGrid({
               // gold rule above it) so it reads as the table's bottom line.
               const rowTint =
                 displayRow.kind === "grand"
-                  ? "bg-gold-soft hover:bg-gold-soft/80 border-t-2 border-t-gold"
+                  ? "bg-primary-soft hover:bg-primary-soft/80 border-t-2 border-t-primary"
                   : isTotalRow
                     ? "bg-slate-100 hover:bg-slate-200/70"
-                    : `${displayIndex % 2 === 1 ? "bg-slate-50/60" : "bg-white"} hover:bg-gold-soft/50`;
+                    : `${displayIndex % 2 === 1 ? "bg-slate-50/60" : "bg-white"} hover:bg-primary-soft/50`;
 
               // Excel's +/- sits right next to an item's own label, for every field but the
               // innermost (2026-10-15 — it used to be the outermost field only): on its item row in
@@ -2040,7 +2040,7 @@ export default function PivotGrid({
                         key={colIndex}
                         className={`${cellBorder} whitespace-nowrap px-3 py-1.5 text-center tabular-nums ${
                           isTotalCell ? "font-bold text-ink" : "text-slate-700"
-                        } ${isSelected ? "relative z-20 ring-2 ring-inset ring-gold-strong" : ""} ${isInRange ? "!bg-gold/25" : ""}`}
+                        } ${isSelected ? "relative z-20 ring-2 ring-inset ring-primary-strong" : ""} ${isInRange ? "!bg-primary/25" : ""}`}
                         style={conditionalStyle ?? undefined}
                         // Excel's drag-to-select (2026-10-20): press on a cell and drag over others to
                         // select the range — preventDefault keeps the browser from selecting the TEXT.

@@ -1219,7 +1219,7 @@ export default function PivotBuilder() {
               <button
                 type="button"
                 onClick={() => setShowVersionName(true)}
-                className="inline-flex items-center gap-1 self-start text-xs font-medium text-gold-strong hover:underline"
+                className="inline-flex items-center gap-1 self-start text-xs font-medium text-primary-strong hover:underline"
               >
                 <Plus className="h-3 w-3" />
                 Add a version name
@@ -1238,7 +1238,7 @@ export default function PivotBuilder() {
             )}
 
             <select
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40 focus:border-gold"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
               value={tableStyle}
               onChange={(e) => setTableStyle(e.target.value)}
               title="Table style for the saved snapshot"
@@ -1255,7 +1255,7 @@ export default function PivotBuilder() {
             </label>
             {includeChart && (
               <select
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40 focus:border-gold"
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
                 value={chartType}
                 onChange={(e) => setChartType(e.target.value)}
                 title="Chart type"
@@ -1569,7 +1569,7 @@ export default function PivotBuilder() {
               <label className="flex items-center gap-2 text-ink">
                 <input
                   type="checkbox"
-                  className="h-4 w-4 accent-gold"
+                  className="h-4 w-4 accent-primary"
                   checked={deferLayout}
                   onChange={(e) => {
                     setDeferLayout(e.target.checked);
@@ -1595,7 +1595,7 @@ export default function PivotBuilder() {
           <button
             type="button"
             onClick={() => setShowFieldList(true)}
-            className="flex shrink-0 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:border-gold hover:text-ink lg:ml-2 lg:w-8 lg:flex-col lg:px-0 lg:py-3"
+            className="flex shrink-0 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:border-primary hover:text-ink lg:ml-2 lg:w-8 lg:flex-col lg:px-0 lg:py-3"
             title="Show the PivotTable Fields pane"
           >
             <PanelRightOpen className="h-4 w-4 shrink-0" />

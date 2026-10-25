@@ -52,7 +52,7 @@ function AccountMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         title={user.name || user.email || "Account"}
-        className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white ring-offset-2 transition hover:ring-2 hover:ring-gold/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+        className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white ring-offset-2 transition hover:ring-2 hover:ring-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
         {initialsOf(user)}
       </button>
@@ -84,12 +84,13 @@ export default function AppShell({ children, workspace = false, actions = null }
   const location = useLocation();
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    // ds-shell-bg: the design system's shell atmosphere (index.css), on the shell only.
+    <div className="ds-shell-bg min-h-screen">
       {/* Narrow screens (2026-10-25): tighter spacing, the name hidden under the logo, tabs on one line —
           the bar used to push Export/Save off a phone screen and scroll the whole page sideways. */}
       <header className="sticky top-0 z-50 flex h-12 items-center gap-2 border-b border-slate-200 bg-white px-2 sm:gap-6 sm:px-4">
         <Link to="/" className="flex shrink-0 items-center gap-2.5" title="Pivot Snapshot">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-gold">
+          <span className="flex h-7 w-7 items-center justify-center rounded-control bg-gradient-to-br from-primary to-primary-deep">
             <Activity className="h-4 w-4 text-white" />
           </span>
           <span className="hidden text-[15px] font-bold tracking-tight text-ink md:inline">Pivot Snapshot</span>
@@ -108,7 +109,7 @@ export default function AppShell({ children, workspace = false, actions = null }
               >
                 <span className="sm:hidden">{short}</span>
                 <span className="hidden sm:inline">{label}</span>
-                {active && <span className="absolute inset-x-3 bottom-0 h-[2px] rounded-full bg-gold" aria-hidden="true" />}
+                {active && <span className="absolute inset-x-3 bottom-0 h-[2px] rounded-full bg-primary" aria-hidden="true" />}
               </Link>
             );
           })}

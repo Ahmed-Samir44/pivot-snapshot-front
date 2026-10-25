@@ -42,7 +42,7 @@ export default function PaneSplitter({ width, min, max, defaultWidth, onChange, 
       }}
     >
       {/* The visible line: a hairline that turns gold on hover/focus/drag. */}
-      <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-200 transition-colors group-hover:w-[3px] group-hover:bg-gold group-focus-visible:w-[3px] group-focus-visible:bg-gold group-active:bg-gold" />
+      <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-200 transition-colors group-hover:w-[3px] group-hover:bg-primary group-focus-visible:w-[3px] group-focus-visible:bg-primary group-active:bg-primary" />
     </div>
   );
 }

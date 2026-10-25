@@ -24,8 +24,8 @@ function InsertFieldsDialog({ title, fields, emptyText, onOk, onCancel }) {
           <p className="px-1 py-2 text-xs text-muted">{fields.length === 0 ? emptyText : "No matching fields."}</p>
         ) : (
           visible.map((d) => (
-            <label key={d.field} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-gold/10">
-              <input type="checkbox" className="h-3.5 w-3.5 accent-gold" checked={checked.includes(d.field)} onChange={() => toggle(d.field)} />
+            <label key={d.field} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-primary/10">
+              <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={checked.includes(d.field)} onChange={() => toggle(d.field)} />
               <span className="truncate">{d.displayName}</span>
             </label>
           ))
@@ -97,9 +97,9 @@ const ICON_TONES = {
   "Report Filter Pages": "text-sky-600",
   "Calculated Field": "text-indigo-600",
   "Calculated Item": "text-indigo-600",
-  "Field List": "text-gold-strong",
-  "+/- Buttons": "text-gold-strong",
-  "Field Headers": "text-gold-strong",
+  "Field List": "text-primary-strong",
+  "+/- Buttons": "text-primary-strong",
+  "Field Headers": "text-primary-strong",
   Clear: "text-rose-600",
 };
 
@@ -115,7 +115,7 @@ function RibbonButtonFace({ icon: Icon, label, badge = 0 }) {
       <span className={iconOnly ? "sr-only" : compact ? "text-xs leading-none text-slate-700" : "text-center text-xs leading-tight text-slate-700"}>{label}</span>
       {badge > 0 && (
         <span
-          className={`flex h-4 w-4 items-center justify-center rounded-full bg-gold text-[10px] font-bold text-white ${compact ? "ml-0.5" : "absolute right-1 top-1"}`}
+          className={`flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white ${compact ? "ml-0.5" : "absolute right-1 top-1"}`}
         >
           {badge}
         </span>
@@ -134,7 +134,7 @@ function RibbonPlainButton({ icon, label, onClick, pressed, disabled = false, ti
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={ribbonButtonClass(compact, (pressed ? "bg-gold-soft ring-1 ring-inset ring-gold/50" : "hover:bg-slate-100") + " disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent")}
+      className={ribbonButtonClass(compact, (pressed ? "bg-primary-soft ring-1 ring-inset ring-primary/50" : "hover:bg-slate-100") + " disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent")}
     >
       <RibbonButtonFace icon={icon} label={label} />
     </button>
@@ -187,7 +187,7 @@ function NumberGroup({ selection, onApply }) {
           disabled={!enabled}
           value={shared ?? ""}
           onChange={(e) => e.target.value && apply((f) => withFormatType(f, e.target.value))}
-          className="h-7 w-40 rounded border border-slate-300 bg-white px-1.5 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-gold disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted"
+          className="h-7 w-40 rounded border border-slate-300 bg-white px-1.5 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted"
         >
           {shared === null && <option value="">{enabled ? "(mixed)" : "General"}</option>}
           {NUMBER_FORMAT_CHOICES.map((c) => (
@@ -390,7 +390,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
               className={`relative px-2.5 py-2 text-xs transition-colors ${active ? "font-semibold text-ink" : "font-medium text-slate-500 hover:text-ink"}`}
             >
               {t.label}
-              {active && <span className="absolute inset-x-2.5 bottom-0 h-[2px] rounded-full bg-gold" aria-hidden="true" />}
+              {active && <span className="absolute inset-x-2.5 bottom-0 h-[2px] rounded-full bg-primary" aria-hidden="true" />}
             </button>
           );
         })}
@@ -450,7 +450,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                         onChange({ ...request, grandTotals: opt.value });
                         close();
                       }}
-                      className={`rounded-lg px-2 py-1.5 text-left ${request.grandTotals === opt.value ? "bg-gold-soft font-semibold text-gold-strong" : "hover:bg-slate-100"}`}
+                      className={`rounded-lg px-2 py-1.5 text-left ${request.grandTotals === opt.value ? "bg-primary-soft font-semibold text-primary-strong" : "hover:bg-slate-100"}`}
                     >
                       {opt.label}
                     </button>
@@ -486,7 +486,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                           close();
                         }}
                         className={`rounded-lg px-2 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-40 ${
-                          request.subtotals === opt.value ? "bg-gold-soft font-semibold text-gold-strong" : "hover:bg-slate-100"
+                          request.subtotals === opt.value ? "bg-primary-soft font-semibold text-primary-strong" : "hover:bg-slate-100"
                         }`}
                       >
                         {opt.label}
@@ -516,7 +516,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                             layout.onReportLayoutChange(opt.value);
                             close();
                           }}
-                          className={`rounded-lg px-2 py-1.5 text-left ${layout.reportLayout === opt.value ? "bg-gold-soft font-semibold text-gold-strong" : "hover:bg-slate-100"}`}
+                          className={`rounded-lg px-2 py-1.5 text-left ${layout.reportLayout === opt.value ? "bg-primary-soft font-semibold text-primary-strong" : "hover:bg-slate-100"}`}
                         >
                           {opt.label}
                         </button>
@@ -536,7 +536,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                             close();
                           }}
                           className={`rounded-lg px-2 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-40 ${
-                            layout.reportLayout !== "Compact" && layout.repeatItemLabels === opt.value ? "bg-gold-soft font-semibold text-gold-strong" : "hover:bg-slate-100"
+                            layout.reportLayout !== "Compact" && layout.repeatItemLabels === opt.value ? "bg-primary-soft font-semibold text-primary-strong" : "hover:bg-slate-100"
                           }`}
                         >
                           {opt.label}
@@ -601,7 +601,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                   setNameDraft(null);
                 }}
                 onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-                className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-gold"
+                className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
             <RibbonPlainButton icon={Settings2} label="Options" onClick={onOpenPivotTableOptions} />

@@ -142,7 +142,7 @@ export default function GroupItemsPanel({ field, request, onChange, onBack, onDo
                   {shown.map((m) => (
                     <li key={m}>
                       <label className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-0.5 text-xs hover:bg-slate-50">
-                        <input type="checkbox" className="h-3.5 w-3.5 accent-gold" checked={selected.has(m)} onChange={() => toggle(m)} />
+                        <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={selected.has(m)} onChange={() => toggle(m)} />
                         {m}
                       </label>
                     </li>
