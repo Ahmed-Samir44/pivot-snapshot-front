@@ -1110,8 +1110,10 @@ export default function PivotGrid({
             request.slicerFields, which is also why that field is excluded from the Report Filter
             rows just below — Excel never shows both a Slicer AND a Report Filter row for the same
             field at once. */}
-        {request && onChange && request.slicerFields.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
+        {request && onChange && (request.slicerFields.length > 0 || request.timelineFields.length > 0) && (
+          // One strip for every slicer and timeline, side by side like Excel's floating controls —
+          // they used to be two stacked rows that pushed the PivotTable down (2026-10-25).
+          <div className="mb-2 flex flex-wrap items-start gap-2">
             {request.slicerFields.map((field) => {
               const filter = request.filters.find((f) => f.field === field) ?? null;
               return (
@@ -1136,12 +1138,8 @@ export default function PivotGrid({
                 />
               );
             })}
-          </div>
-        )}
-        {/* Excel's own Timeline control (Insert Timeline, PivotToolbar.jsx) — same relationship to
-            request.filters as the Slicer block above, see Timeline.jsx's own WHY comment. */}
-        {request && onChange && request.timelineFields.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
+            {/* Excel's own Timeline control (Insert Timeline, PivotToolbar.jsx) — same relationship
+                to request.filters as the slicers, see Timeline.jsx's own WHY comment. */}
             {request.timelineFields.map((field) => {
               const filter = request.filters.find((f) => f.field === field) ?? null;
               return (

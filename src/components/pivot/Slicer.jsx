@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X, Search, FilterX } from "lucide-react";
 import { getMembers } from "../../services/cubeMetaApi";
+import { widgetTitle } from "./Timeline";
 
 // Excel's own Slicer: a floating button-grid control bound to one field — every member is its own
 // clickable toggle button (selected = highlighted), with a small search box and a "clear filter"
@@ -55,10 +56,10 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
   const clearFilter = () => onChange({ field, mode: "Members", includedMembers: [] });
 
   return (
-    <div className="flex w-56 shrink-0 flex-col rounded-xl border border-slate-300/70 bg-white shadow-sm">
-      <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-100 px-3 py-2">
+    <div className="flex w-56 shrink-0 flex-col rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
         <span className="truncate text-xs font-bold text-ink" title={displayName}>
-          {displayName}
+          {widgetTitle(displayName)}
         </span>
         <div className="flex shrink-0 items-center gap-1">
           <button
@@ -89,18 +90,18 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
         </div>
       </div>
 
-      <div className="grid max-h-56 grid-cols-2 gap-1 overflow-y-auto p-1.5">
+      <div className="custom-scrollbar flex max-h-48 flex-col gap-1 overflow-y-auto p-1.5">
         {loading && members.length === 0 ? (
-          <p className="col-span-2 py-2 text-center text-xs text-muted">Loading…</p>
+          <p className="py-2 text-center text-xs text-muted">Loading…</p>
         ) : failed && members.length === 0 ? (
-          <div className="col-span-2 flex flex-col items-center gap-1.5 py-2 text-center text-xs text-rose-700">
+          <div className="flex flex-col items-center gap-1.5 py-2 text-center text-xs text-rose-700">
             <span>Couldn't load the items — the data server is busy.</span>
             <button type="button" onClick={() => setRetryToken((t) => t + 1)} className="rounded border border-rose-300 px-2 py-0.5 font-medium hover:bg-rose-50">
               Retry
             </button>
           </div>
         ) : members.length === 0 ? (
-          <p className="col-span-2 py-2 text-center text-xs text-muted">No items</p>
+          <p className="py-2 text-center text-xs text-muted">No items</p>
         ) : (
           members.map((member) => {
             const selected = includedMembers.includes(member);
@@ -110,11 +111,13 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
                 type="button"
                 onClick={() => toggleMember(member)}
                 title={member}
-                className={`truncate rounded px-1.5 py-1 text-left text-xs ${
-                  selected ? "bg-primary text-white font-semibold" : "bg-slate-50 text-ink hover:bg-slate-100"
+                aria-pressed={selected}
+                className={`truncate rounded-md border px-2 py-1.5 text-left text-xs ${
+                  selected ? "border-primary bg-primary font-semibold text-white" : "border-slate-200 bg-white text-ink hover:border-primary/40 hover:bg-primary-50"
                 }`}
               >
-                {member}
+                {/* A member with an empty caption reads "(blank)", like Excel (display only). */}
+                {member === "" ? "(blank)" : member}
               </button>
             );
           })

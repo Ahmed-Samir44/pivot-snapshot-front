@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { X, FilterX } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { X, FilterX, ChevronLeft, ChevronRight } from "lucide-react";
 import { getMembers } from "../../services/cubeMetaApi";
 
 const GRANULARITIES = ["Years", "Quarters", "Months", "Days"];
@@ -41,6 +41,35 @@ function bucketLabel(key, granularity) {
     return new Date(Number(year), Number(month) - 1, Number(day)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   }
   return key;
+}
+
+// Excel's timeline layout (2026-10-25, the user: "like Excel", "why the scroll bar?"): periods sit
+// under a heading for the period they belong to (months and quarters under their year, days under
+// their month), and each period shows only its short name ("Jan", "Q1", "5").
+function groupOf(key, granularity) {
+  if (granularity === "Months" || granularity === "Quarters") return key.slice(0, 4);
+  if (granularity === "Days") {
+    const [year, month] = key.split("-");
+    return new Date(Number(year), Number(month) - 1, 1).toLocaleString("en-US", { month: "short", year: "numeric" });
+  }
+  return "";
+}
+
+function shortLabel(key, granularity) {
+  if (granularity === "Months") return new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1).toLocaleString("en-US", { month: "short" });
+  if (granularity === "Quarters") return key.slice(5);
+  if (granularity === "Days") return String(Number(key.slice(8, 10)));
+  return key;
+}
+
+// The field's own name for a widget title — "Country Name", not "Business Unit.Country Name"; the
+// full name stays in the tooltip. Shared with Slicer.
+// Before the field list loads, displayName is the raw identifier ("[Dim X].[Country Name].[Country
+// Name]"), so the brackets go too.
+export function widgetTitle(displayName) {
+  const name = String(displayName ?? "");
+  const last = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : name;
+  return last.replace(/^\[|\]$/g, "");
 }
 
 // A bucket's first and last day, as ISO "yyyy-mm-dd" — what a DateBetween filter takes.
@@ -179,12 +208,56 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
     onChange({ field, mode: "Members", includedMembers: [] });
   };
 
+  // The strip scrolls with the ‹ › buttons or the mouse wheel and opens on the selection, or on the
+  // latest periods when nothing is selected — it used to open on the oldest month (Jan 2020) with a
+  // full-size scrollbar under it.
+  const stripRef = useRef(null);
+  const bucketRefs = useRef(new Map());
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip || buckets.length === 0) return;
+    const target = bucketRefs.current.get(buckets[rangeHi ?? buckets.length - 1]);
+    if (target) strip.scrollLeft = Math.max(0, target.offsetLeft + target.offsetWidth - strip.clientWidth + 24);
+    // Only when the periods change (load, level switch) — not on every click inside the strip.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buckets]);
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return undefined;
+    const onWheel = (e) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      strip.scrollLeft += e.deltaY;
+    };
+    strip.addEventListener("wheel", onWheel, { passive: false });
+    return () => strip.removeEventListener("wheel", onWheel);
+  }, [buckets.length]);
+  const scrollStrip = (direction) => stripRef.current?.scrollBy({ left: direction * stripRef.current.clientWidth * 0.8, behavior: "smooth" });
+
+  // Consecutive buckets grouped under their heading (see groupOf).
+  const groups = [];
+  buckets.forEach((bucket, index) => {
+    const label = groupOf(bucket, granularity);
+    if (groups.length === 0 || groups[groups.length - 1].label !== label) groups.push({ label, items: [] });
+    groups[groups.length - 1].items.push({ bucket, index });
+  });
+  // The caption under the title, like Excel's ("Oct 2026", "Jan 2026 – Mar 2026", "All Periods").
+  const selectionCaption =
+    rangeLo === null
+      ? "All Periods"
+      : rangeLo === rangeHi
+        ? bucketLabel(buckets[rangeLo], granularity)
+        : `${bucketLabel(buckets[rangeLo], granularity)} – ${bucketLabel(buckets[rangeHi], granularity)}`;
+
   return (
-    <div className="flex w-full max-w-2xl flex-col rounded-xl border border-slate-300/70 bg-white shadow-sm">
-      <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-100 px-3 py-2">
-        <span className="truncate text-xs font-bold text-ink" title={displayName}>
-          {displayName}
-        </span>
+    <div className="flex w-[34rem] max-w-full flex-col rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
+        <div className="min-w-0">
+          <p className="truncate text-xs font-bold text-ink" title={displayName}>
+            {widgetTitle(displayName)}
+          </p>
+          <p className="truncate text-[11px] text-muted">{selectionCaption}</p>
+        </div>
         <div className="flex shrink-0 items-center gap-2">
           <select
             value={granularity}
@@ -192,7 +265,8 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
               setRangeStart(null);
               setGranularity(e.target.value);
             }}
-            className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-xs"
+            className="rounded-control border border-slate-200 bg-white px-1.5 py-0.5 text-xs text-ink focus:border-primary focus:outline-none"
+            aria-label="Time level"
           >
             {GRANULARITIES.map((g) => (
               <option key={g} value={g}>
@@ -215,7 +289,7 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
         </div>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto p-2">
+      <div className="flex items-stretch gap-1 px-1 py-2">
         {loading ? (
           <p className="py-2 text-xs text-muted">Loading…</p>
         ) : failed && allMembers.length === 0 ? (
@@ -228,22 +302,42 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
         ) : buckets.length === 0 ? (
           <p className="py-2 text-xs text-muted">This field has no date-shaped members.</p>
         ) : (
-          buckets.map((bucket, index) => {
-            const isSelected = rangeLo !== null && index >= rangeLo && index <= rangeHi;
-            return (
-              <button
-                key={bucket}
-                type="button"
-                onClick={(e) => handleBucketClick(index, e.shiftKey)}
-                title="Click to select, Shift+Click to extend the range"
-                className={`min-w-[3.5rem] shrink-0 rounded px-2 py-3 text-center text-xs font-medium ${
-                  isSelected ? "bg-primary text-white" : "bg-slate-50 text-ink hover:bg-slate-100"
-                }`}
-              >
-                {bucketLabel(bucket, granularity)}
-              </button>
-            );
-          })
+          <>
+            <button type="button" onClick={() => scrollStrip(-1)} aria-label="Earlier periods" className="flex w-6 shrink-0 items-center justify-center rounded text-muted hover:bg-slate-100 hover:text-ink">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            {/* No visible scrollbar — the arrows and the mouse wheel scroll the strip. */}
+            <div ref={stripRef} className="flex min-w-0 flex-1 gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {groups.map((group) => (
+                <div key={group.label || "all"} className="flex shrink-0 flex-col">
+                  {group.label && <span className="mb-1 px-0.5 text-[11px] font-semibold text-muted">{group.label}</span>}
+                  <div className="flex gap-0.5">
+                    {group.items.map(({ bucket, index }) => {
+                      const isSelected = rangeLo !== null && index >= rangeLo && index <= rangeHi;
+                      return (
+                        <button
+                          key={bucket}
+                          ref={(el) => (el ? bucketRefs.current.set(bucket, el) : bucketRefs.current.delete(bucket))}
+                          type="button"
+                          onClick={(e) => handleBucketClick(index, e.shiftKey)}
+                          title={`${bucketLabel(bucket, granularity)} — click to select, Shift+Click to extend`}
+                          aria-pressed={isSelected}
+                          className="group flex min-w-[2.75rem] flex-col items-center gap-1 rounded px-1 pt-0.5 text-xs text-ink"
+                        >
+                          <span className={isSelected ? "font-semibold text-primary-strong" : ""}>{shortLabel(bucket, granularity)}</span>
+                          {/* Excel's period bar: filled for the selected range. */}
+                          <span className={`h-2.5 w-full rounded-sm ${isSelected ? "bg-primary" : "bg-slate-200 group-hover:bg-slate-300"}`} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={() => scrollStrip(1)} aria-label="Later periods" className="flex w-6 shrink-0 items-center justify-center rounded text-muted hover:bg-slate-100 hover:text-ink">
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </>
         )}
       </div>
     </div>
