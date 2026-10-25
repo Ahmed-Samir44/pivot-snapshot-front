@@ -26,6 +26,18 @@ const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F
 // values are a plain ratio (0.3843, not 38.43, fixed 2026-10-05, see numberFormat.js's own WHY
 // comment), exactly what Excel's built-in *100-on-render behavior for '%' expects, so no
 // workaround is needed here anymore.
+// The app's "General" shows thousands separators and up to 2 decimals (numberFormat.js), Excel's
+// General shows neither separators nor a fixed count — so an exported 2,445 read 2445 in Excel
+// (found 2026-10-25). Excel has no "General with separators", so General becomes #,##0 with as
+// many decimals (0-2) as the given values need: exact per cell, and per field for a PivotTable.
+export function generalAsShown(values) {
+  const decimals = Math.max(0, ...values.filter((v) => typeof v === "number" && Number.isFinite(v)).map((v) => {
+    const fraction = String(Math.round(Math.abs(v) * 100) / 100).split(".")[1] ?? "";
+    return fraction.length;
+  }));
+  return decimals > 0 ? `#,##0.${"0".repeat(decimals)}` : "#,##0";
+}
+
 function excelNumberFormat(format) {
   const type = format?.type ?? "General";
   const decimals = Math.min(Math.max(format?.decimalPlaces ?? 2, 0), 10);
@@ -403,7 +415,8 @@ export async function exportPivotToExcel({
       } else {
         cell.value = value;
       }
-      cell.numFmt = excelNumberFormat(cellFormats?.[cellFormatKey(rowHeader, colHeader)] ?? formatForColumn(measureIndex, valueFields));
+      const code = excelNumberFormat(cellFormats?.[cellFormatKey(rowHeader, colHeader)] ?? formatForColumn(measureIndex, valueFields));
+      cell.numFmt = code === "General" && typeof value === "number" ? generalAsShown([value]) : code;
       cell.font = { bold: isTotalCell };
       cell.alignment = { horizontal: "center" };
       if (isTotalCell) cell.fill = SUBTOTAL_FILL;
@@ -484,7 +497,8 @@ export async function exportPivotToExcel({
     const column = dataSheet.getColumn(i + 1);
     column.width = Math.min(Math.max(f.name.length, ...pivotSource.data.slice(0, 200).map((r) => String(r[i] ?? "").length)) + 2, 40);
     if (f.kind !== "data") return;
-    const code = excelNumberFormat(formatForColumn(f.measureIndex, valueFields));
+    const fieldCode = excelNumberFormat(formatForColumn(f.measureIndex, valueFields));
+    const code = fieldCode === "General" ? generalAsShown(pivotSource.data.map((r) => r[i])) : fieldCode;
     numFmtCodes.push(code);
     column.numFmt = code;
   });

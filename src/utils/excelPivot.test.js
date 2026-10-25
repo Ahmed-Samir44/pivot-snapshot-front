@@ -93,4 +93,25 @@ describe("buildPivotSource (the exported Excel PivotTable's Data sheet)", () => 
     expect(source.measuresInRows).toBe(false);
     expect(source.measuresPosition).toBe(1);
   });
+
+  it("lists each field's items in the app's order, not in the order the first rows happen to show them", () => {
+    // AKW (the first row) only has KSA, so first appearance would put KSA before Egypt.
+    const source = buildPivotSource({
+      result: {
+        rowHeaders: [{ labels: ["AKW"], isTotal: false }, { labels: ["AMH"], isTotal: false }],
+        columnHeaders: [
+          { labels: ["Egypt", "Revenue"], isTotal: false },
+          { labels: ["KSA", "Revenue"], isTotal: false },
+        ],
+        cells: [[null, 5], [7, null]],
+      },
+      rows: ["[BU]"],
+      columns: ["[Country]", "[Measures]"],
+      rowFieldLabels: ["BU"],
+      columnFieldLabels: ["Country", "Σ Values"],
+      valueFields: [{ field: "Revenue", showValuesAs: "Normal" }],
+    });
+    expect(source.fields.find((f) => f.kind === "col").items).toEqual(["Egypt", "KSA"]);
+    expect(source.fields.find((f) => f.kind === "row").items).toEqual(["AKW", "AMH"]);
+  });
 });

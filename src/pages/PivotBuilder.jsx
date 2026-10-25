@@ -891,9 +891,11 @@ export default function PivotBuilder() {
   // Layout override with it. Done here instead of inside FieldPicker's onChange handlers because
   // fieldLayouts lives OUTSIDE `request` (see its own WHY comment above), so FieldPicker's
   // request-only onChange has no way to touch it directly.
+  // Columns fields count too since their Field Settings gained Custom Name (2026-10-25) — Rows-only,
+  // this wiped a column field's custom name on every reload.
   useEffect(() => {
-    setFieldLayouts((prev) => prev.filter((f) => request.rows.includes(f.field)));
-  }, [request.rows]);
+    setFieldLayouts((prev) => prev.filter((f) => request.rows.includes(f.field) || request.columns.includes(f.field)));
+  }, [request.rows, request.columns]);
 
   // Clears the whole builder back to a blank slate — fields, result, every warning/message, and
   // the save-panel inputs. Doesn't touch dimensions/measures (still the same cube, no need to

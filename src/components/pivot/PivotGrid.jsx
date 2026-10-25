@@ -1225,6 +1225,13 @@ export default function PivotGrid({
               <p className="text-sm font-semibold text-ink">Updating the PivotTable…</p>
               <p className="mt-1.5 text-xs leading-relaxed text-muted">Getting the numbers from the data server.</p>
             </>
+          ) : request && (request.rows.length > 0 || request.columns.some((f) => f !== MEASURES_PLACEHOLDER) || request.values.length > 0) ? (
+            // Fields are placed but no numbers came back (a failed or cancelled query, or a deferred
+            // update) — "choose fields" would wrongly tell the user to start over (2026-10-25).
+            <>
+              <p className="text-sm font-semibold text-ink">The PivotTable hasn&apos;t loaded its numbers</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-muted">Its fields are set. Use Retry in the message above, or Update when Defer Layout Update is on.</p>
+            </>
           ) : (
             <>
               <p className="text-sm font-semibold text-ink">To build a report, choose fields from the PivotTable Fields list</p>

@@ -110,11 +110,16 @@ export function buildPivotSource({ result, rows = [], columns = [], rowFieldLabe
     ...measureNames,
   ]);
   let n = 0;
-  const firstSeen = (values) => [...new Set(values)];
+  // Each field's items in the app's own header order (its A to Z, Z to A, by-value or manual sort),
+  // keeping only items that carry data. Taking them in order of first appearance across the
+  // records instead put a column item first just because the FIRST ROW had it — "Kingdom of Saudi
+  // Arabia" before "Egypt" when AKW (KSA only) was the first row (found in Excel, 2026-10-25).
+  const headerOrder = (headers, level, present) => [...new Set(headers.filter((h) => !h.isTotal).map((h) => h.labels[level] ?? ""))].filter((v) => present.has(v));
+  const itemsOf = (headers, axisFields, k, valuesOf) => headerOrder(headers, axisFields[k].level, new Set(kept.map((rec) => valuesOf(rec)[k])));
   const fields = [
     ...pageFilters.map((f) => ({ kind: "page", name: names[n++], items: [filterValueSummary(f)] })),
-    ...rowFields.map((_, k) => ({ kind: "row", name: names[n++], items: firstSeen(kept.map((rec) => rec.rowValues[k])) })),
-    ...colFields.map((_, k) => ({ kind: "col", name: names[n++], items: firstSeen(kept.map((rec) => rec.colValues[k])) })),
+    ...rowFields.map((_, k) => ({ kind: "row", name: names[n++], items: itemsOf(rowHeaders, rowFields, k, (rec) => rec.rowValues) })),
+    ...colFields.map((_, k) => ({ kind: "col", name: names[n++], items: itemsOf(columnHeaders, colFields, k, (rec) => rec.colValues) })),
     ...valueFields.map((v, m) => ({ kind: "data", name: names[n++], measureIndex: m, caption: measureNames[m] })),
   ];
   const data = kept.map((rec) => [...pageFilters.map((f) => filterValueSummary(f)), ...rec.rowValues, ...rec.colValues, ...rec.measures]);

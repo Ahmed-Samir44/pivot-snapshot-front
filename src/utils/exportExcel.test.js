@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createWorkbook, exportPivotToExcel } from "./exportExcel";
+import { createWorkbook, exportPivotToExcel, generalAsShown } from "./exportExcel";
 import { DEFAULT_PIVOT_OPTIONS } from "./pivotOptions";
 import { cellFormatKey } from "./cellFormats";
 
@@ -49,8 +49,9 @@ describe("exportPivotToExcel into a workbook (Show Report Filter Pages)", () => 
     await exportPivotToExcel(options({ workbook, cellFormats }));
     const formats = [];
     workbook.worksheets[0].eachRow((row) => row.eachCell((cell) => cell.value === 10 && formats.push(cell.numFmt)));
-    // Egypt's cell carries its own 0.0%; the Grand Total (also 10) keeps the field's General.
-    expect(formats).toEqual(["#,##0.0%", "General"]);
+    // Egypt's cell carries its own 0.0%; the Grand Total (also 10) keeps the field's General, written
+    // as the app shows it (10 → #,##0).
+    expect(formats).toEqual(["#,##0.0%", "#,##0"]);
   });
 
   it("exports the Number options as Excel's own codes (separator, red/parenthesised negatives)", async () => {
@@ -59,6 +60,12 @@ describe("exportPivotToExcel into a workbook (Show Report Filter Pages)", () => 
     const formats = new Set();
     workbook.worksheets[0].eachRow((row) => row.eachCell((cell) => cell.value === 10 && formats.add(cell.numFmt)));
     expect([...formats]).toEqual(["0.0;[Red](0.0)"]);
+  });
+
+  it("writes General the way the app shows it: separators and only the decimals it needs (up to 2)", () => {
+    expect(generalAsShown([2445, 29631])).toBe("#,##0");
+    expect(generalAsShown([1564531.1, 7])).toBe("#,##0.0");
+    expect(generalAsShown([1.237, NaN, null])).toBe("#,##0.00");
   });
 
   it("writes real numbers, an error cell as #DIV/0!, and the Grand Total row", async () => {
