@@ -69,11 +69,11 @@ function FilterHeaderRow({ filter, index, request, onChange, dimensionOptions, s
       </div>
       <Popover
         fullWidth
-        trigger={(toggle) => (
+        trigger={(toggle, open) => (
           <button
             type="button"
             onClick={toggle}
-            className="flex min-w-[10rem] flex-1 items-center justify-between gap-2 px-3 py-1.5 text-left text-xs text-ink hover:bg-slate-50"
+            className={`flex min-w-[10rem] flex-1 items-center justify-between gap-2 px-3 py-1.5 text-left text-xs text-ink hover:bg-slate-50 ${open ? "bg-primary-50" : ""}`}
           >
             <span className="truncate">{filterValueSummary(filter)}</span>
             <FilterIcon className="h-3 w-3 shrink-0 text-primary" />
@@ -262,7 +262,7 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
       fullWidth
       // The Sort dialog needs more room than the shortcut list.
       panelClassName={panel === "sort" || panel === "group" ? "min-w-[20rem] max-w-[22rem]" : "min-w-[14rem] max-w-[18rem]"}
-      trigger={(toggle) => (
+      trigger={(toggle, open) => (
         <button
           type="button"
           onClick={() => {
@@ -272,7 +272,7 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
           // Same tones as HeaderCell on the neutral slate band (the 2026-10-13/14 contrast bugs came
           // from the old gold band: gray and gold text both vanished on it). Gold is the hover/
           // filtered accent only.
-          className={`flex w-full items-center justify-center gap-1 text-sm font-semibold hover:text-primary-strong ${
+          className={`flex w-full items-center justify-center gap-1 text-sm font-semibold hover:text-primary-strong ${open ? "!text-primary-strong" : ""} ${
             muted ? "text-slate-500" : isTotal ? "text-primary-strong" : "text-ink"
           }`}
           title={`Sort or filter ${label}`}

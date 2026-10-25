@@ -1178,12 +1178,12 @@ export default function PivotBuilder() {
       <Popover
         align="right"
         panelClassName="!min-w-[20rem] !max-w-[22rem]"
-        trigger={(toggle) => (
+        trigger={(toggle, open) => (
           <button
             type="button"
             onClick={toggle}
             disabled={!result}
-            className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+            className={`btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50 ${open ? "!bg-primary-strong ring-2 ring-primary/30" : ""}`}
             title={result ? "Save this PivotTable as a snapshot" : "Build a PivotTable first"}
           >
             <Save className="h-4 w-4" />

@@ -1218,15 +1218,15 @@ function FilterPill({ filter, dimensionOptions, selectedValueOptions, onChange, 
       <Popover
         align="right"
         fullWidth
-        trigger={(toggle) => (
+        trigger={(toggle, open) => (
           <button
             type="button"
             draggable={Boolean(filter.field)}
             onDragStart={(e) => filter.field && setFieldDragPayload(e, filter.field, "filters")}
             onClick={toggle}
-            className={`flex w-full items-center justify-between gap-1 rounded border border-slate-300 bg-white px-2 py-1.5 text-left text-xs font-medium text-ink shadow-sm hover:bg-slate-50 ${
-              filter.field ? "cursor-grab active:cursor-grabbing" : ""
-            }`}
+            className={`flex w-full items-center justify-between gap-1 rounded border px-2 py-1.5 text-left text-xs font-medium text-ink shadow-sm hover:bg-slate-50 ${
+              open ? "border-primary bg-primary-50 ring-1 ring-primary/40" : "border-slate-300 bg-white"
+            } ${filter.field ? "cursor-grab active:cursor-grabbing" : ""}`}
           >
             <span className="min-w-0 truncate">{label}</span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted" />
@@ -2461,7 +2461,7 @@ function ValuePill({
         align="right"
         fullWidth
         panelClassName={panel === "menu" ? "!min-w-[13rem] !max-w-[16rem] !p-1" : ""}
-        trigger={(toggle) => (
+        trigger={(toggle, open) => (
           <button
             type="button"
             draggable
@@ -2470,7 +2470,7 @@ function ValuePill({
               setPanel("menu");
               toggle();
             }}
-            className="flex w-full cursor-grab items-center justify-between gap-1 rounded border border-slate-300 bg-white px-2 py-1.5 text-left text-xs font-medium text-ink shadow-sm hover:bg-slate-50 active:cursor-grabbing"
+            className={`flex w-full cursor-grab items-center justify-between gap-1 rounded border px-2 py-1.5 text-left text-xs font-medium text-ink shadow-sm hover:bg-slate-50 active:cursor-grabbing ${open ? "border-primary bg-primary-50 ring-1 ring-primary/40" : "border-slate-300 bg-white"}`}
           >
             <span className="min-w-0 truncate">{label}</span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted" />
@@ -3258,8 +3258,8 @@ export default function FieldPicker({
     <>
       <Popover
         align="right"
-        trigger={(toggle) => (
-          <button type="button" onClick={toggle} className={toolsTarget ? "rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-ink" : "btn-secondary px-2 py-1.5 text-xs"} title="Field List layout and sort order" aria-label="Field List tools">
+        trigger={(toggle, open) => (
+          <button type="button" onClick={toggle} className={`${toolsTarget ? "rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-ink" : "btn-secondary px-2 py-1.5 text-xs"} ${open ? "!bg-primary-soft !text-primary-strong" : ""}`} title="Field List layout and sort order" aria-label="Field List tools">
             <Settings className={toolsTarget ? "h-4 w-4" : "h-3.5 w-3.5"} />
           </button>
         )}
@@ -3393,11 +3393,11 @@ export default function FieldPicker({
               </span>
               <Popover
                 align="right"
-                trigger={(toggle) => (
+                trigger={(toggle, open) => (
                   <button
                     type="button"
                     onClick={toggle}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25"
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${open ? "bg-primary text-white" : "bg-primary/15 text-primary hover:bg-primary/25"}`}
                     aria-label="Add filter"
                     title="Add filter"
                   >
@@ -3691,11 +3691,11 @@ export default function FieldPicker({
               </span>
               <Popover
                 align="right"
-                trigger={(toggle) => (
+                trigger={(toggle, open) => (
                   <button
                     type="button"
                     onClick={toggle}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25"
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${open ? "bg-primary text-white" : "bg-primary/15 text-primary hover:bg-primary/25"}`}
                     aria-label="Add a value"
                     title="Add a value"
                   >

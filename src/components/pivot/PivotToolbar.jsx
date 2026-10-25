@@ -148,8 +148,16 @@ function RibbonButton({ icon, label, badge, panelClassName = "", children }) {
   return (
     <Popover
       panelClassName={`!mt-6 ${panelClassName}`}
-      trigger={(toggle) => (
-        <button type="button" onClick={toggle} className={ribbonButtonClass(compact, "hover:bg-slate-100")}>
+      // While its popup is open the button stays marked (the Show toggles' pressed look), like Excel
+      // keeps a command highlighted while its gallery or dialog is up (2026-10-25).
+      trigger={(toggle, open) => (
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          className={ribbonButtonClass(compact, open ? "bg-primary-soft ring-1 ring-inset ring-primary/50" : "hover:bg-slate-100")}
+        >
           <RibbonButtonFace icon={icon} label={label} badge={badge} />
         </button>
       )}
@@ -205,8 +213,8 @@ function NumberGroup({ selection, onApply }) {
           <Popover
             align="left"
             panelClassName="!min-w-[9rem] !max-w-[9rem] !p-1"
-            trigger={(toggle) => (
-              <button type="button" disabled={!enabled} onClick={toggle} className={`${iconButton} !min-w-4 !px-0`} title="Currency symbol" aria-label="Choose the currency symbol">
+            trigger={(toggle, open) => (
+              <button type="button" disabled={!enabled} onClick={toggle} className={`${iconButton} !min-w-4 !px-0 ${open ? "!bg-primary-soft" : ""}`} title="Currency symbol" aria-label="Choose the currency symbol">
                 <ChevronDown className="h-3 w-3" />
               </button>
             )}

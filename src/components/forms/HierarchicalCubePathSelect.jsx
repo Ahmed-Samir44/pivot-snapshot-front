@@ -126,14 +126,14 @@ function PlacedFieldPill({
         // for Popover's OTHER callers' real forms/selects) would make it far wider than this
         // narrow docked pane, pushing it past the card's own edge (caught live, 2026-10-05).
         panelClassName="!min-w-[11rem] !max-w-[14rem] !p-1"
-        trigger={(toggle) => (
+        trigger={(toggle, open) => (
           <button
             type="button"
             onClick={() => {
               setPanel("menu");
               toggle();
             }}
-            className="flex w-full items-center justify-between gap-1 rounded border border-slate-300 bg-white px-2 py-1.5 text-left text-xs font-medium text-ink shadow-sm hover:bg-slate-50"
+            className={`flex w-full items-center justify-between gap-1 rounded border px-2 py-1.5 text-left text-xs font-medium text-ink shadow-sm hover:bg-slate-50 ${open ? "border-primary bg-primary-50 ring-1 ring-primary/40" : "border-slate-300 bg-white"}`}
           >
             {/* A field's Custom Name replaces its name in the Rows area too, like Excel's field list. */}
             <span className="min-w-0 truncate">{currentLayout.customName || formatDimensionName(fullPath)}</span>
@@ -537,11 +537,11 @@ export default function HierarchicalCubePathSelect({
         </span>
         <Popover
           align={align}
-          trigger={(toggle) => (
+          trigger={(toggle, open) => (
             <button
               type="button"
               onClick={toggle}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25"
+              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${open ? "bg-primary text-white" : "bg-primary/15 text-primary hover:bg-primary/25"}`}
               aria-label={`Add a field to ${label}`}
               title={`Add a field to ${label}`}
             >
