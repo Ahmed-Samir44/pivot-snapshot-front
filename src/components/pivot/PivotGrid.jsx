@@ -1637,10 +1637,11 @@ export default function PivotGrid({
         // directly here instead of via the class so the SAME element also owns the overflow (see
         // this div's own WHY comment above). custom-scrollbar (index.css) swaps in the app's thin
         // scrollbar.
-        // fill (the Builder's workspace, 2026-10-20): the box takes all the space its flex-column
-        // parent leaves — a white "worksheet" the table sits in at the top-left, scrolling inside
-        // itself — instead of hugging the table (w-fit) under an 80vh cap, which left a big empty
-        // band beside/below a small pivot.
+        // fill (the Builder's workspace): since 2026-10-25 the box hugs the table (w-fit, height of
+        // its content) and grows and shrinks with it, per the user; it never pushes the rest of the
+        // page — past the space its flex-column parent leaves it stops (max-w-full, min-h-0 + shrink)
+        // and scrolls inside itself, like a worksheet. (2026-10-20 to -25 it filled all that space,
+        // leaving a big empty white area beside and below a small pivot.)
         // No backdrop-blur-xl here — this element is BOTH the
         // overflow-auto scroll container AND the ancestor of the <thead>'s position:sticky (a few
         // lines down), and backdrop-filter on an element that's also a scrolling ancestor of a
@@ -1661,7 +1662,7 @@ export default function PivotGrid({
         // sticky header to protect (see the thead's own WHY comment below) and no independent
         // scrolling of its own either, so overflow-hidden there is just the plain corner-clipping.
         className={`rounded-lg border border-slate-200 bg-white shadow-sm custom-scrollbar outline-none ${
-          fill ? "min-h-[16rem] w-full flex-1 overflow-auto lg:min-h-0" : `w-fit max-w-full ${boundedHeight ? "max-h-[80vh] overflow-auto" : "overflow-hidden"}`
+          fill ? "w-fit max-w-full min-h-0 shrink self-start overflow-auto" : `w-fit max-w-full ${boundedHeight ? "max-h-[80vh] overflow-auto" : "overflow-hidden"}`
         }`}
         tabIndex={0}
         onKeyDown={handleGridKeyDown}
