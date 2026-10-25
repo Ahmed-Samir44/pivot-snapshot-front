@@ -74,6 +74,9 @@ const TABS = [
 // of view): when the full ribbon doesn't fit, its large icon-over-label buttons become small
 // icon-beside-label buttons stacked three high in each group — set by PivotToolbar, read here.
 const RibbonCompact = createContext(false);
+// The next step down (2026-10-25, a 1024px window still overflowed the small buttons): icon only,
+// the command's name kept as its tooltip and for screen readers — like Excel's narrowest ribbon.
+const RibbonIconOnly = createContext(false);
 
 function ribbonButtonClass(compact, extra = "") {
   return compact
@@ -102,11 +105,14 @@ const ICON_TONES = {
 
 function RibbonButtonFace({ icon: Icon, label, badge = 0 }) {
   const compact = useContext(RibbonCompact);
+  const iconOnly = useContext(RibbonIconOnly);
   const tone = ICON_TONES[label] ?? "text-slate-600";
   return (
     <>
-      <Icon className={compact ? `h-4 w-4 shrink-0 ${tone}` : `h-6 w-6 ${tone}`} strokeWidth={1.6} />
-      <span className={compact ? "text-xs leading-none text-slate-700" : "text-center text-xs leading-tight text-slate-700"}>{label}</span>
+      <span title={iconOnly ? label : undefined} className="flex shrink-0">
+        <Icon className={compact ? `h-4 w-4 shrink-0 ${tone}` : `h-6 w-6 ${tone}`} strokeWidth={1.6} aria-hidden="true" />
+      </span>
+      <span className={iconOnly ? "sr-only" : compact ? "text-xs leading-none text-slate-700" : "text-center text-xs leading-tight text-slate-700"}>{label}</span>
       {badge > 0 && (
         <span
           className={`flex h-4 w-4 items-center justify-center rounded-full bg-gold text-[10px] font-bold text-white ${compact ? "ml-0.5" : "absolute right-1 top-1"}`}
@@ -324,34 +330,50 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  // Each step's width is measured while it's showing (full, then small buttons); the narrowest step
+  // that fits is used. Re-checked after every step change, since a step change alters scrollWidth
+  // without resizing the element (ResizeObserver alone wouldn't fire).
+  const [iconOnly, setIconOnly] = useState(false);
   const compactRef = useRef(false);
+  const iconOnlyRef = useRef(false);
   const fullWidthRef = useRef(0);
+  const compactWidthRef = useRef(0);
   useLayoutEffect(() => {
     const el = surfaceRef.current;
     if (!el) return undefined;
     const check = () => {
       if (!compactRef.current) fullWidthRef.current = el.scrollWidth;
-      const next = el.clientWidth < fullWidthRef.current;
-      if (next !== compactRef.current) {
-        compactRef.current = next;
-        setCompact(next);
+      else if (!iconOnlyRef.current) compactWidthRef.current = el.scrollWidth;
+      const nextCompact = el.clientWidth < fullWidthRef.current;
+      const nextIconOnly = nextCompact && compactWidthRef.current > 0 && el.clientWidth < compactWidthRef.current;
+      if (nextCompact !== compactRef.current) {
+        compactRef.current = nextCompact;
+        setCompact(nextCompact);
+      }
+      if (nextIconOnly !== iconOnlyRef.current) {
+        iconOnlyRef.current = nextIconOnly;
+        setIconOnly(nextIconOnly);
       }
     };
     check();
     const observer = new ResizeObserver(check);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [tab, collapsed]);
+  }, [tab, collapsed, compact, iconOnly]);
   const switchTab = (key) => {
     // Re-measure the new tab at full size first.
     compactRef.current = false;
+    iconOnlyRef.current = false;
+    compactWidthRef.current = 0;
     setCompact(false);
+    setIconOnly(false);
     setTab(key);
     setCollapsed(false);
   };
 
   return (
     <RibbonCompact.Provider value={compact}>
+    <RibbonIconOnly.Provider value={iconOnly}>
     <div className="shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
       {/* Tab strip — the modern Office ribbon (2026-10-20 UI refresh): flat, one surface, the active
           tab marked by a short gold underline and bold ink text (was a tinted strip with gold text). */}
@@ -738,6 +760,7 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
       </div>
       )}
     </div>
+    </RibbonIconOnly.Provider>
     </RibbonCompact.Provider>
   );
 }

@@ -1663,7 +1663,7 @@ export default function PivotGrid({
         // sticky header to protect (see the thead's own WHY comment below) and no independent
         // scrolling of its own either, so overflow-hidden there is just the plain corner-clipping.
         className={`rounded-lg border border-slate-200 bg-white shadow-sm custom-scrollbar outline-none ${
-          fill ? "min-h-[16rem] w-full flex-1 overflow-auto xl:min-h-0" : `w-fit max-w-full ${boundedHeight ? "max-h-[80vh] overflow-auto" : "overflow-hidden"}`
+          fill ? "min-h-[16rem] w-full flex-1 overflow-auto lg:min-h-0" : `w-fit max-w-full ${boundedHeight ? "max-h-[80vh] overflow-auto" : "overflow-hidden"}`
         }`}
         tabIndex={0}
         onKeyDown={handleGridKeyDown}

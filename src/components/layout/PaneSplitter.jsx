@@ -17,7 +17,7 @@ export default function PaneSplitter({ width, min, max, defaultWidth, onChange, 
       aria-valuemax={max}
       tabIndex={0}
       title="Drag to resize · double-click to reset"
-      className="group relative hidden w-3 shrink-0 cursor-col-resize touch-none select-none outline-none xl:block"
+      className="group relative hidden w-3 shrink-0 cursor-col-resize touch-none select-none outline-none lg:block"
       onPointerDown={(e) => {
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);

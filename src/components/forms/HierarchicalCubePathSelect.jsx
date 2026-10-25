@@ -528,9 +528,11 @@ export default function HierarchicalCubePathSelect({
     // card that LOOKED droppable but wasn't (caught live, 2026-09-23). flex-1 on the <ul> below is
     // what actually claims that leftover space.
     <div className={`flex h-full flex-col p-2 ${bare ? "" : "rounded-xl border border-slate-200 bg-white shadow-sm"}`}>
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
-          {Icon && <Icon className="h-3.5 w-3.5" />}
+      {/* min-w-0 + truncate: in a narrow docked pane (1024px window, 2026-10-25) the label shrinks
+          instead of pushing the "+" button out past the card's edge. */}
+      <div className="mb-1.5 flex min-w-0 items-center justify-between gap-1">
+        <span className="flex min-w-0 items-center gap-1.5 truncate text-xs font-bold uppercase tracking-wide text-muted">
+          {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
           {label} {value.length > 0 && <span className="text-gold">({value.length})</span>}
         </span>
         <Popover

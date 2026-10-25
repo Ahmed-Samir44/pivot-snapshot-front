@@ -6,9 +6,10 @@ import { Link, useLocation } from "react-router-dom";
 import { Activity, LogOut } from "lucide-react";
 import { getSignedInUser, signOut } from "../../services/dataverseAuth";
 
+// short: the label on a phone, where both full names don't fit beside the actions (2026-10-25).
 const NAV_ITEMS = [
-  { path: "/", label: "Pivot Builder" },
-  { path: "/history", label: "Snapshot History" },
+  { path: "/", label: "Pivot Builder", short: "Builder" },
+  { path: "/history", label: "Snapshot History", short: "History" },
 ];
 
 function initialsOf(user) {
@@ -84,43 +85,46 @@ export default function AppShell({ children, workspace = false, actions = null }
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <header className="sticky top-0 z-50 flex h-12 items-center gap-6 border-b border-slate-200 bg-white px-4">
+      {/* Narrow screens (2026-10-25): tighter spacing, the name hidden under the logo, tabs on one line —
+          the bar used to push Export/Save off a phone screen and scroll the whole page sideways. */}
+      <header className="sticky top-0 z-50 flex h-12 items-center gap-2 border-b border-slate-200 bg-white px-2 sm:gap-6 sm:px-4">
         <Link to="/" className="flex shrink-0 items-center gap-2.5" title="Pivot Snapshot">
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-gold">
             <Activity className="h-4 w-4 text-white" />
           </span>
-          <span className="text-[15px] font-bold tracking-tight text-ink">Pivot Snapshot</span>
+          <span className="hidden text-[15px] font-bold tracking-tight text-ink md:inline">Pivot Snapshot</span>
         </Link>
 
         {/* The two screens as tabs; the active one carries the gold underline, like the ribbon's. */}
         <nav className="flex h-full items-stretch gap-1" aria-label="Main">
-          {NAV_ITEMS.map(({ path, label }) => {
+          {NAV_ITEMS.map(({ path, label, short }) => {
             const active = location.pathname === path;
             return (
               <Link
                 key={path}
                 to={path}
                 aria-current={active ? "page" : undefined}
-                className={`relative flex items-center px-3 text-sm transition-colors ${active ? "font-semibold text-ink" : "font-medium text-slate-500 hover:text-ink"}`}
+                className={`relative flex items-center whitespace-nowrap px-2 text-sm transition-colors sm:px-3 ${active ? "font-semibold text-ink" : "font-medium text-slate-500 hover:text-ink"}`}
               >
-                {label}
+                <span className="sm:hidden">{short}</span>
+                <span className="hidden sm:inline">{label}</span>
                 {active && <span className="absolute inset-x-3 bottom-0 h-[2px] rounded-full bg-gold" aria-hidden="true" />}
               </Link>
             );
           })}
         </nav>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
           {actions}
-          <span className="mx-1 h-6 w-px bg-slate-200" aria-hidden="true" />
+          <span className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" aria-hidden="true" />
           <AccountMenu />
         </div>
       </header>
 
-      {/* A workspace page: tight padding and, from xl up, exactly the height under the top bar (the
-          grid fills what's left — no page scrollbar). A document page (History): normal padding,
+      {/* A workspace page: tight padding and, from lg up, exactly the height under the top bar (the
+          grid fills what's left — no page scrollbar; lg since 2026-10-25). A document page (History): normal padding,
           the page scrolls. */}
-      <main className={workspace ? "flex flex-col gap-2 p-2 xl:h-[calc(100vh-3rem)] xl:overflow-hidden" : "mx-auto max-w-[1600px] p-6"}>{children}</main>
+      <main className={workspace ? "flex flex-col gap-2 p-2 lg:h-[calc(100vh-3rem)] lg:overflow-hidden" : "mx-auto max-w-[1600px] p-6"}>{children}</main>
     </div>
   );
 }
