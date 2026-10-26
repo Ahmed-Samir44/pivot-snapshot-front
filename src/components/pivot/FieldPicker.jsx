@@ -12,7 +12,7 @@ import Popover from "../forms/Popover";
 import { getMembers } from "../../services/cubeMetaApi";
 import { formatNumber, isRedNegative, NEGATIVE_NUMBER_STYLES } from "../../utils/numberFormat";
 import { LABEL_FILTERS, VALUE_FILTERS, DATE_FILTERS, DATE_PERIODS, TOP_10_MODES, TOP_10_MODE_SET, isLabelMode, isDateMode, isTop10Mode, isRangeMode, isValueCompareMode, top10Parts, isRuleFilterComplete } from "../../utils/filterModes";
-import { formatDimensionName } from "../../utils/cubeMeta";
+import { formatDimensionName, fieldCaption } from "../../utils/cubeMeta";
 import {
   setFieldDragPayload,
   readFieldDragPayload,
@@ -1198,7 +1198,7 @@ export function FilterRow({ filter, dimensionOptions, selectedValueOptions, onCh
 // itself is draggable so moving a filter to another zone doesn't require opening the popover
 // first, same pattern as HierarchicalCubePathSelect's own pills.
 function FilterPill({ filter, dimensionOptions, selectedValueOptions, onChange, onRemove, onDropReorder, onMoveTo }) {
-  const label = filter.field ? formatDimensionName(filter.field) : "New filter";
+  const label = filter.field ? fieldCaption(filter.field) : "New filter";
   return (
     // onDragOver/onDrop here, not on the <span> below: dropping ON this pill reorders/moves a
     // field onto it specifically (see handleFilterRowDrop) — same wrapper pattern as ValuePill.
@@ -1359,7 +1359,7 @@ function AxisGroupingEditor({ label, fields, dimensions, dateGroupings, numericG
         const isNumeric = fieldIsNumeric(field);
         return (
           <div key={field} className="flex flex-wrap items-center gap-2">
-            <span className="min-w-[10rem] text-sm text-ink">{formatDimensionName(field)}</span>
+            <span className="min-w-[10rem] text-sm text-ink" title={formatDimensionName(field)}>{fieldCaption(field)}</span>
             <select className={nativeSelectClass} value={mode} onChange={(e) => setMode(field, e.target.value)}>
               <option value="None">No grouping</option>
               {isNumeric ? (
@@ -1534,7 +1534,7 @@ export function FieldSortDialog({ field, axis, level, request, onChange, onBack,
   const singleField = axisFields.filter((f) => f !== MEASURES_PLACEHOLDER).length === 1;
   const rule = levelSorts.find((s) => s.level === level);
   const axisSort = request.sort?.axis === axis ? request.sort : null;
-  const fieldName = formatDimensionName(field);
+  const fieldName = fieldCaption(field);
 
   // Every Value field, for a field on either axis, wherever Σ Values sits — the backend matches a
   // measure's cells by caption since 2026-10-15 (it used to need Σ innermost in Columns, Rows only).
@@ -1970,9 +1970,9 @@ export function CalculatedItemDialog({ calculatedItems, rows, columns, onApply, 
   return (
     <div className="w-[30rem] max-w-full space-y-3">
       {/* A long field name is truncated (full name on hover) so the title stays on one line. */}
-      <p className="flex min-w-0 text-sm font-semibold text-ink" title={`Insert Calculated Item in "${formatDimensionName(field)}"`}>
+      <p className="flex min-w-0 text-sm font-semibold text-ink" title={`Insert Calculated Item in "${fieldCaption(field)}"`}>
         <span className="shrink-0">Insert Calculated Item in&nbsp;</span>
-        <span className="truncate">&quot;{formatDimensionName(field)}&quot;</span>
+        <span className="truncate">&quot;{fieldCaption(field)}&quot;</span>
       </p>
       <div className="grid grid-cols-[4.5rem_minmax(0,1fr)_5.5rem] items-center gap-2 text-xs">
         <label htmlFor="calc-item-name" className="font-medium text-muted">Name:</label>
@@ -2003,7 +2003,7 @@ export function CalculatedItemDialog({ calculatedItems, rows, columns, onApply, 
                   onClick={() => pickField(f)}
                   className={`block w-full truncate px-2 py-0.5 text-left text-xs ${field === f ? "bg-primary text-white" : "text-ink hover:bg-slate-100"}`}
                 >
-                  {formatDimensionName(f)}
+                  {fieldCaption(f)}
                 </button>
               </li>
             ))}
@@ -2427,7 +2427,7 @@ function ValuePill({
   // Excel's own distinction (see its real Value Field Settings dialog): "Source Name" is always
   // just the plain underlying field, "Age" — the aggregation-qualified "Sum of Age" is the
   // SEPARATE, editable "Custom Name", which defaults to that computed label until overridden.
-  const sourceName = isDimensionField ? formatDimensionName(v.field) : v.field;
+  const sourceName = isDimensionField ? fieldCaption(v.field) : v.field;
   // A dimension field (not a real cube measure) dropped into Values defaults to "<Aggregation> of
   // <field>" — Sum for a numeric field, Count otherwise (see moveField's own WHY comment) — and
   // can be changed via "Summarize Values By" below. Mirrors the backend's own naming exactly (see
@@ -2624,7 +2624,7 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows, col
   const allowsPrevious = usesBaseItem;
   const isDimensionField = v.field.startsWith("[");
   const dimensionAggregation = draft.dimensionAggregation ?? "Count";
-  const sourceName = isDimensionField ? formatDimensionName(v.field) : v.field;
+  const sourceName = isDimensionField ? fieldCaption(v.field) : v.field;
   const computedLabel = isDimensionField ? `${aggregationLabel(dimensionAggregation)} of ${sourceName}` : sourceName;
   const [panel, setPanel] = useState("settings");
   // Excel's real Value Field Settings dialog is two TABS ("Summarize Values By" / "Show Values
@@ -2788,7 +2788,7 @@ export function ValueFieldSettingsPanel({ v, onUpdate, onBack, onDone, rows, col
               <ListBox
                 className="h-28"
                 disabled={!usesBase}
-                options={[...rows, ...columns].filter((f) => f !== MEASURES_PLACEHOLDER).map((field) => ({ value: field, label: formatDimensionName(field) }))}
+                options={[...rows, ...columns].filter((f) => f !== MEASURES_PLACEHOLDER).map((field) => ({ value: field, label: fieldCaption(field) }))}
                 value={draft.baseField}
                 onSelect={(field) => patchDraft({ baseField: field, baseItem: allowsPrevious ? PREVIOUS_BASE_ITEM : "" })}
               />

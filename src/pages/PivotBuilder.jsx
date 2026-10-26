@@ -17,7 +17,7 @@ import PaneSplitter from "../components/layout/PaneSplitter";
 import { DEFAULT_PIVOT_OPTIONS } from "../utils/pivotOptions";
 import { onePerField } from "../utils/filterKinds";
 import { isFilterComplete } from "../utils/filterModes";
-import { formatDimensionName } from "../utils/cubeMeta";
+import { formatDimensionName, fieldCaptions } from "../utils/cubeMeta";
 import PivotChart from "../components/pivot/PivotChart";
 import { chartUnavailableReason } from "../utils/chartLayout";
 import { queryPivot } from "../services/pivotApi";
@@ -212,14 +212,20 @@ function readPersistedBuilderState() {
 // the field list (collapsed, or restored from a saved pivot) is formatted from its own identifier
 // instead of shown raw ("[Dim X].[Y].[Y]" — seen 2026-10-19), the same way Snapshot History labels it.
 // fieldLayouts: a field's Field Settings › Custom Name wins, as in Excel (2026-10-21, for Columns).
-function fieldLabels(fieldIds, dimensions, fieldLayouts = []) {
+// Since 2026-10-26 a field reads by its own caption, like Excel ("BU Short Name", not "Business
+// Unit.BU Short Name"); pivotFieldIds (every field of that PivotTable) lets two same-named fields
+// keep their full names instead (see fieldCaptions).
+function fieldLabels(fieldIds, dimensions, fieldLayouts = [], pivotFieldIds = fieldIds ?? []) {
   if (!fieldIds) return [];
+  const fullNameOf = (id) => dimensions.find((d) => d.field === id)?.displayName ?? formatDimensionName(id);
+  const captionOf = fieldCaptions(pivotFieldIds, fullNameOf);
   return fieldIds.map((id) =>
-    id === MEASURES_PLACEHOLDER
-      ? "Σ Values"
-      : (fieldLayouts.find((f) => f.field === id)?.customName || (dimensions.find((d) => d.field === id)?.displayName ?? formatDimensionName(id))),
+    id === MEASURES_PLACEHOLDER ? "Σ Values" : fieldLayouts.find((f) => f.field === id)?.customName || captionOf(id),
   );
 }
+
+// Every field of a PivotTable (Rows, Columns, Filters) — the set its captions are told apart within.
+const pivotFieldsOf = (q) => (q ? [...(q.rows ?? []), ...(q.columns ?? []), ...(q.filters ?? []).map((f) => f.field)] : []);
 
 // Which tables the "Available fields" picker actually works with, out of everything the cube's
 // schema has (302 tables as of 2026-09-27, mostly internal/system tables no business user needs).
@@ -1057,8 +1063,8 @@ export default function PivotBuilder() {
     result: queryResult,
     rows: query.rows,
     columns: query.columns,
-    rowFieldLabels: fieldLabels(query.rows, dimensions),
-    columnFieldLabels: fieldLabels(hideMeasuresLabelIfSingleValue(query.columns, query.values.length), dimensions, fieldLayouts),
+    rowFieldLabels: fieldLabels(query.rows, dimensions, [], pivotFieldsOf(query)),
+    columnFieldLabels: fieldLabels(hideMeasuresLabelIfSingleValue(query.columns, query.values.length), dimensions, fieldLayouts, pivotFieldsOf(query)),
     valueFields: displayValues,
     // Same layout as the live grid, so the export draws the same rows.
     layout: reportLayout,
@@ -1070,7 +1076,7 @@ export default function PivotBuilder() {
     pivotOptions,
     cellFormats,
     filters: query.filters,
-    filterFieldLabels: Object.fromEntries(query.filters.map((f) => [f.field, fieldLabels([f.field], dimensions)[0]])),
+    filterFieldLabels: Object.fromEntries(query.filters.map((f) => [f.field, fieldLabels([f.field], dimensions, [], pivotFieldsOf(query))[0]])),
     // A drilldown alone keeps its single ragged column; combined with other Rows fields
     // (Drilldown v3) it's a normal field slot, indented by member depth.
     ...(() => {
@@ -1127,7 +1133,7 @@ export default function PivotBuilder() {
         pages++;
       }
       if (pages === 0) throw new Error("None of the items has data.");
-      await downloadWorkbook(workbook, `${snapshotName.trim() || pivotOptions.name?.trim() || "Pivot"} - ${fieldLabels([field], dimensions)[0]}`);
+      await downloadWorkbook(workbook, `${snapshotName.trim() || pivotOptions.name?.trim() || "Pivot"} - ${fieldLabels([field], dimensions, [], pivotFieldsOf(request))[0]}`);
       setFilterPagesStatus(`${pages} page${pages === 1 ? "" : "s"} exported${truncated ? ` (first ${MAX_FILTER_PAGES} items only)` : ""}.`);
     } catch (err) {
       setFilterPagesStatus(null);
@@ -1356,7 +1362,7 @@ export default function PivotBuilder() {
                 // Report Filter fields = the Filters area's fields (one still at "(All)" too — it isn't
                 // in the query, but it's exactly the field Excel offers), not on Rows/Columns, and not
                 // a slicer's/timeline's (they aren't in the Report Filter area).
-                reportFilterFields: lastQuery ? reportFilterFieldsOf(request).map((field) => ({ field, label: fieldLabels([field], dimensions)[0] })) : [],
+                reportFilterFields: lastQuery ? reportFilterFieldsOf(request).map((field) => ({ field, label: fieldLabels([field], dimensions, [], pivotFieldsOf(request))[0] })) : [],
                 onShowReportFilterPages: handleShowReportFilterPages,
                 filterPagesStatus,
               }}
@@ -1386,8 +1392,8 @@ export default function PivotBuilder() {
               result={result}
               rows={lastQuery?.rows}
               columns={lastQuery?.columns}
-              rowFieldLabels={fieldLabels(lastQuery?.rows, dimensions)}
-              columnFieldLabels={fieldLabels(hideMeasuresLabelIfSingleValue(lastQuery?.columns, lastQuery?.values?.length ?? 0), dimensions, fieldLayouts)}
+              rowFieldLabels={fieldLabels(lastQuery?.rows, dimensions, [], pivotFieldsOf(lastQuery))}
+              columnFieldLabels={fieldLabels(hideMeasuresLabelIfSingleValue(lastQuery?.columns, lastQuery?.values?.length ?? 0), dimensions, fieldLayouts, pivotFieldsOf(lastQuery))}
               valueFields={displayValues}
               dimensions={dimensions}
               layout={reportLayout}

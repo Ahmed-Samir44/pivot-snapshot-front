@@ -21,7 +21,7 @@ import {
   deleteVersion,
   compareVersions,
 } from "../services/snapshotApi";
-import { formatDimensionName } from "../utils/cubeMeta";
+import { formatDimensionName, fieldCaptions } from "../utils/cubeMeta";
 import { hideMeasuresLabelIfSingleValue } from "../utils/measuresPlacement";
 import { DEFAULT_PIVOT_OPTIONS } from "../utils/pivotOptions";
 import { BUILDER_STATE_STORAGE_KEY } from "./PivotBuilder";
@@ -74,9 +74,17 @@ function parseBuilderState(builderStateJson) {
 
 // The column caption row's field names — a field's Custom Name (Field Settings) wins, as in the Builder.
 function columnCaptions(version, fieldLayouts = []) {
+  const captionOf = versionCaptions(version);
   return hideMeasuresLabelIfSingleValue(version.columns, version.values.length).map(
-    (id) => (fieldLayouts ?? []).find((f) => f.field === id)?.customName || formatDimensionName(id),
+    (id) => (fieldLayouts ?? []).find((f) => f.field === id)?.customName || captionOf(id),
   );
+}
+
+// A saved version's field captions, like the Builder's ("BU Short Name"; two same-named fields keep
+// their full names) — see fieldCaptions.
+function versionCaptions(version) {
+  const filters = parseBuilderState(version.builderStateJson)?.request?.filters ?? [];
+  return fieldCaptions([...version.rows, ...version.columns, ...filters.map((f) => f.field)], formatDimensionName);
 }
 
 // A plain Set-backed multi-select for one list — its own little state machine (toggle one, toggle
@@ -378,7 +386,7 @@ export default function SnapshotHistory() {
         result: previewVersion.result,
         rows: previewVersion.rows,
         columns: previewVersion.columns,
-        rowFieldLabels: previewVersion.rows.map(formatDimensionName),
+        rowFieldLabels: previewVersion.rows.map(versionCaptions(previewVersion)),
         columnFieldLabels: columnCaptions(previewVersion, parseBuilderState(previewVersion.builderStateJson)?.fieldLayouts),
         valueFields: previewVersion.values,
         filename: `${pivotName}_v${previewVersion.versionNumber}`,
@@ -396,7 +404,7 @@ export default function SnapshotHistory() {
         // Formats set on individual cells (Home › Number) when this version was saved.
         cellFormats: parseBuilderState(previewVersion.builderStateJson)?.cellFormats ?? null,
         filters: (parseBuilderState(previewVersion.builderStateJson)?.request?.filters ?? []).filter((f) => f.field),
-        filterFieldLabels: Object.fromEntries((parseBuilderState(previewVersion.builderStateJson)?.request?.filters ?? []).map((f) => [f.field, formatDimensionName(f.field)])),
+        filterFieldLabels: Object.fromEntries((parseBuilderState(previewVersion.builderStateJson)?.request?.filters ?? []).map((f) => [f.field, versionCaptions(previewVersion)(f.field)])),
       });
       setExportNotice(exported.pivotTable ? null : `Exported as values, not a PivotTable: ${exported.reason}.`);
     } catch (err) {
@@ -738,7 +746,7 @@ export default function SnapshotHistory() {
               result={previewVersion.result}
               rows={previewVersion.rows}
               columns={previewVersion.columns}
-              rowFieldLabels={previewVersion.rows.map(formatDimensionName)}
+              rowFieldLabels={previewVersion.rows.map(versionCaptions(previewVersion))}
               columnFieldLabels={columnCaptions(previewVersion, builderState?.fieldLayouts)}
               valueFields={previewVersion.values}
               layout={builderState?.reportLayout ?? "Tabular"}

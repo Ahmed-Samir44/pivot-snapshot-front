@@ -12,7 +12,7 @@ import { formatForColumn, isRedNegative } from "../../utils/numberFormat";
 import { DEFAULT_PIVOT_OPTIONS, cellText, filterAreaSlot, filterValueSummary } from "../../utils/pivotOptions";
 import { filterKind, setFieldFilter, FILTER_KIND_LABELS } from "../../utils/filterKinds";
 import { LABEL_FILTERS, VALUE_FILTERS, DATE_FILTERS, isLabelMode, isDateMode, datePeriodLabel, isRangeMode, isTop10Mode, top10Parts, isFilterComplete } from "../../utils/filterModes";
-import { formatDimensionName } from "../../utils/cubeMeta";
+import { formatDimensionName, fieldCaption } from "../../utils/cubeMeta";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
 import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys, collapseKey, buildColumnHeaderRows, computeLabelSpans } from "../../utils/pivotGridLayout";
 import { MEASURES_PLACEHOLDER, measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "../../utils/measuresPlacement";
@@ -65,7 +65,10 @@ function FilterHeaderRow({ filter, index, request, onChange, dimensionOptions, s
   return (
     <div className="flex items-stretch overflow-hidden rounded-lg border border-slate-200 bg-white" style={style}>
       <div className="flex w-40 shrink-0 items-center border-r border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-ink">
-        <span className="truncate">{formatDimensionName(filter.field)}</span>
+        {/* The field's own caption, like Excel ("Month"); the full name on hover. */}
+        <span className="truncate" title={formatDimensionName(filter.field)}>
+          {fieldCaption(filter.field)}
+        </span>
       </div>
       <Popover
         fullWidth

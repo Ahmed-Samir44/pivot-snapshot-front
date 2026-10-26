@@ -35,3 +35,29 @@ export function formatDimensionName(dimension) {
     .filter((part, index, arr) => part !== arr[index - 1]);
   return parts.join(".");
 }
+
+// A field's own caption, the way Excel labels an OLAP field in the PivotTable — "BU Short Name",
+// not "Business Unit.BU Short Name" (2026-10-26). formatDimensionName keeps the full
+// "Table.Field" name for tooltips and for telling same-named fields apart (see fieldCaptions).
+// Accepts a raw MDX field id or an already formatted "Table.Field" display name.
+export function fieldCaption(dimension) {
+  if (dimension === MEASURES_PLACEHOLDER) return "Σ Values";
+  const text = String(dimension ?? "");
+  const segments = parseCubeBracketSegments(text);
+  if (segments.length > 0) return segments[segments.length - 1];
+  return text.includes(".") ? text.slice(text.lastIndexOf(".") + 1) : text;
+}
+
+// Captions for the fields of one PivotTable: each field's short caption, except where two
+// different fields would read the same ("Date" from two date tables) — those keep their full
+// "Table.Field" name so the headers stay unambiguous. fullNameOf(id) gives that full name.
+export function fieldCaptions(ids, fullNameOf = formatDimensionName) {
+  const unique = [...new Set(ids.filter((id) => id && id !== MEASURES_PLACEHOLDER))];
+  const counts = new Map();
+  for (const id of unique) counts.set(fieldCaption(fullNameOf(id)), (counts.get(fieldCaption(fullNameOf(id))) ?? 0) + 1);
+  return (id) => {
+    if (id === MEASURES_PLACEHOLDER) return "Σ Values";
+    const caption = fieldCaption(fullNameOf(id));
+    return (counts.get(caption) ?? 0) > 1 ? fullNameOf(id) : caption;
+  };
+}

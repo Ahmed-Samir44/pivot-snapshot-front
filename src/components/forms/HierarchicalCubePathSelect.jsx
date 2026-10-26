@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import Select from "react-select";
 import { Plus, ChevronDown } from "lucide-react";
 import Popover from "./Popover";
-import { parseCubeBracketSegments, formatCubeBracketLabel, formatDimensionName } from "../../utils/cubeMeta";
+import { parseCubeBracketSegments, formatCubeBracketLabel, formatDimensionName, fieldCaption } from "../../utils/cubeMeta";
 import { setFieldDragPayload, readFieldDragPayload } from "../../utils/dragDrop";
 import { useFieldDragActive } from "../../utils/useFieldDragActive";
 import { MEASURES_PLACEHOLDER } from "../../utils/measuresPlacement";
@@ -136,7 +136,10 @@ function PlacedFieldPill({
             className={`flex w-full items-center justify-between gap-1 rounded border px-2 py-1.5 text-left text-xs font-medium text-ink shadow-sm hover:bg-slate-50 ${open ? "border-primary bg-primary-50 ring-1 ring-primary/40" : "border-slate-300 bg-white"}`}
           >
             {/* A field's Custom Name replaces its name in the Rows area too, like Excel's field list. */}
-            <span className="min-w-0 truncate">{currentLayout.customName || formatDimensionName(fullPath)}</span>
+            {/* A field reads by its own caption, like Excel's areas ("Country Name"); full name on hover. */}
+            <span className="min-w-0 truncate" title={formatDimensionName(fullPath)}>
+              {currentLayout.customName || fieldCaption(fullPath)}
+            </span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted" />
           </button>
         )}
@@ -168,7 +171,7 @@ function PlacedFieldPill({
                   <input
                     type="text"
                     className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
-                    placeholder={formatDimensionName(fullPath)}
+                    placeholder={fieldCaption(fullPath)}
                     value={currentLayout.customName ?? ""}
                     onChange={(e) => fieldLayout.onChange(fullPath, { customName: e.target.value || null })}
                   />
