@@ -1166,26 +1166,68 @@ export default function PivotGrid({
   // used to vanish during every refresh and come back reset (a timeline switched to Years jumped
   // back to Months and re-loaded its items — 2026-10-21, found by the feature test). Excel keeps
   // them on screen while it refreshes.
-  // Floating slicer/timeline layouts (see FloatingWidget): stored per field; a new widget is
-  // cascaded at the right of the sheet area, the way Excel drops a new slicer onto the sheet.
+  // Floating slicer/timeline layouts (see FloatingWidget), stored per field once moved or resized.
+  // Until then a widget sits BESIDE the PivotTable, to its right, the widgets stacked under each other
+  // (a new column when the sheet runs out of height) — they used to be dropped at the sheet's right
+  // edge and covered the table (2026-10-26, "why is everything on top of each other"). Only when
+  // there's no room beside the table at all does one overlap it, as in Excel; dragging it anywhere
+  // keeps it there.
   const [widgetLayouts, setWidgetLayouts] = useState(readWidgetLayouts);
   const [widgetOrder, setWidgetOrder] = useState([]);
   const widgetLayerRef = useRef(null);
-  const [layerWidth, setLayerWidth] = useState(0);
+  const [sheetBox, setSheetBox] = useState({ width: 0, height: 0, tableRight: 0, tableTop: 0 });
+  const hasResult = Boolean(result);
   useEffect(() => {
-    const el = widgetLayerRef.current;
-    if (!el) return undefined;
-    const observer = new ResizeObserver(() => setLayerWidth(el.clientWidth));
-    observer.observe(el);
+    const layer = widgetLayerRef.current;
+    if (!layer) return undefined;
+    const measure = () => {
+      const l = layer.getBoundingClientRect();
+      const t = gridRef.current?.getBoundingClientRect();
+      setSheetBox({
+        width: layer.clientWidth,
+        height: layer.clientHeight,
+        tableRight: t ? Math.round(t.right - l.left) : 0,
+        tableTop: t ? Math.max(0, Math.round(t.top - l.top)) : 0,
+      });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(layer);
+    if (gridRef.current) observer.observe(gridRef.current);
     return () => observer.disconnect();
-  }, [request?.slicerFields?.length, request?.timelineFields?.length]);
-  const layoutOf = (field, index, kind) => {
-    const stored = widgetLayouts[field];
-    if (stored) return stored;
-    const w = kind === "timeline" ? 544 : 208;
-    const h = kind === "timeline" ? 150 : 260;
-    return { x: Math.max(0, (layerWidth || 1200) - w - 24 - index * 28), y: 8 + index * 28, w, h };
-  };
+  }, [request?.slicerFields?.length, request?.timelineFields?.length, hasResult]);
+  const defaultLayouts = (() => {
+    const widgets = [
+      ...(request?.slicerFields ?? []).map((field) => ({ field, w: 208, h: 260, minW: 140 })),
+      ...(request?.timelineFields ?? []).map((field) => ({ field, w: 544, h: 150, minW: 260 })),
+    ];
+    const gap = 12;
+    const top = sheetBox.tableTop;
+    const sheetWidth = sheetBox.width || 1200;
+    const sheetHeight = sheetBox.height || 800;
+    let x = sheetBox.tableRight ? sheetBox.tableRight + 16 : 16;
+    let y = top;
+    let columnWidth = 0;
+    const out = {};
+    for (const { field, w: fullWidth, h, minW } of widgets) {
+      if (widgetLayouts[field]) continue;
+      if (y > top && y + h > sheetHeight) {
+        x += columnWidth + gap;
+        y = top;
+        columnWidth = 0;
+      }
+      // Too wide for the room beside the table: narrower (down to its minimum) to fit there; with no
+      // room at all, kept inside the sheet over the table, as Excel's would be.
+      const room = sheetWidth - x - 8;
+      const w = fullWidth <= room ? fullWidth : Math.max(minW, room);
+      const left = x + w > sheetWidth ? Math.max(0, sheetWidth - w - 8) : x;
+      out[field] = { x: left, y, w, h };
+      y += h + gap;
+      columnWidth = Math.max(columnWidth, w);
+    }
+    return out;
+  })();
+  const layoutOf = (field) => widgetLayouts[field] ?? defaultLayouts[field] ?? { x: 16, y: 16, w: 208, h: 260 };
   const saveLayout = (field, layout) =>
     setWidgetLayouts((current) => {
       const next = { ...current, [field]: layout };
@@ -1214,12 +1256,12 @@ export default function PivotGrid({
           // the table's sticky header (z-30) — at the same level the table, drawn later, covered the
           // widgets — and below popovers and menus (z-50).
           <div ref={widgetLayerRef} className="pointer-events-none absolute inset-0 z-40">
-            {request.slicerFields.map((field, index) => {
+            {request.slicerFields.map((field) => {
               const filter = request.filters.find((f) => f.field === field) ?? null;
               return (
                 <FloatingWidget
                   key={field}
-                  layout={layoutOf(field, index, "slicer")}
+                  layout={layoutOf(field)}
                   onLayoutChange={(layout) => saveLayout(field, layout)}
                   zIndex={zOf(field)}
                   onFocus={() => bringToFront(field)}
@@ -1250,12 +1292,12 @@ export default function PivotGrid({
             })}
             {/* Excel's own Timeline control (Insert Timeline, PivotToolbar.jsx) — same relationship
                 to request.filters as the slicers, see Timeline.jsx's own WHY comment. */}
-            {request.timelineFields.map((field, index) => {
+            {request.timelineFields.map((field) => {
               const filter = request.filters.find((f) => f.field === field) ?? null;
               return (
                 <FloatingWidget
                   key={field}
-                  layout={layoutOf(field, request.slicerFields.length + index, "timeline")}
+                  layout={layoutOf(field)}
                   onLayoutChange={(layout) => saveLayout(field, layout)}
                   zIndex={zOf(field)}
                   onFocus={() => bringToFront(field)}
