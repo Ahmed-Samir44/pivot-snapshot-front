@@ -511,6 +511,68 @@ function cellHasDetails(request, valueField, row, column) {
   );
 }
 
+// Excel's slicers and timelines are floating objects on the sheet (2026-10-26, the user: "I need
+// everything like Excel"): drag one by its header, resize it from its bottom-right corner, click it
+// to bring it to the front. Its position and size are remembered per field in this browser.
+const WIDGET_LAYOUT_KEY = "pivotSnapshot.widgetLayout";
+function readWidgetLayouts() {
+  try {
+    return JSON.parse(localStorage.getItem(WIDGET_LAYOUT_KEY) ?? "{}") ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function FloatingWidget({ layout, onLayoutChange, zIndex, onFocus, minWidth, minHeight, children }) {
+  const ref = useRef(null);
+  const latest = useRef(layout);
+  latest.current = layout;
+  // A resize from the corner is the browser's (CSS resize) — saved once it settles.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    let timer = null;
+    const observer = new ResizeObserver(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const { width, height } = el.getBoundingClientRect();
+        const current = latest.current;
+        if (Math.abs(width - current.w) > 2 || Math.abs(height - current.h) > 2) onLayoutChange({ ...current, w: Math.round(width), h: Math.round(height) });
+      }, 150);
+    });
+    observer.observe(el);
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+    };
+    // onLayoutChange is rebuilt each render; the element is what's observed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const startDrag = (e) => {
+    onFocus();
+    if (e.button !== 0 || !e.target.closest("[data-drag-handle]") || e.target.closest("button, select, input")) return;
+    e.preventDefault();
+    const start = { x: e.clientX, y: e.clientY, left: layout.x, top: layout.y };
+    const move = (ev) => onLayoutChange({ ...latest.current, x: Math.max(0, start.left + ev.clientX - start.x), y: Math.max(0, start.top + ev.clientY - start.y) });
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  return (
+    <div
+      ref={ref}
+      onPointerDown={startDrag}
+      className="pointer-events-auto absolute overflow-hidden rounded-lg shadow-lg"
+      style={{ left: layout.x, top: layout.y, width: layout.w, height: layout.h, zIndex, resize: "both", minWidth, minHeight }}
+    >
+      {children}
+    </div>
+  );
+}
+
 // Excel's right-click menu on a ROW LABEL (2026-10-20): Copy, Sort, Filter (Keep Only / Hide /
 // Clear Filter From), Expand/Collapse (the item, the entire field), Move (Up / Down / To Beginning /
 // To End — a manual order, LevelSort.CustomOrder), Remove the field. Flat sections instead of
@@ -1104,6 +1166,39 @@ export default function PivotGrid({
   // used to vanish during every refresh and come back reset (a timeline switched to Years jumped
   // back to Months and re-loaded its items — 2026-10-21, found by the feature test). Excel keeps
   // them on screen while it refreshes.
+  // Floating slicer/timeline layouts (see FloatingWidget): stored per field; a new widget is
+  // cascaded at the right of the sheet area, the way Excel drops a new slicer onto the sheet.
+  const [widgetLayouts, setWidgetLayouts] = useState(readWidgetLayouts);
+  const [widgetOrder, setWidgetOrder] = useState([]);
+  const widgetLayerRef = useRef(null);
+  const [layerWidth, setLayerWidth] = useState(0);
+  useEffect(() => {
+    const el = widgetLayerRef.current;
+    if (!el) return undefined;
+    const observer = new ResizeObserver(() => setLayerWidth(el.clientWidth));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [request?.slicerFields?.length, request?.timelineFields?.length]);
+  const layoutOf = (field, index, kind) => {
+    const stored = widgetLayouts[field];
+    if (stored) return stored;
+    const w = kind === "timeline" ? 544 : 208;
+    const h = kind === "timeline" ? 150 : 260;
+    return { x: Math.max(0, (layerWidth || 1200) - w - 24 - index * 28), y: 8 + index * 28, w, h };
+  };
+  const saveLayout = (field, layout) =>
+    setWidgetLayouts((current) => {
+      const next = { ...current, [field]: layout };
+      try {
+        localStorage.setItem(WIDGET_LAYOUT_KEY, JSON.stringify(next));
+      } catch {
+        // Not remembered — still applies on this page.
+      }
+      return next;
+    });
+  const bringToFront = (field) => setWidgetOrder((order) => [...order.filter((f) => f !== field), field]);
+  const zOf = (field) => 30 + Math.max(0, widgetOrder.indexOf(field));
+
   const filterWidgets = (
     <>
         {/* Excel's own Slicer control (Insert Slicer, PivotToolbar.jsx) — a separate button-grid
@@ -1114,12 +1209,23 @@ export default function PivotGrid({
             rows just below — Excel never shows both a Slicer AND a Report Filter row for the same
             field at once. */}
         {request && onChange && (request.slicerFields.length > 0 || request.timelineFields.length > 0) && (
-          // One strip for every slicer and timeline, side by side like Excel's floating controls —
-          // they used to be two stacked rows that pushed the PivotTable down (2026-10-25).
-          <div className="mb-2 flex flex-wrap items-start gap-2">
-            {request.slicerFields.map((field) => {
+          // A layer over the whole sheet area: each slicer/timeline floats on it (FloatingWidget) like
+          // Excel's — the layer itself lets clicks through to the PivotTable underneath. z-40: above
+          // the table's sticky header (z-30) — at the same level the table, drawn later, covered the
+          // widgets — and below popovers and menus (z-50).
+          <div ref={widgetLayerRef} className="pointer-events-none absolute inset-0 z-40">
+            {request.slicerFields.map((field, index) => {
               const filter = request.filters.find((f) => f.field === field) ?? null;
               return (
+                <FloatingWidget
+                  key={field}
+                  layout={layoutOf(field, index, "slicer")}
+                  onLayoutChange={(layout) => saveLayout(field, layout)}
+                  zIndex={zOf(field)}
+                  onFocus={() => bringToFront(field)}
+                  minWidth={140}
+                  minHeight={110}
+                >
                 <Slicer
                   key={field}
                   field={field}
@@ -1139,13 +1245,23 @@ export default function PivotGrid({
                     })
                   }
                 />
+                </FloatingWidget>
               );
             })}
             {/* Excel's own Timeline control (Insert Timeline, PivotToolbar.jsx) — same relationship
                 to request.filters as the slicers, see Timeline.jsx's own WHY comment. */}
-            {request.timelineFields.map((field) => {
+            {request.timelineFields.map((field, index) => {
               const filter = request.filters.find((f) => f.field === field) ?? null;
               return (
+                <FloatingWidget
+                  key={field}
+                  layout={layoutOf(field, request.slicerFields.length + index, "timeline")}
+                  onLayoutChange={(layout) => saveLayout(field, layout)}
+                  zIndex={zOf(field)}
+                  onFocus={() => bringToFront(field)}
+                  minWidth={260}
+                  minHeight={120}
+                >
                 <Timeline
                   key={field}
                   field={field}
@@ -1165,6 +1281,7 @@ export default function PivotGrid({
                     })
                   }
                 />
+                </FloatingWidget>
               );
             })}
           </div>

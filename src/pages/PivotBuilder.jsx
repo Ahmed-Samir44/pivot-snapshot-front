@@ -1388,112 +1388,117 @@ export default function PivotBuilder() {
                 onClose={() => setShowPivotOptions(false)}
               />
             )}
-            <PivotGrid
-              result={result}
-              rows={lastQuery?.rows}
-              columns={lastQuery?.columns}
-              rowFieldLabels={fieldLabels(lastQuery?.rows, dimensions, [], pivotFieldsOf(lastQuery))}
-              columnFieldLabels={fieldLabels(hideMeasuresLabelIfSingleValue(lastQuery?.columns, lastQuery?.values?.length ?? 0), dimensions, fieldLayouts, pivotFieldsOf(lastQuery))}
-              valueFields={displayValues}
-              dimensions={dimensions}
-              layout={reportLayout}
-              repeatItemLabels={repeatItemLabels}
-              fieldLayouts={fieldLayouts}
-              // Real Excel's per-member OLAP drilldown (PLAN 8, EXPERIMENTAL) — keyed off `request`
-              // (not lastQuery) like the Sort/Filter menus just below: clicking +/- edits the LIVE
-              // expanded-member set and re-runs the query immediately (same auto-run effect as every
-              // other field edit), it isn't a display-only toggle.
-              rowsHierarchyDrilldown={request.rowsHierarchyDrilldown}
-              drilldownSubtotals={request.subtotals}
-              // Whether the member on this row is expanded — per outer item when the drilldown sits
-              // after other Rows fields (Drilldown v3), else from the context-free list.
-              isDrilldownMemberExpanded={(uniqueName, row) => {
-                const current = request.rowsHierarchyDrilldown;
-                if (!current) return false;
-                const slot = row?.drill?.level ?? 0;
-                if (row?.drill && slot > 0) {
-                  const outer = outerKey(row.uniqueNames.slice(0, slot));
-                  return (current.scopedExpansions ?? []).some((e) => outerKey(e.outerUniqueNames) === outer && e.memberUniqueName === uniqueName);
-                }
-                return current.expandedMemberUniqueNames.includes(uniqueName);
-              }}
-              onToggleDrilldownMember={(uniqueName, row) => {
-                const current = request.rowsHierarchyDrilldown;
-                if (!current) return;
-                // Drilldown v3: combined with Rows fields BEFORE the slot, the expansion belongs to
-                // the clicked row's outer item (real Excel expands per outer item) — stored in
-                // scopedExpansions with the ancestry the backend reported in row.drill.
-                const slot = row?.drill?.level ?? 0;
-                if (row?.drill && slot > 0) {
-                  const outerUniqueNames = row.uniqueNames.slice(0, slot);
-                  const scoped = current.scopedExpansions ?? [];
-                  const isThis = (e) => outerKey(e.outerUniqueNames) === outerKey(outerUniqueNames) && e.memberUniqueName === uniqueName;
-                  const nextScoped = scoped.some(isThis)
-                    ? scoped.filter((e) => !isThis(e))
-                    : [...scoped, { outerUniqueNames, memberUniqueName: uniqueName, ancestors: row.drill.ancestorUniqueNames }];
-                  editRequest({ ...editingRequest, rowsHierarchyDrilldown: { ...current, scopedExpansions: nextScoped } });
-                  return;
-                }
-                // Like Excel, collapsing a member REMEMBERS the expansions under it (Drilldown v2,
-                // 2026-10-14): only this member leaves the expanded list; its expanded descendants
-                // stay, and the query just skips them while an ancestor is collapsed (see
-                // visibleDrilldownExpansions). Expanding records the member's ancestry — the
-                // backend's row.drill when combined with other fields, else the drilldown-alone
-                // row's own uniqueNames (its full ancestry, see CubeQueryService.BuildDrilldownHeaders).
-                const collapsing = current.expandedMemberUniqueNames.includes(uniqueName);
-                const ancestors = { ...(current.expandedAncestors ?? {}) };
-                if (!collapsing) {
-                  if (row?.drill) {
-                    ancestors[uniqueName] = row.drill.ancestorUniqueNames;
-                  } else {
-                    const found = (result?.rowHeaders ?? []).find((h) => (h.uniqueNames ?? []).includes(uniqueName));
-                    const names = found?.uniqueNames ?? [];
-                    ancestors[uniqueName] = names.slice(0, names.indexOf(uniqueName));
+            {/* The sheet area: slicers and timelines float over it like Excel's (absolute, see
+                PivotGrid's FloatingWidget), so it is the positioning box — the ribbon above and the
+                Field List beside it stay where they are (2026-10-26). */}
+            <div className="relative flex min-h-0 flex-1 flex-col gap-2">
+              <PivotGrid
+                result={result}
+                rows={lastQuery?.rows}
+                columns={lastQuery?.columns}
+                rowFieldLabels={fieldLabels(lastQuery?.rows, dimensions, [], pivotFieldsOf(lastQuery))}
+                columnFieldLabels={fieldLabels(hideMeasuresLabelIfSingleValue(lastQuery?.columns, lastQuery?.values?.length ?? 0), dimensions, fieldLayouts, pivotFieldsOf(lastQuery))}
+                valueFields={displayValues}
+                dimensions={dimensions}
+                layout={reportLayout}
+                repeatItemLabels={repeatItemLabels}
+                fieldLayouts={fieldLayouts}
+                // Real Excel's per-member OLAP drilldown (PLAN 8, EXPERIMENTAL) — keyed off `request`
+                // (not lastQuery) like the Sort/Filter menus just below: clicking +/- edits the LIVE
+                // expanded-member set and re-runs the query immediately (same auto-run effect as every
+                // other field edit), it isn't a display-only toggle.
+                rowsHierarchyDrilldown={request.rowsHierarchyDrilldown}
+                drilldownSubtotals={request.subtotals}
+                // Whether the member on this row is expanded — per outer item when the drilldown sits
+                // after other Rows fields (Drilldown v3), else from the context-free list.
+                isDrilldownMemberExpanded={(uniqueName, row) => {
+                  const current = request.rowsHierarchyDrilldown;
+                  if (!current) return false;
+                  const slot = row?.drill?.level ?? 0;
+                  if (row?.drill && slot > 0) {
+                    const outer = outerKey(row.uniqueNames.slice(0, slot));
+                    return (current.scopedExpansions ?? []).some((e) => outerKey(e.outerUniqueNames) === outer && e.memberUniqueName === uniqueName);
                   }
-                }
-                const expanded = collapsing
-                  ? current.expandedMemberUniqueNames.filter((u) => u !== uniqueName)
-                  : [...current.expandedMemberUniqueNames, uniqueName];
-                editRequest({ ...editingRequest, rowsHierarchyDrilldown: { ...current, expandedMemberUniqueNames: expanded, expandedAncestors: ancestors } });
-              }}
-              // Columns drilldown (C4): its slot in the DISPLAYED columns (lastQuery), and +/- on the
-              // header cells. Expansions are per outer item when real Columns fields sit before the
-              // slot — their members come from the clicked header's own column (Σ Values skipped).
-              columnsDrillSlot={lastQuery?.columnsHierarchyDrilldown ? lastQuery.columns.indexOf(lastQuery.columnsHierarchyDrilldown.topLevelField) : -1}
-              isColumnDrilldownMemberExpanded={(uniqueName, column) => {
-                const current = request.columnsHierarchyDrilldown;
-                if (!current || !lastQuery) return false;
-                const outer = columnsOuterIndexes(lastQuery.columns, current).map((i) => column?.uniqueNames?.[i]);
-                return isDrilldownExpansionOn(current, uniqueName, outer);
-              }}
-              onToggleColumnDrilldownMember={(uniqueName, column, ancestors) => {
-                const current = request.columnsHierarchyDrilldown;
-                if (!current || !lastQuery) return;
-                const outer = columnsOuterIndexes(lastQuery.columns, current).map((i) => column?.uniqueNames?.[i]);
-                if (outer.some((u) => !u)) return;
-                editRequest({ ...editingRequest, columnsHierarchyDrilldown: toggleDrilldownExpansion(current, uniqueName, outer, ancestors) });
-              }}
-              // request/onChange, not lastQuery: a header's Sort/Filter menu edits the LIVE field
-              // config (same request/setRequest pair FieldPicker already uses) — rows/columns above
-              // stay keyed off lastQuery so the field identifiers always match what's actually
-              // displayed, but the edit itself targets the live request, same as every other
-              // Sort/Filter control in FieldPicker (still needs Run query to take effect — this isn't
-              // a special case, just a new entry point into the same existing flow).
-              request={editingRequest}
-              onChange={editRequest}
-              onRefresh={runQuery}
-              onHideFieldList={() => setShowFieldList((v) => !v)}
-              fieldListShown={showFieldList}
-              pivotOptions={pivotOptions}
-              onOpenPivotTableOptions={() => setShowPivotOptions(true)}
-              fill
-              zoom={zoom}
-              onSelectionStatsChange={setSelectionSummary}
-              cellFormats={cellFormats}
-              onCellFormatsChange={setCellFormats}
-              commandRef={gridCommandRef}
-              loading={loading}
-            />
+                  return current.expandedMemberUniqueNames.includes(uniqueName);
+                }}
+                onToggleDrilldownMember={(uniqueName, row) => {
+                  const current = request.rowsHierarchyDrilldown;
+                  if (!current) return;
+                  // Drilldown v3: combined with Rows fields BEFORE the slot, the expansion belongs to
+                  // the clicked row's outer item (real Excel expands per outer item) — stored in
+                  // scopedExpansions with the ancestry the backend reported in row.drill.
+                  const slot = row?.drill?.level ?? 0;
+                  if (row?.drill && slot > 0) {
+                    const outerUniqueNames = row.uniqueNames.slice(0, slot);
+                    const scoped = current.scopedExpansions ?? [];
+                    const isThis = (e) => outerKey(e.outerUniqueNames) === outerKey(outerUniqueNames) && e.memberUniqueName === uniqueName;
+                    const nextScoped = scoped.some(isThis)
+                      ? scoped.filter((e) => !isThis(e))
+                      : [...scoped, { outerUniqueNames, memberUniqueName: uniqueName, ancestors: row.drill.ancestorUniqueNames }];
+                    editRequest({ ...editingRequest, rowsHierarchyDrilldown: { ...current, scopedExpansions: nextScoped } });
+                    return;
+                  }
+                  // Like Excel, collapsing a member REMEMBERS the expansions under it (Drilldown v2,
+                  // 2026-10-14): only this member leaves the expanded list; its expanded descendants
+                  // stay, and the query just skips them while an ancestor is collapsed (see
+                  // visibleDrilldownExpansions). Expanding records the member's ancestry — the
+                  // backend's row.drill when combined with other fields, else the drilldown-alone
+                  // row's own uniqueNames (its full ancestry, see CubeQueryService.BuildDrilldownHeaders).
+                  const collapsing = current.expandedMemberUniqueNames.includes(uniqueName);
+                  const ancestors = { ...(current.expandedAncestors ?? {}) };
+                  if (!collapsing) {
+                    if (row?.drill) {
+                      ancestors[uniqueName] = row.drill.ancestorUniqueNames;
+                    } else {
+                      const found = (result?.rowHeaders ?? []).find((h) => (h.uniqueNames ?? []).includes(uniqueName));
+                      const names = found?.uniqueNames ?? [];
+                      ancestors[uniqueName] = names.slice(0, names.indexOf(uniqueName));
+                    }
+                  }
+                  const expanded = collapsing
+                    ? current.expandedMemberUniqueNames.filter((u) => u !== uniqueName)
+                    : [...current.expandedMemberUniqueNames, uniqueName];
+                  editRequest({ ...editingRequest, rowsHierarchyDrilldown: { ...current, expandedMemberUniqueNames: expanded, expandedAncestors: ancestors } });
+                }}
+                // Columns drilldown (C4): its slot in the DISPLAYED columns (lastQuery), and +/- on the
+                // header cells. Expansions are per outer item when real Columns fields sit before the
+                // slot — their members come from the clicked header's own column (Σ Values skipped).
+                columnsDrillSlot={lastQuery?.columnsHierarchyDrilldown ? lastQuery.columns.indexOf(lastQuery.columnsHierarchyDrilldown.topLevelField) : -1}
+                isColumnDrilldownMemberExpanded={(uniqueName, column) => {
+                  const current = request.columnsHierarchyDrilldown;
+                  if (!current || !lastQuery) return false;
+                  const outer = columnsOuterIndexes(lastQuery.columns, current).map((i) => column?.uniqueNames?.[i]);
+                  return isDrilldownExpansionOn(current, uniqueName, outer);
+                }}
+                onToggleColumnDrilldownMember={(uniqueName, column, ancestors) => {
+                  const current = request.columnsHierarchyDrilldown;
+                  if (!current || !lastQuery) return;
+                  const outer = columnsOuterIndexes(lastQuery.columns, current).map((i) => column?.uniqueNames?.[i]);
+                  if (outer.some((u) => !u)) return;
+                  editRequest({ ...editingRequest, columnsHierarchyDrilldown: toggleDrilldownExpansion(current, uniqueName, outer, ancestors) });
+                }}
+                // request/onChange, not lastQuery: a header's Sort/Filter menu edits the LIVE field
+                // config (same request/setRequest pair FieldPicker already uses) — rows/columns above
+                // stay keyed off lastQuery so the field identifiers always match what's actually
+                // displayed, but the edit itself targets the live request, same as every other
+                // Sort/Filter control in FieldPicker (still needs Run query to take effect — this isn't
+                // a special case, just a new entry point into the same existing flow).
+                request={editingRequest}
+                onChange={editRequest}
+                onRefresh={runQuery}
+                onHideFieldList={() => setShowFieldList((v) => !v)}
+                fieldListShown={showFieldList}
+                pivotOptions={pivotOptions}
+                onOpenPivotTableOptions={() => setShowPivotOptions(true)}
+                fill
+                zoom={zoom}
+                onSelectionStatsChange={setSelectionSummary}
+                cellFormats={cellFormats}
+                onCellFormatsChange={setCellFormats}
+                commandRef={gridCommandRef}
+                loading={loading}
+              />
+              </div>
           </div>
 
           {/* The chart takes its natural height under the grid, capped (and scrolling) so it can't

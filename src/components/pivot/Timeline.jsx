@@ -206,15 +206,18 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
   // ("MONTHS ▾") under it; years over upper-case period names; every period bar filled while
   // unfiltered; click, Shift+click or DRAG across periods to pick a range; a thin scrollbar and the
   // mouse wheel to scroll; right-click for Clear Filter / Remove Timeline (Excel has no close button).
-  // It opens on the selection, or on the latest periods when nothing is selected (it opened on the
-  // oldest month, Jan 2020).
+  // It opens like Excel's: on the first periods when nothing is selected, on the selection otherwise.
   const stripRef = useRef(null);
   const bucketRefs = useRef(new Map());
   const [menu, setMenu] = useState(null);
   useEffect(() => {
     const strip = stripRef.current;
     if (!strip || buckets.length === 0) return;
-    const target = bucketRefs.current.get(buckets[rangeHi ?? buckets.length - 1]);
+    if (rangeLo === null) {
+      strip.scrollLeft = 0;
+      return;
+    }
+    const target = bucketRefs.current.get(buckets[rangeHi]);
     if (target) strip.scrollLeft = Math.max(0, target.offsetLeft + target.offsetWidth - strip.clientWidth + 16);
     // Only when the periods change (load, level switch) — not on every click inside the strip.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -266,13 +269,14 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
 
   return (
     <div
-      className="flex w-[34rem] max-w-full select-none flex-col rounded-lg border border-slate-300 bg-white shadow-sm"
+      className="flex h-full w-full select-none flex-col rounded-lg border border-slate-300 bg-white"
       onContextMenu={(e) => {
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY });
       }}
     >
-      <div className="flex items-center justify-between gap-2 px-2.5 pt-2">
+      {/* The header rows are where the floating timeline is dragged from (PivotGrid's FloatingWidget). */}
+      <div data-drag-handle className="flex cursor-move items-center justify-between gap-2 px-2.5 pt-2">
         <span className="truncate text-sm font-semibold text-ink" title={displayName}>
           {title}
         </span>
@@ -286,7 +290,7 @@ export default function Timeline({ field, displayName, filter, onChange, onRemov
           <FilterX className="h-4 w-4" />
         </button>
       </div>
-      <div className="flex items-center justify-between gap-2 px-2.5 pb-1">
+      <div data-drag-handle className="flex cursor-move items-center justify-between gap-2 px-2.5 pb-1">
         <span className="truncate text-xs text-ink">{selectionCaption}</span>
         <select
           value={granularity}

@@ -70,13 +70,14 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
 
   return (
     <div
-      className="flex w-52 shrink-0 flex-col rounded-lg border border-slate-300 bg-white shadow-sm"
+      className="flex h-full w-full flex-col rounded-lg border border-slate-300 bg-white"
       onContextMenu={(e) => {
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY });
       }}
     >
-      <div className="flex items-center justify-between gap-2 px-2.5 pb-1.5 pt-2">
+      {/* The header is where the floating slicer is dragged from (PivotGrid's FloatingWidget). */}
+      <div data-drag-handle className="flex cursor-move items-center justify-between gap-2 px-2.5 pb-1.5 pt-2">
         <span className="truncate text-sm font-semibold text-ink" title={displayName}>
           {title}
         </span>
@@ -97,7 +98,7 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
       </div>
 
       <div
-        className="custom-scrollbar flex max-h-52 flex-col gap-1 overflow-y-auto px-2 pb-2"
+        className="custom-scrollbar flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 pb-2"
         onKeyDown={(e) => {
           if (e.altKey && e.key.toLowerCase() === "s") setMultiSelect((v) => !v);
           if (e.altKey && e.key.toLowerCase() === "c") clearFilter();
