@@ -540,6 +540,18 @@ export default function PivotBuilder() {
   // displayed, so (like reportLayout/repeatItemLabels) they must stay out of structuralSignature or
   // every per-field display toggle would needlessly re-query the live cube.
   const [fieldLayouts, setFieldLayouts] = useState(() => readPersistedBuilderState()?.fieldLayouts ?? []);
+  // Floating slicer/timeline positions and sizes ({ field: { x, y, w, h } }) — like Excel keeps a
+  // slicer's place in the workbook, they persist with the Builder's state and are saved with the
+  // snapshot (2026-10-26). The old per-browser key is read once, for positions made before this.
+  const [widgetLayouts, setWidgetLayouts] = useState(() => {
+    const saved = readPersistedBuilderState()?.widgetLayouts;
+    if (saved) return saved;
+    try {
+      return JSON.parse(localStorage.getItem("pivotSnapshot.widgetLayout") ?? "{}") ?? {};
+    } catch {
+      return {};
+    }
+  });
   // Excel's PivotTable Options > Layout & Format (2026-10-18): name, merged labels, empty/error cell
   // text, report filter area layout. Display-only, so — like fieldLayouts — a sibling of `request`,
   // never part of structuralSignature (a change never re-queries the cube). Merged with the
@@ -888,13 +900,13 @@ export default function PivotBuilder() {
     try {
       localStorage.setItem(
         BUILDER_STATE_STORAGE_KEY,
-        JSON.stringify({ request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts, pivotOptions, cellFormats }),
+        JSON.stringify({ request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts, pivotOptions, cellFormats, widgetLayouts }),
       );
     } catch {
       // Per-browser convenience only — same no-op-on-failure as every other localStorage write in
       // this file; worst case, the next visit just starts blank again.
     }
-  }, [request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts, pivotOptions, cellFormats]);
+  }, [request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts, pivotOptions, cellFormats, widgetLayouts]);
 
   // Orphaned-entry cleanup for fieldLayouts, same reasoning as request.fieldSubtotals' own cleanup
   // in FieldPicker.jsx (moveField/addHierarchyToAxis) — a field that leaves Rows should take its
@@ -963,6 +975,7 @@ export default function PivotBuilder() {
       calculatedFields: prev.calculatedFields,
     }));
     setFieldLayouts([]);
+    setWidgetLayouts({});
     setCellFormats({});
     setLastQuery(null);
     setResult(null);
@@ -1003,7 +1016,7 @@ export default function PivotBuilder() {
       // sends) the persistence effect above already writes to localStorage — reused as-is here so
       // Edit later restores this exactly as it looked while being edited, not just a filtered/
       // query-ready subset of it. See BUILDER_STATE_STORAGE_KEY's own WHY comment.
-      const builderStateJson = JSON.stringify({ request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts, pivotOptions, cellFormats });
+      const builderStateJson = JSON.stringify({ request, tableStyle, includeChart, chartType, reportLayout, repeatItemLabels, fieldLayouts, pivotOptions, cellFormats, widgetLayouts });
       const saved = await saveSnapshot(
         snapshotName.trim(),
         { ...lastQuery, values: displayValues },
@@ -1403,6 +1416,8 @@ export default function PivotBuilder() {
                 layout={reportLayout}
                 repeatItemLabels={repeatItemLabels}
                 fieldLayouts={fieldLayouts}
+                widgetLayouts={widgetLayouts}
+                onWidgetLayoutsChange={setWidgetLayouts}
                 // Real Excel's per-member OLAP drilldown (PLAN 8, EXPERIMENTAL) — keyed off `request`
                 // (not lastQuery) like the Sort/Filter menus just below: clicking +/- edits the LIVE
                 // expanded-member set and re-runs the query immediately (same auto-run effect as every

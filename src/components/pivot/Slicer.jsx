@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { FilterX, ListChecks } from "lucide-react";
 import { getMembers } from "../../services/cubeMetaApi";
+import { queryPivot } from "../../services/pivotApi";
+import { itemsWithData } from "../../utils/slicerProbe";
 import ContextMenu from "../forms/ContextMenu";
 import { widgetTitle } from "../../utils/widgetTitle";
 
@@ -12,7 +14,9 @@ import { widgetTitle } from "../../utils/widgetTitle";
 // with the field name and only Multi-Select and Clear Filter; no search box; every item highlighted
 // while the field is unfiltered; a click selects that item ALONE, Ctrl+click (or Multi-Select on)
 // adds/removes items; right-click for Clear Filter / Remove, as Excel has no close button.
-export default function Slicer({ field, displayName, filter, onChange, onRemove }) {
+// probeRequest (utils/slicerProbe): the query telling which items have data under the other
+// filters — those without are greyed out and listed last, like Excel's default slicer settings.
+export default function Slicer({ field, displayName, filter, onChange, onRemove, probeRequest = null }) {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(false);
   // A failed load (the shared cube's "busy" spells) used to show "No items" as if the field were
@@ -49,6 +53,30 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
       controller.abort();
     };
   }, [field, retryToken]);
+
+  // Items with data under the other filters (null = not known, nothing greyed — also on a failed
+  // query, so a busy server never makes every item look empty).
+  const [withData, setWithData] = useState(null);
+  const probeKey = probeRequest ? JSON.stringify(probeRequest) : "";
+  useEffect(() => {
+    if (!probeKey) {
+      setWithData(null);
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      queryPivot(JSON.parse(probeKey), { signal: controller.signal })
+        .then((result) => setWithData(itemsWithData(result)))
+        .catch(() => setWithData(null));
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [probeKey]);
+  const hasData = (member) => withData === null || withData.has(member);
+  // Items with no data go last, keeping the field's order within each group.
+  const orderedMembers = withData === null ? members : [...members.filter(hasData), ...members.filter((m) => !hasData(m))];
 
   const clearFilter = () => onChange({ field, mode: "Members", includedMembers: [] });
 
@@ -116,9 +144,10 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
         ) : members.length === 0 ? (
           <p className="py-2 text-center text-xs text-muted">No items</p>
         ) : (
-          members.map((member) => {
+          orderedMembers.map((member) => {
             // Unfiltered, every item shows as selected — Excel's slicer look.
             const selected = !filtered || includedMembers.includes(member);
+            const noData = !hasData(member);
             return (
               <button
                 key={member}
@@ -127,7 +156,13 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove 
                 title={member === "" ? "(blank)" : member}
                 aria-pressed={selected}
                 className={`truncate rounded border px-2 py-1.5 text-left text-xs ${
-                  selected ? "border-primary/60 bg-primary-100 text-ink" : "border-slate-200 bg-white text-slate-400 hover:border-slate-300"
+                  noData
+                    ? selected
+                      ? "border-primary/30 bg-primary-50 text-slate-400"
+                      : "border-dashed border-slate-200 bg-white text-slate-300"
+                    : selected
+                      ? "border-primary/60 bg-primary-100 text-ink"
+                      : "border-slate-200 bg-white text-slate-400 hover:border-slate-300"
                 }`}
               >
                 {/* A member with an empty caption reads "(blank)", like Excel (display only). */}

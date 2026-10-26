@@ -13,6 +13,7 @@ import { DEFAULT_PIVOT_OPTIONS, cellText, filterAreaSlot, filterValueSummary } f
 import { filterKind, setFieldFilter, FILTER_KIND_LABELS } from "../../utils/filterKinds";
 import { LABEL_FILTERS, VALUE_FILTERS, DATE_FILTERS, isLabelMode, isDateMode, datePeriodLabel, isRangeMode, isTop10Mode, top10Parts, isFilterComplete } from "../../utils/filterModes";
 import { formatDimensionName, fieldCaption } from "../../utils/cubeMeta";
+import { buildSlicerProbeRequest } from "../../utils/slicerProbe";
 import { conditionalStyleFor, detailRangeForColumn, detailRangeForRow, iconColorFor } from "../../utils/conditionalFormat";
 import { buildRowHeaderGroups, buildDisplayRows, applyCollapse, collapsibleKeys, collapseKey, buildColumnHeaderRows, computeLabelSpans } from "../../utils/pivotGridLayout";
 import { MEASURES_PLACEHOLDER, measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "../../utils/measuresPlacement";
@@ -512,48 +513,33 @@ function cellHasDetails(request, valueField, row, column) {
 }
 
 // Excel's slicers and timelines are floating objects on the sheet (2026-10-26, the user: "I need
-// everything like Excel"): drag one by its header, resize it from its bottom-right corner, click it
-// to bring it to the front. Its position and size are remembered per field in this browser.
-const WIDGET_LAYOUT_KEY = "pivotSnapshot.widgetLayout";
-function readWidgetLayouts() {
-  try {
-    return JSON.parse(localStorage.getItem(WIDGET_LAYOUT_KEY) ?? "{}") ?? {};
-  } catch {
-    return {};
-  }
-}
+// everything like Excel"): drag one by its header; click it to select it — a frame with 8 sizing
+// handles, like Excel's selected shape — and resize from any handle; Delete removes the selected one;
+// it comes to the front when clicked. Positions and sizes live in the Builder's state, so they're
+// remembered and saved with the snapshot.
 
-function FloatingWidget({ layout, onLayoutChange, zIndex, onFocus, minWidth, minHeight, children }) {
-  const ref = useRef(null);
+const HANDLES = [
+  { dir: "nw", cls: "-left-1 -top-1 cursor-nwse-resize" },
+  { dir: "n", cls: "left-1/2 -top-1 -translate-x-1/2 cursor-ns-resize" },
+  { dir: "ne", cls: "-right-1 -top-1 cursor-nesw-resize" },
+  { dir: "e", cls: "-right-1 top-1/2 -translate-y-1/2 cursor-ew-resize" },
+  { dir: "se", cls: "-bottom-1 -right-1 cursor-nwse-resize" },
+  { dir: "s", cls: "-bottom-1 left-1/2 -translate-x-1/2 cursor-ns-resize" },
+  { dir: "sw", cls: "-bottom-1 -left-1 cursor-nesw-resize" },
+  { dir: "w", cls: "-left-1 top-1/2 -translate-y-1/2 cursor-ew-resize" },
+];
+
+function FloatingWidget({ layout, onLayoutChange, zIndex, onSelect, selected, minWidth, minHeight, children }) {
   const latest = useRef(layout);
-  latest.current = layout;
-  // A resize from the corner is the browser's (CSS resize) — saved once it settles.
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return undefined;
-    let timer = null;
-    const observer = new ResizeObserver(() => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        const { width, height } = el.getBoundingClientRect();
-        const current = latest.current;
-        if (Math.abs(width - current.w) > 2 || Math.abs(height - current.h) > 2) onLayoutChange({ ...current, w: Math.round(width), h: Math.round(height) });
-      }, 150);
-    });
-    observer.observe(el);
-    return () => {
-      clearTimeout(timer);
-      observer.disconnect();
-    };
-    // onLayoutChange is rebuilt each render; the element is what's observed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const startDrag = (e) => {
-    onFocus();
-    if (e.button !== 0 || !e.target.closest("[data-drag-handle]") || e.target.closest("button, select, input")) return;
+    latest.current = layout;
+  }, [layout]);
+  // One pointer gesture (move or resize) — the change is computed from where it started.
+  const track = (e, apply) => {
     e.preventDefault();
-    const start = { x: e.clientX, y: e.clientY, left: layout.x, top: layout.y };
-    const move = (ev) => onLayoutChange({ ...latest.current, x: Math.max(0, start.left + ev.clientX - start.x), y: Math.max(0, start.top + ev.clientY - start.y) });
+    e.stopPropagation();
+    const from = { x: e.clientX, y: e.clientY, layout: latest.current };
+    const move = (ev) => onLayoutChange(apply(from.layout, ev.clientX - from.x, ev.clientY - from.y));
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
@@ -561,14 +547,45 @@ function FloatingWidget({ layout, onLayoutChange, zIndex, onFocus, minWidth, min
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+  const startDrag = (e) => {
+    onSelect();
+    if (e.button !== 0 || !e.target.closest("[data-drag-handle]") || e.target.closest("button, select, input")) return;
+    track(e, (l, dx, dy) => ({ ...l, x: Math.max(0, l.x + dx), y: Math.max(0, l.y + dy) }));
+  };
+  const startResize = (e, dir) => {
+    if (e.button !== 0) return;
+    track(e, (l, dx, dy) => {
+      let { x, y, w, h } = l;
+      if (dir.includes("e")) w = Math.max(minWidth, l.w + dx);
+      if (dir.includes("s")) h = Math.max(minHeight, l.h + dy);
+      if (dir.includes("w")) {
+        w = Math.max(minWidth, l.w - dx);
+        x = Math.max(0, l.x + l.w - w);
+      }
+      if (dir.includes("n")) {
+        h = Math.max(minHeight, l.h - dy);
+        y = Math.max(0, l.y + l.h - h);
+      }
+      return { ...l, x, y, w, h };
+    });
+  };
   return (
     <div
-      ref={ref}
       onPointerDown={startDrag}
-      className="pointer-events-auto absolute overflow-hidden rounded-lg shadow-lg"
-      style={{ left: layout.x, top: layout.y, width: layout.w, height: layout.h, zIndex, resize: "both", minWidth, minHeight }}
+      data-floating-widget
+      className={`pointer-events-auto absolute rounded-lg shadow-lg ${selected ? "ring-2 ring-primary/60" : ""}`}
+      style={{ left: layout.x, top: layout.y, width: layout.w, height: layout.h, zIndex }}
     >
-      {children}
+      <div className="h-full w-full overflow-hidden rounded-lg">{children}</div>
+      {selected &&
+        HANDLES.map(({ dir, cls }) => (
+          <span
+            key={dir}
+            onPointerDown={(e) => startResize(e, dir)}
+            className={`absolute h-2.5 w-2.5 rounded-sm border border-primary bg-white ${cls}`}
+            aria-hidden="true"
+          />
+        ))}
     </div>
   );
 }
@@ -1022,6 +1039,10 @@ export default function PivotGrid({
   pivotOptions = DEFAULT_PIVOT_OPTIONS,
   // Opens the PivotTable Options dialog (the value-cell menu's "PivotTable Options…"); null = none.
   onOpenPivotTableOptions = null,
+  // Floating slicer/timeline positions and sizes ({ field: { x, y, w, h } }), owned by the Builder so
+  // they persist and are saved with the snapshot; without them the grid keeps its own.
+  widgetLayouts: widgetLayoutsProp = null,
+  onWidgetLayoutsChange = null,
   // The Builder's workspace layout (2026-10-20): the grid box flexes into its parent's leftover
   // height/width instead of hugging the table. The parent must be a flex column.
   fill = false,
@@ -1172,8 +1193,32 @@ export default function PivotGrid({
   // edge and covered the table (2026-10-26, "why is everything on top of each other"). Only when
   // there's no room beside the table at all does one overlap it, as in Excel; dragging it anywhere
   // keeps it there.
-  const [widgetLayouts, setWidgetLayouts] = useState(readWidgetLayouts);
+  const [localWidgetLayouts, setLocalWidgetLayouts] = useState({});
+  const widgetLayouts = widgetLayoutsProp ?? localWidgetLayouts;
   const [widgetOrder, setWidgetOrder] = useState([]);
+  const [selectedWidget, setSelectedWidget] = useState(null);
+  // Excel: a click anywhere else deselects; Delete removes the selected slicer/timeline (not while
+  // typing in a box).
+  useEffect(() => {
+    if (!selectedWidget) return undefined;
+    const onPointerDown = (e) => {
+      if (!e.target.closest?.("[data-floating-widget]")) setSelectedWidget(null);
+    };
+    const onKeyDown = (e) => {
+      if (e.key !== "Delete" || e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+      e.preventDefault();
+      removeWidget(selectedWidget);
+      setSelectedWidget(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+    // removeWidget is rebuilt each render; the selection is what matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedWidget]);
   const widgetLayerRef = useRef(null);
   const [sheetBox, setSheetBox] = useState({ width: 0, height: 0, tableRight: 0, tableTop: 0 });
   const hasResult = Boolean(result);
@@ -1228,16 +1273,35 @@ export default function PivotGrid({
     return out;
   })();
   const layoutOf = (field) => widgetLayouts[field] ?? defaultLayouts[field] ?? { x: 16, y: 16, w: 208, h: 260 };
-  const saveLayout = (field, layout) =>
-    setWidgetLayouts((current) => {
-      const next = { ...current, [field]: layout };
-      try {
-        localStorage.setItem(WIDGET_LAYOUT_KEY, JSON.stringify(next));
-      } catch {
-        // Not remembered — still applies on this page.
-      }
-      return next;
+  // A new widget's place is fixed (saved) as soon as it has been placed beside a real table, so it
+  // never moves by itself afterwards — it used to jump to the top-left whenever the table briefly
+  // went away during a refresh (found 2026-10-26). Excel's slicers stay put too.
+  const defaultsKey = sheetBox.tableRight > 0 ? JSON.stringify(defaultLayouts) : "";
+  useEffect(() => {
+    if (!defaultsKey) return;
+    const pending = JSON.parse(defaultsKey);
+    if (Object.keys(pending).length === 0) return;
+    const next = { ...widgetLayouts, ...pending };
+    if (onWidgetLayoutsChange) onWidgetLayoutsChange(next);
+    else setLocalWidgetLayouts(next);
+    // Runs when a NEW default appears (defaultsKey); widgetLayouts is read as it is then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultsKey]);
+  const saveLayout = (field, layout) => {
+    const next = { ...widgetLayouts, [field]: layout };
+    if (onWidgetLayoutsChange) onWidgetLayoutsChange(next);
+    else setLocalWidgetLayouts(next);
+  };
+  // Remove a slicer or timeline (right-click › Remove, or Delete while selected) — its filter goes too.
+  const removeWidget = (field) => {
+    if (!request || !onChange) return;
+    onChange({
+      ...request,
+      slicerFields: request.slicerFields.filter((f) => f !== field),
+      timelineFields: request.timelineFields.filter((f) => f !== field),
+      filters: request.filters.filter((f) => f.field !== field),
     });
+  };
   const bringToFront = (field) => setWidgetOrder((order) => [...order.filter((f) => f !== field), field]);
   const zOf = (field) => 30 + Math.max(0, widgetOrder.indexOf(field));
 
@@ -1264,13 +1328,18 @@ export default function PivotGrid({
                   layout={layoutOf(field)}
                   onLayoutChange={(layout) => saveLayout(field, layout)}
                   zIndex={zOf(field)}
-                  onFocus={() => bringToFront(field)}
+                  onSelect={() => {
+                    bringToFront(field);
+                    setSelectedWidget(field);
+                  }}
+                  selected={selectedWidget === field}
                   minWidth={140}
                   minHeight={110}
                 >
                 <Slicer
                   key={field}
                   field={field}
+                  probeRequest={buildSlicerProbeRequest(request, field)}
                   displayName={dimensionOptions.find((d) => d.value === field)?.label ?? field}
                   filter={filter}
                   onChange={(nextFilter) => {
@@ -1279,13 +1348,7 @@ export default function PivotGrid({
                       : [...request.filters, nextFilter];
                     onChange({ ...request, filters: next });
                   }}
-                  onRemove={() =>
-                    onChange({
-                      ...request,
-                      slicerFields: request.slicerFields.filter((f) => f !== field),
-                      filters: request.filters.filter((f) => f.field !== field),
-                    })
-                  }
+                  onRemove={() => removeWidget(field)}
                 />
                 </FloatingWidget>
               );
@@ -1300,7 +1363,11 @@ export default function PivotGrid({
                   layout={layoutOf(field)}
                   onLayoutChange={(layout) => saveLayout(field, layout)}
                   zIndex={zOf(field)}
-                  onFocus={() => bringToFront(field)}
+                  onSelect={() => {
+                    bringToFront(field);
+                    setSelectedWidget(field);
+                  }}
+                  selected={selectedWidget === field}
                   minWidth={260}
                   minHeight={120}
                 >
@@ -1315,13 +1382,7 @@ export default function PivotGrid({
                       : [...request.filters, nextFilter];
                     onChange({ ...request, filters: next });
                   }}
-                  onRemove={() =>
-                    onChange({
-                      ...request,
-                      timelineFields: request.timelineFields.filter((f) => f !== field),
-                      filters: request.filters.filter((f) => f.field !== field),
-                    })
-                  }
+                  onRemove={() => removeWidget(field)}
                 />
                 </FloatingWidget>
               );
