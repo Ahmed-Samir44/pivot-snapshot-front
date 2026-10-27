@@ -408,7 +408,8 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
                   removeFilter();
                   close();
                 }}
-                className="rounded-lg px-2 py-1.5 text-left text-muted hover:bg-slate-100"
+                // Same look as its neighbours — it's an active command (grey read as disabled).
+                className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10"
               >
                 Clear Filter From &quot;{choice?.label ?? label}&quot;
               </button>

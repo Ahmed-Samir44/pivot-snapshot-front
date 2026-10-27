@@ -155,7 +155,9 @@ export default function Slicer({ field, displayName, filter, onChange, onRemove,
                 onClick={(e) => clickItem(member, e.ctrlKey || e.metaKey)}
                 title={member === "" ? "(blank)" : member}
                 aria-pressed={selected}
-                className={`truncate rounded border px-2 py-1.5 text-left text-xs ${
+                // shrink-0: with more items than room the list scrolls, as in Excel, instead of
+                // squashing every button until its text is cut off.
+                className={`shrink-0 truncate rounded border px-2 py-1.5 text-left text-xs ${
                   noData
                     ? selected
                       ? "border-primary/30 bg-primary-50 text-slate-400"
