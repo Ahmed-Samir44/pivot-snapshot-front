@@ -1,5 +1,6 @@
 import { formatNumber } from "../../utils/numberFormat";
 import { measuresPlacementSupportsChart } from "../../utils/chartLayout";
+import { isErrorValue } from "../../utils/errorCells";
 
 // Live-preview mirror of the backend's PivotChartRenderer.cs (same three chart types, same
 // first-value-field-only scope, same multi-series-from-a-Columns-field support added 2026-09-24)
@@ -40,8 +41,8 @@ function extractSeries(result) {
   if (detailColumns.length === 0) return null;
   const series = detailColumns.map((colIndex) => ({
     label: detailColumns.length === 1 ? "" : result.columnHeaders[colIndex].labels.filter((l) => l !== "").join(" / "),
-    // An error cell (NaN) plots as 0, like Excel's charts do for #DIV/0! (mirrors PivotChartRenderer).
-    values: categoryRows.map(({ r }) => (Number.isNaN(result.cells[r][colIndex]) ? 0 : (result.cells[r][colIndex] ?? 0))),
+    // An error cell (#DIV/0!, #N/A) plots as 0, like Excel's charts do (mirrors PivotChartRenderer).
+    values: categoryRows.map(({ r }) => (isErrorValue(result.cells[r][colIndex]) ? 0 : (result.cells[r][colIndex] ?? 0))),
   }));
 
   return { categories, series };

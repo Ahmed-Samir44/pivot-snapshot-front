@@ -1,5 +1,5 @@
 import { formatNumber } from "./numberFormat";
-import { isErrorValue } from "./errorCells";
+import { errorToken, isErrorValue } from "./errorCells";
 import { isDateMode, isLabelMode } from "./filterModes";
 
 // Excel's PivotTable Options > Layout & Format tab (2026-10-18, against a screenshot of the real
@@ -39,7 +39,8 @@ export const ERROR_TOKEN = "#DIV/0!";
 // number. Mirrors PivotTableOptions.TextFor + NumberFormatter.Format.
 export function cellText(value, format, options = DEFAULT_PIVOT_OPTIONS) {
   if (value === null || value === undefined) return options.showEmptyText ? options.emptyText ?? "" : "";
-  if (isErrorValue(value)) return options.showErrorText ? options.errorText ?? "" : ERROR_TOKEN;
+  // "For error values show" covers #DIV/0! and #N/A alike, as in Excel.
+  if (isErrorValue(value)) return options.showErrorText ? options.errorText ?? "" : errorToken(value);
   return formatNumber(value, format);
 }
 

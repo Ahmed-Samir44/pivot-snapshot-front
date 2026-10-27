@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { isErrorValue } from "../../utils/errorCells";
+import { errorToken, isErrorValue } from "../../utils/errorCells";
 
 // Side-by-side comparison of 2+ saved versions (2026-10-20 — the backend's /compare endpoint had no
 // screen). One row per cell of the pivot (row labels × column labels, matched by LABEL across
@@ -11,7 +11,7 @@ const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2
 
 function formatValue(value) {
   if (value == null) return "";
-  if (isErrorValue(value)) return "#DIV/0!";
+  if (isErrorValue(value)) return errorToken(value);
   return numberFormat.format(value);
 }
 
@@ -25,7 +25,7 @@ const joinLabels = (labels) => {
 // relative 1e-9 counts as unchanged, or every cell would show as "+0" changed.
 const sameValue = (a, b) => {
   if (a == null || b == null) return a == null && b == null;
-  if (isErrorValue(a) || isErrorValue(b)) return isErrorValue(a) && isErrorValue(b);
+  if (isErrorValue(a) || isErrorValue(b)) return isErrorValue(a) && isErrorValue(b) && errorToken(a) === errorToken(b);
   return Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b), 1);
 };
 

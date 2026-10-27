@@ -1,8 +1,8 @@
 import ExcelJS from "exceljs";
 import { formatForColumn } from "./numberFormat";
 import { buildRowHeaderGroups, buildDisplayRows, buildColumnHeaderRows, computeLabelSpans } from "./pivotGridLayout";
-import { DEFAULT_PIVOT_OPTIONS, ERROR_TOKEN, filterAreaSlot, filterValueSummary } from "./pivotOptions";
-import { isErrorValue } from "./errorCells";
+import { DEFAULT_PIVOT_OPTIONS, filterAreaSlot, filterValueSummary } from "./pivotOptions";
+import { errorToken, isErrorValue } from "./errorCells";
 import { measuresIndexOf, buildCaptionToIndex, measureIndexOf } from "./measuresPlacement";
 import { DEFAULT_MIN_COLOR, DEFAULT_MID_COLOR, DEFAULT_MAX_COLOR, DEFAULT_BAR_COLOR } from "./conditionalFormat";
 import { buildPivotSource, addPivotTableToXlsx } from "./excelPivot";
@@ -409,7 +409,7 @@ export async function exportPivotToExcel({
       // An error cell is a real Excel #DIV/0! (or the "For error values show" text); an empty one
       // stays empty unless "For empty cells show" has text.
       if (isErrorValue(value)) {
-        cell.value = pivotOptions.showErrorText ? pivotOptions.errorText : { error: ERROR_TOKEN };
+        cell.value = pivotOptions.showErrorText ? pivotOptions.errorText : { error: errorToken(value) };
       } else if (value === null || value === undefined) {
         cell.value = pivotOptions.showEmptyText && pivotOptions.emptyText ? pivotOptions.emptyText : null;
       } else {
