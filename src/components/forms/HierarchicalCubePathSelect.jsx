@@ -618,7 +618,9 @@ export default function HierarchicalCubePathSelect({
           the pointer crosses a pill inside it. */}
       <ul
         data-zone={dragSourceKey}
-        className={`flex min-h-[6.5rem] flex-1 flex-wrap content-start gap-1.5 rounded-md transition-colors ${value.length === 0 ? "items-center" : "items-start"} ${
+        // overflow-y-auto: when the area is given a fixed share of the pane (the Field List side by
+        // side), more pills than fit scroll inside it, like Excel's areas (2026-10-27).
+        className={`custom-scrollbar flex min-h-[6.5rem] flex-1 flex-wrap content-start gap-1.5 overflow-y-auto rounded-md transition-colors ${value.length === 0 ? "items-center" : "items-start"} ${
           dragOver ? "bg-primary-soft/70 ring-2 ring-inset ring-primary" : dragActive ? "bg-slate-50 outline-dashed outline-1 -outline-offset-1 outline-slate-300" : ""
         } ${value.length === 0 ? "border border-dashed border-slate-300 px-2" : ""}`}
         onDragOver={dragSourceKey && onFieldDropped ? handleDragOver : undefined}

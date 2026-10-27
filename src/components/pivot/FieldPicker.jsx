@@ -448,8 +448,8 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
   const showValuesPseudoField = valuesCount >= 2 && (!query || "σ values".includes(query) || "values".includes(query));
 
   return (
-    // h-full flex flex-col: fills the exact pixel height its caller's wrapper div sets (from
-    // zonesColumnHeight — see FieldPicker's own WHY comment) instead of sizing to its own content;
+    // h-full flex flex-col: fills the height its caller's wrapper gives it (see FieldPicker's own
+    // WHY comment) instead of sizing to its own content;
     // only the scrollable list below (flex-1 min-h-0) actually grows/shrinks into whatever's left
     // after the header and search box above, which stay their natural height either way.
     <div className="flex h-full flex-col">
@@ -645,9 +645,10 @@ function ZoneDropArea({ zoneKey, onFieldDropped, isFieldAccepted, isEmpty, empty
     // size empty or full" Excel parity from the original 2026-10-04 decision holds.
     // Drag feedback (2026-10-20): every zone gets a dashed slate outline while a field is in
     // flight, and the one under the pointer turns soft gold with a solid gold ring.
+    // overflow-y-auto: more pills than the area's share of the pane scroll inside it (2026-10-27).
     <div
       data-zone={zoneKey}
-      className={`min-h-[6.5rem] flex-1 rounded-md transition-colors ${
+      className={`custom-scrollbar min-h-[6.5rem] flex-1 overflow-y-auto rounded-md transition-colors ${
         dragOver
           ? "bg-primary-soft/70 ring-2 ring-inset ring-primary"
           : dragActive
@@ -2862,18 +2863,6 @@ export default function FieldPicker({
   // them above the areas as before.
   toolsTarget = null,
 }) {
-  // Measures the Rows/Columns/Values/Filters zones column's OWN rendered height, so the Fields tree
-  // card next to it can match it exactly in EITHER direction (requested live 2026-10-12, "خلي الـ
-  // fields تاخد المكان الفاضي" — after a plain CSS grid `items-stretch` attempt made things WORSE,
-  // not better: stretch can only GROW a shorter item to match a taller one, never shrink a naturally
-  // huge one down, so it just stretched the short zones column to match the field list's own full,
-  // uncapped ~300-table height instead of the other way around). A ResizeObserver on this ONE
-  // sibling element is a much narrower, safer measurement than the "rest of the viewport" approach
-  // that caused a real page-scrollbar bug the last time dynamic sizing was tried here (2026-10-05) —
-  // this only ever reacts to the zones column's own height, never the page's.
-  const zonesColumnRef = useRef(null);
-  const [zonesColumnHeight, setZonesColumnHeight] = useState(null);
-
   // Excel's Field List gear menu (2026-10-20): the pane's layout — fields and areas side by side
   // (this app's default), stacked, fields only, or areas only (2 by 2) — and the field list's sort
   // order. A per-browser preference, like Excel's, so it's kept in localStorage.
@@ -2895,17 +2884,6 @@ export default function FieldPicker({
       }
       return next;
     });
-
-  useEffect(() => {
-    const el = zonesColumnRef.current;
-    if (!el) return undefined;
-    const measure = () => setZonesColumnHeight(el.getBoundingClientRect().height);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-    // Re-attached when the layout brings the areas back (fields-only has none to measure).
-  }, [pane.layout]);
 
   const dimensionOptions = dimensions.map((d) => ({ value: d.field, label: d.displayName }));
   // Any field of the cube can be dropped into an area — including one found by search whose table
@@ -3315,15 +3293,6 @@ export default function FieldPicker({
     // pane apparently reflows between a single stacked column and a 2×2 grid depending on its own
     // width/version, so this now matches the most recent, most explicit screenshot+instruction
     // rather than re-arguing which one is "more canonical".
-    // items-start: the field list card's HEIGHT is now driven explicitly by zonesColumnHeight (a
-    // narrow, self-contained ResizeObserver measurement of the zones column alone — see this
-    // function's own top-of-component WHY comment), not by grid's own align-items:stretch — stretch
-    // was tried live 2026-10-12 ("خلي ارتفاع ال fields زي ال 4 اللي جنبه") and made things WORSE: it
-    // can only GROW a shorter item to match a taller one's natural content size, never SHRINK a
-    // naturally-huge one (this field list, ~300+ tables, uncapped) down — so it stretched the SHORT
-    // zones column to match the field list's own enormous natural height instead ("انت شايف ان دا
-    // كدا صح؟"), the opposite of intended. items-start here just means "don't ALSO let grid stretch
-    // interfere" — the actual matching happens via the explicit pixel height set below instead.
     // minmax(0, Nfr), not just Nfr: a plain fr track defaults to a minimum of its own content's
     // min-content width — the classic CSS Grid version of the flexbox min-width:auto trap (see
     // PivotBuilder.jsx's own WHY comment on that one) — so a long unbreakable string anywhere
@@ -3331,21 +3300,25 @@ export default function FieldPicker({
     // wider than the card actually sizes to, spilling a sliver of content out past the card's own
     // right edge (flagged live, 2026-10-04: "ليه طالع برا الكارد"). minmax(0, …) lets each column
     // actually shrink to the space it's given, so `truncate` inside it can do its job.
-    <div className={pane.layout === "sideBySide" ? "grid grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)] items-start gap-2" : "flex flex-col gap-2"}>
+    //
+    // Side by side fills the pane's whole height (2026-10-27, "why is there empty space — stretch
+    // them to take the space"): flex-1 (the pane's scroll box is a flex column — PivotBuilder) makes the
+    // row exactly as tall as the pane (a definite height,
+    // so the four areas can split it equally — see the areas grid), min-h-[40rem] keeps the areas at
+    // their own minimum on a short screen, where the pane scrolls instead. The field list fills its
+    // cell absolutely positioned, so its ~300 tables never push the row taller (the reason a plain
+    // stretch failed on 2026-10-12, and the areas column's height used to be measured and copied).
+    <div className={pane.layout === "sideBySide" ? "grid min-h-[40rem] flex-1 grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)] gap-2" : "flex flex-col gap-2"}>
       {toolsTarget ? createPortal(paneControls, toolsTarget) : pane.layout === "fieldsOnly" && <div className="flex justify-end gap-1">{paneControls}</div>}
-      {/* Height set explicitly from the zones column's OWN measured height (zonesColumnHeight,
-          above) once known — min 200px as a sane floor for the very first render (before the
-          ResizeObserver's first callback fires) and for the unlikely case of an almost-empty zones
-          column. AvailableFieldsPanel fills whatever height this div ends up with (h-full flex-col,
-          its own scrollable list as flex-1) — see its own WHY comment. Stacked / fields-only use a
-          fixed height instead (nothing beside them to match). */}
+      {/* Side by side: the cell's height comes from the row (see above) and the list fills it,
+          200px at the least. Stacked / fields-only use a fixed height (nothing beside them).
+          AvailableFieldsPanel fills whatever height it's given — see its own WHY comment. */}
       {pane.layout !== "areasOnly" && (
       <div
-        style={{
-          height:
-            pane.layout === "stacked" ? "300px" : pane.layout === "fieldsOnly" ? "560px" : zonesColumnHeight ? `${Math.max(zonesColumnHeight, 200)}px` : undefined,
-        }}
+        className={pane.layout === "sideBySide" ? "relative min-h-[200px]" : undefined}
+        style={pane.layout === "sideBySide" ? undefined : { height: pane.layout === "stacked" ? "300px" : "560px" }}
       >
+        <div className={pane.layout === "sideBySide" ? "absolute inset-0" : "h-full"}>
         <AvailableFieldsPanel
           sortOrder={pane.sortOrder}
           dimensions={dimensions}
@@ -3362,6 +3335,7 @@ export default function FieldPicker({
           onAddHierarchy={addHierarchyToAxis}
           onStartDrilldown={startDrilldown}
         />
+        </div>
       </div>
       )}
 
@@ -3370,13 +3344,11 @@ export default function FieldPicker({
       {/* Each zone shows only its pill list; the full add/edit form (dimension picker, filter
           mode, show-values-as, ...) lives in a Popover behind the zone's "+" or, for Filters/
           Values, behind the pill itself — one click away instead of permanently occupying space.
-          ref={zonesColumnRef}: this is the sibling FieldPicker's own Fields card measures itself
-          against — see zonesColumnHeight's own WHY comment above.
           pt-2, not the original pt-6 (cut 2026-10-12 alongside the zone boxes above, same reason):
           this existed purely so "Reset" lines up with "FIELDS" (.card's own p-6 top padding) —
           real, but strictly cosmetic, and the page-scrollbar problem took priority over it being
           pixel-perfect. Still a little breathing room instead of "Reset" flush against the edge. */}
-      <div ref={zonesColumnRef} className="pt-2">
+      <div className={pane.layout === "sideBySide" ? "flex min-h-0 flex-col pt-2" : "pt-2"}>
         {/* Real Excel's own instructional text used to sit here ("Drag fields between areas
             below:", confirmed live 2026-10-05 against a real Excel screenshot) — removed again
             2026-10-12 on explicit request ("شيل دا"): this sidebar is tight on vertical space now
@@ -3384,7 +3356,10 @@ export default function FieldPicker({
             so literal Excel-instructional-text parity lost out to reclaiming the row for it. */}
         {!toolsTarget && <div className="mb-1 flex justify-end gap-1">{paneControls}</div>}
         {/* Stacked / areas-only have the pane's full width: Excel's 2 by 2 areas. */}
-        <div className={`grid gap-1.5 ${pane.layout === "sideBySide" ? "grid-cols-1" : "grid-cols-2"}`}>
+        {/* Side by side: four equal shares of the height, never smaller than an area's own minimum
+            (9.5rem = header + the 6.5rem drop area); an area with more pills than fit scrolls
+            inside itself, like Excel's, instead of growing and pushing the others down. */}
+        <div className={`grid gap-1.5 ${pane.layout === "sideBySide" ? "min-h-0 flex-1 grid-cols-1 grid-rows-[repeat(4,minmax(9.5rem,1fr))] [&>*]:min-h-0" : "grid-cols-2"}`}>
           <div className="flex flex-col rounded-lg border border-slate-200 bg-white p-2">
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">

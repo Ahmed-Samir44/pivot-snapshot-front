@@ -1569,7 +1569,8 @@ export default function PivotBuilder() {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="custom-scrollbar min-h-0 flex-1 overflow-x-hidden p-2 lg:overflow-y-auto">
+            {/* A flex column, so the Field List fills its height exactly (see FieldPicker). */}
+            <div className="custom-scrollbar flex min-h-0 flex-1 flex-col overflow-x-hidden p-2 lg:overflow-y-auto">
             <FieldPicker
               value={pendingRequest ?? request}
               onChange={deferLayout ? (next) => setPendingRequest(normalizeMeasuresPlacement(next)) : setRequest}
