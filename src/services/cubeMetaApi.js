@@ -1,5 +1,6 @@
 import { getDataverseAccessToken } from "./dataverseAuth";
 import { apiErrorFrom } from "./apiError";
+import { createResponseCache } from "./responseCache";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5191";
 
@@ -46,8 +47,15 @@ export function getMeasures() {
 // only ever offer whichever members land in the cube's own default order, unrelated to what the
 // user actually typed (confirmed live 2026-09-23: a real, active doctor wasn't in the first 500
 // at all, so no amount of typing their name found them).
+//
+// A field's full item list is remembered for 10 minutes and shared (responseCache.js) — the slicer,
+// the filter list and Group Items ask for the same field's items, often at the same moment
+// (2026-10-27). Matches the server's own 10 minutes. A search isn't remembered.
+const recentMembers = createResponseCache({ ttlMs: 10 * 60 * 1000, maxEntries: 100 });
+
 export function getMembers(field, search, signal) {
   const query = new URLSearchParams({ field });
   if (search) query.set("search", search);
-  return getJson(`/api/cube/members?${query.toString()}`, signal);
+  const path = `/api/cube/members?${query.toString()}`;
+  return search ? getJson(path, signal) : recentMembers.shared(field, () => getJson(path), signal);
 }

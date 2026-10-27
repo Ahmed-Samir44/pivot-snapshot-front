@@ -742,7 +742,8 @@ export default function PivotBuilder() {
   // "nobody's calling runQuery again at all" case that abort wouldn't otherwise cover.
   useEffect(() => () => queryAbortControllerRef.current?.abort(), []);
 
-  const runQuery = async () => {
+  // fresh: Excel's Refresh — asks the cube again instead of reusing a remembered answer (pivotApi).
+  const runQuery = async ({ fresh = false } = {}) => {
     const token = ++queryTokenRef.current;
     // Whatever the PREVIOUS runQuery call is still waiting on is now definitely stale (this call's
     // own token just superseded it) — abort its request outright instead of letting it keep
@@ -839,7 +840,7 @@ export default function PivotBuilder() {
         // Σ Values) sit before its slot — mirrors MdxPivotQueryBuilder.ValidateColumnsDrilldown.
         columnsHierarchyDrilldown: cleanColumnsDrilldown(request),
       };
-      const data = await queryPivot(cleaned, { signal: controller.signal });
+      const data = await queryPivot(cleaned, { signal: controller.signal, fresh });
       if (token !== queryTokenRef.current) return; // a newer call already landed/owns the UI
       setResult(data);
       setLastQuery(cleaned);
@@ -883,11 +884,14 @@ export default function PivotBuilder() {
   // مش بيحصل حاجة" — the state WAS changing, the query just never fired).
   const isPivotEmpty =
     request.rows.length === 0 && request.columns.length === 0 && request.values.length === 0 && !request.rowsHierarchyDrilldown;
+  // 300ms (was 700ms until 2026-10-27, "anything to make it faster?"): still long enough to fold a
+  // quick run of changes into one query, and a query superseded by a newer one is aborted on the
+  // cube anyway (queryAbortControllerRef); a layout seen recently doesn't reach the cube at all.
   useEffect(() => {
     if (isPivotEmpty) return undefined;
     const timer = setTimeout(() => {
       runQueryRef.current();
-    }, 700);
+    }, 300);
     return () => clearTimeout(timer);
   }, [requestSignature, isPivotEmpty]);
 
@@ -1500,7 +1504,7 @@ export default function PivotBuilder() {
                 // a special case, just a new entry point into the same existing flow).
                 request={editingRequest}
                 onChange={editRequest}
-                onRefresh={runQuery}
+                onRefresh={() => runQuery({ fresh: true })}
                 onHideFieldList={() => setShowFieldList((v) => !v)}
                 fieldListShown={showFieldList}
                 pivotOptions={pivotOptions}
