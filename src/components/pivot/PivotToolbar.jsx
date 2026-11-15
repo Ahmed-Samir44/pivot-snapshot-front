@@ -143,8 +143,15 @@ function RibbonPlainButton({ icon, label, onClick, pressed, disabled = false, ti
   );
 }
 
-function RibbonButton({ icon, label, badge, panelClassName = "", children }) {
+function RibbonButton({ icon, label, badge, panelClassName = "", disabled = false, title, children }) {
   const compact = useContext(RibbonCompact);
+  if (disabled) {
+    return (
+      <button type="button" disabled title={title} className={ribbonButtonClass(compact, "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent")}>
+        <RibbonButtonFace icon={icon} label={label} badge={badge} />
+      </button>
+    );
+  }
   return (
     <Popover
       panelClassName={`!mt-6 ${panelClassName}`}
@@ -738,7 +745,21 @@ export default function PivotToolbar({ request, onChange, measureOptions, dimens
                 />
               )}
             </RibbonButton>
-            <RibbonButton icon={ListPlus} label="Calculated Item" badge={request.calculatedItems.length} panelClassName="!max-w-[34rem]">
+            {/* Disabled (2026-11-09): confirmed against real Excel + its own docs/community reports
+                that "Insert Calculated Item" is unavailable for an OLAP-connected PivotTable — this
+                app is OLAP-only (even the mock service stands in for one), so the button is always
+                greyed out here, same as real Excel would show it, rather than offering something
+                Excel itself can't do for this data source (same reasoning as Custom Subtotals,
+                disabled the same day). Calculated FIELDS (a cube "WITH MEMBER", a different, fully
+                OLAP-supported mechanism) are unaffected. */}
+            <RibbonButton
+              icon={ListPlus}
+              label="Calculated Item"
+              badge={request.calculatedItems.length}
+              panelClassName="!max-w-[34rem]"
+              disabled
+              title="Not available for an OLAP cube source, like real Excel"
+            >
               {(close) => (
                 <CalculatedItemDialog
                   calculatedItems={request.calculatedItems}

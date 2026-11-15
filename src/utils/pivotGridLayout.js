@@ -495,10 +495,21 @@ function columnHeaderEntries(column, c, drillSlot, maxDepth, rowCount, measuresI
   let inTotal = false;
   column.labels.forEach((label, f) => {
     if (f !== drillSlot) {
-      // By label, not unique name (see ColumnHeaderLayout.cs): a total column has no uniqueNames,
-      // and its outer items must still merge with its siblings'.
-      path += "\u0001" + label;
-      entries.push({ text: label, key: path, isTotal: isTotal && (inTotal || f > drillSlot), member: null });
+      // A real field's own subtotal column (ColumnSubtotalsProcessor, captionLevel === f) shows its
+      // "<field> Total"/"<field> <Function>" caption here, at its own level — same convention as the
+      // no-drilldown branch below (totalLevel) and as Rows' own subtotal captions. Without this, a
+      // before/after-the-slot field's subtotal column showed the plain field label, indistinguishable
+      // from its detail sibling (found live-testing PLAN 10/11's drilldown-combined shape).
+      const isOwnCaptionLevel = isTotal && column.captionLevel === f;
+      const text = isOwnCaptionLevel ? (column.caption ?? label) : label;
+      // By text, not unique name (see ColumnHeaderLayout.cs): a total column has no uniqueNames, and
+      // its outer items must still merge with its siblings' — but not with a differently-captioned
+      // subtotal column at this same level.
+      path += "\u0001" + text;
+      // A field's own subtotal column (before the slot) is "in total" from its own level on — same
+      // as the slot's own total starting at its depth below.
+      if (isOwnCaptionLevel) inTotal = true;
+      entries.push({ text, key: path, isTotal: isTotal && (inTotal || f > drillSlot), member: null });
       return;
     }
     const ancestors = column.drill?.ancestorUniqueNames ?? [];

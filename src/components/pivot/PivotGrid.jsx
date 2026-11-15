@@ -383,18 +383,23 @@ function FieldHeaderMenu({ label, field: fixedField, axis, request, onChange, mu
             >
               Sort Z → A
             </button>
-            {isSortedHere && (
-              <button
-                type="button"
-                onClick={() => {
-                  clearSort();
-                  close();
-                }}
-                className="rounded-lg px-2 py-1.5 text-left text-muted hover:bg-slate-100"
-              >
-                Clear sort
-              </button>
-            )}
+            {/* Real Excel's third Sort choice for an OLAP field (2026-11-09, confirmed against
+                Microsoft's own docs: "Select Data source order to return items to their original
+                order. This option is available for Online Analytical Processing (OLAP) source data
+                only.") — this app's own "no explicit sort" MDX (ApplySort is simply skipped) already
+                IS the cube's natural member order, so this is the same action `clearSort` always
+                was, just named and always offered like Excel does, not hidden behind "only once
+                something's already sorted". */}
+            <button
+              type="button"
+              onClick={() => {
+                clearSort();
+                close();
+              }}
+              className={`rounded-lg px-2 py-1.5 text-left ${isSortedHere ? "hover:bg-primary/10" : "text-muted hover:bg-slate-100"}`}
+            >
+              Data Source Order
+            </button>
             {!sortOnly && (
               <>
             <button type="button" onClick={() => setPanel("sort")} className="rounded-lg px-2 py-1.5 text-left hover:bg-primary/10">
@@ -1138,6 +1143,168 @@ export default function PivotGrid({
       : result.columnHeaders.map((_, c) => detailRangeForColumn(result, c));
   }, [result, measuresInRows]);
 
+  // A drilldown ALONE (no other real Rows fields) keeps one ragged column; cheap enough (just a
+  // filter over `rows`, a short field-name array, never the actual result rows) to compute plainly
+  // rather than fold into the heavy memo below just so it has to be returned from it too.
+  const drilldownAlone = Boolean(rowsHierarchyDrilldown) && rows.filter((f) => f !== MEASURES_PLACEHOLDER && f !== rowsHierarchyDrilldown.topLevelField).length === 0;
+
+  // Everything below walks every row/level of the result to decide how to group, indent, collapse
+  // and (optionally) merge-span it — real work for a pivot with thousands of rows, and before this
+  // memo it reran on EVERY render, including ones triggered by purely-local UI state (selecting a
+  // cell, opening a context menu, hovering) that touches none of these inputs (perf investigation,
+  // 2026-11-09: "عايز احسن واسرع السيستم كله"). Declared here, above the `if (!result)` early return
+  // below, because a Hook can't be called conditionally — it guards on `!result` internally instead
+  // (mirroring captionToIndex/conditionalRanges above, the two existing memos with the same need).
+  // `collapsed` is the one piece of PivotGrid's own state this pipeline reads, so it stays a real
+  // dependency — toggling a group must still recompute displayRows.
+  const pivotLayout = useMemo(() => {
+    if (!result) {
+      return {
+        rowFieldLayouts: [],
+        combinedDrillSlot: -1,
+        rowHeaderGroups: [],
+        rowHeaderColumnCount: 0,
+        columnHeaderRows: [],
+        singleValueCaption: null,
+        columnDepth: 0,
+        allDisplayRows: [],
+        collapsible: new Set(),
+        displayRows: [],
+        labelSpans: null,
+      };
+    }
+    const { rowHeaders, columnHeaders } = result;
+    // MAX across every row, not just row 0 — real Excel's per-member OLAP drilldown (PLAN 8) produces
+    // genuinely ragged rows (a still-collapsed member has fewer labels than an expanded descendant),
+    // so row 0 alone is no longer a reliable stand-in for "how many levels does this table have".
+    // Harmless no-op for every non-drilldown pivot, where every row already shares the same depth.
+    const rowDepth = rowHeaders.reduce((max, h) => Math.max(max, h.labels.length), 0);
+    // One entry per row level, resolved once rather than re-looked-up per row/group — mirrors the
+    // backend's HtmlSnapshotRenderer exactly (same field, same fallback-to-report-default order), so
+    // the live grid and a saved snapshot never disagree on which fields share a column.
+    const rowFieldLayouts = Array.from({ length: rowDepth }, (_, level) => fieldLayouts.find((f) => f.field === rows[level]) ?? null);
+    const compactFlags = rowFieldLayouts.map((fl) => fl?.compact ?? layout === "Compact");
+    // A drilldown hierarchy is always rendered as ONE shared indented column regardless of
+    // reportLayout — matching real Excel's own natural-hierarchy rendering, and the only shape that
+    // can represent ragged depth without a per-level field to anchor separate columns to (there is no
+    // `rows[level]` field backing any level here — Rows is empty in this mode, see
+    // PivotBuilder.jsx's own rowsHierarchyDrilldown WHY comment).
+    //
+    // Drilldown v3: a drilldown COMBINED with other Rows fields (its slot among `rows`) is laid out like
+    // any Rows field instead — one label per field, the slot's own labels indented by member depth
+    // (see buildDisplayRows' drillSlot). Only a drilldown ALONE keeps the single ragged column.
+    const drillSlot = rowsHierarchyDrilldown ? rows.indexOf(rowsHierarchyDrilldown.topLevelField) : -1;
+    const combinedDrillSlot = rowsHierarchyDrilldown && !drilldownAlone ? drillSlot : -1;
+    const rowHeaderGroups = drilldownAlone ? [{ start: 0, end: Math.max(0, rowDepth - 1) }] : buildRowHeaderGroups(rowDepth, compactFlags);
+    const rowHeaderColumnCount = rowHeaderGroups.length;
+    // Backend floor of 1 (not 0) whenever there's at least one row to label: with no Value fields at
+    // all (Excel's own "removed the last Value field" state), Columns can legitimately come back with
+    // ZERO headers (a literal empty MDX set — see MdxPivotQueryBuilder.BuildAxisFinal's own WHY
+    // comment) — but the level-0 header row below is also where the ROW field's own title cell
+    // (FieldHeaderMenu "Business Unit.BU Short Name" etc.) renders, via the `Array.from({length:
+    // columnDepth})` loop a few lines down. columnDepth === 0 would skip that loop entirely and drop
+    // the row headers' own title row along with the (correctly absent) column ones — caught live,
+    // 2026-10-05, the first time this zero-Values case became reachable at all.
+    // Columns drilldown (C2): a drilldown slot adds one header row per member depth — the shared
+    // buildColumnHeaderRows (mirrored by the backend's ColumnHeaderLayout) decides rows and spans.
+    const allColumnHeaderRows = buildColumnHeaderRows(columnHeaders, columnsDrillSlot, columnsMeasuresIndex);
+    // One value field with Columns fields: Excel shows no row repeating the value's name under every
+    // column — the name sits once in the top-left corner (2026-10-21). Only when Σ Values is the LAST
+    // column level (its usual place, and always so with one value — PivotBuilder keeps it there), so
+    // the Grand Total caption on the first row is never the one dropped.
+    const labelLevels = columnHeaders[0]?.labels.length ?? 0;
+    const hideSingleValueRow = valueFields.length === 1 && columnsDrillSlot < 0 && labelLevels > 1 && columnsMeasuresIndex === labelLevels - 1;
+    const columnHeaderRows = hideSingleValueRow ? allColumnHeaderRows.filter((_, r) => r !== columnsMeasuresIndex) : allColumnHeaderRows;
+    const singleValueCaption = hideSingleValueRow ? (columnHeaders.find((c) => !c.isTotal)?.labels[columnsMeasuresIndex] ?? valueFields[0]?.field ?? "") : null;
+    const columnDepth = columnHeaders.length > 0 ? columnHeaderRows.length : rowHeaders.length > 0 ? 1 : 0;
+
+    // The rows real Excel actually draws (item rows for compact-form levels, "ER Total"/"Grand Total"
+    // captions, Top subtotals absorbed or moved) — see buildDisplayRows' own WHY comment. Shared with
+    // exportExcel.js and mirrored by the backend's HtmlSnapshotRenderer, so the live grid, a saved
+    // snapshot and an export all draw the same table. Collapsing an outermost item (Excel's +/-)
+    // then replaces that item's rows with one row carrying its subtotal.
+    const allDisplayRows = buildDisplayRows(rowHeaders, {
+      rowHeaderGroups,
+      rowFieldLayouts,
+      repeatItemLabels,
+      measuresLevel: rowsMeasuresIndex,
+      drilldown: drilldownAlone,
+      // Excel's Outline AND Compact layouts are both "outline form" (outer items on their own row);
+      // only Tabular puts an item on its first child's row.
+      outline: layout !== "Tabular",
+      drilldownSubtotals,
+      drillSlot: combinedDrillSlot,
+    });
+    // A drilldown hierarchy has its OWN per-member +/- (onToggleDrilldownMember) — the outer-item
+    // collapse would be a second, conflicting toggle on the same rows.
+    const collapsible = rowsHierarchyDrilldown ? new Set() : collapsibleKeys(allDisplayRows);
+    const displayRows = applyCollapse(allDisplayRows, new Set([...collapsed].filter((k) => collapsible.has(k))), rowHeaderGroups);
+    // "Merge and center cells with labels": an item's label cell spans its rows.
+    const labelSpans = pivotOptions.mergeLabels ? computeLabelSpans(displayRows, rowHeaderGroups, { drillSlot: combinedDrillSlot, drilldown: drilldownAlone }) : null;
+    return {
+      rowFieldLayouts,
+      combinedDrillSlot,
+      rowHeaderGroups,
+      rowHeaderColumnCount,
+      columnHeaderRows,
+      singleValueCaption,
+      columnDepth,
+      allDisplayRows,
+      collapsible,
+      displayRows,
+      labelSpans,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    result,
+    rows,
+    fieldLayouts,
+    layout,
+    rowsHierarchyDrilldown,
+    drilldownAlone,
+    columnsDrillSlot,
+    columnsMeasuresIndex,
+    rowsMeasuresIndex,
+    valueFields,
+    repeatItemLabels,
+    drilldownSubtotals,
+    collapsed,
+    pivotOptions.mergeLabels,
+  ]);
+
+  // Value-carrying rows in display order — what arrow-key navigation steps through (an item row
+  // with no subtotal has no value cells to select) — and the selection/range-stats pipeline built
+  // on top of it (bounds/selectedValues/baseStats). Declared here, above the `if (!result)` early
+  // return further down, for the same Rules-of-Hooks reason as pivotLayout above; each step is its
+  // own memo (not one inline chain of plain consts) so a plain `rangeBounds()`-style recompute on
+  // every render doesn't hand the next step a fresh object reference every time, which would make
+  // memoizing it pointless (perf investigation, 2026-11-09: "عايز احسن واسرع السيستم كله").
+  const navigableRows = useMemo(
+    () => pivotLayout.displayRows.filter((d) => d.sourceIndex !== null).map((d) => d.sourceIndex),
+    [pivotLayout.displayRows],
+  );
+  // The selected range in DISPLAY order: row positions in navigableRows and a column span. Keyed
+  // on the PRIMITIVE row/col numbers `selectedCell`/`anchorCell` hold (not the cell objects
+  // themselves, which React treats as new on every selectCell() call).
+  const bounds = useMemo(() => {
+    if (!selectedCell) return null;
+    const anchor = anchorCell ?? selectedCell;
+    const a = navigableRows.indexOf(anchor.row);
+    const b = navigableRows.indexOf(selectedCell.row);
+    if (a < 0 || b < 0) return null;
+    return { top: Math.min(a, b), bottom: Math.max(a, b), left: Math.min(anchor.col, selectedCell.col), right: Math.max(anchor.col, selectedCell.col) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCell?.row, selectedCell?.col, anchorCell?.row, anchorCell?.col, navigableRows]);
+  // The selected range's Sum/Average/Count for the status bar (SelectionStatsReporter below). Reads
+  // `result?.cells` directly rather than waiting for the later `const { cells } = result`
+  // destructure (which sits after the early return and so isn't in scope yet up here).
+  const selectedRows = useMemo(() => (bounds ? navigableRows.slice(bounds.top, bounds.bottom + 1) : []), [bounds, navigableRows]);
+  const selectedValues = useMemo(
+    () => (bounds ? selectedRows.flatMap((r) => (result?.cells?.[r] ?? []).slice(bounds.left, bounds.right + 1)) : []),
+    [bounds, selectedRows, result],
+  );
+  const baseStats = useMemo(() => (bounds ? selectionStats(selectedValues) : null), [bounds, selectedValues]);
+
   // Excel's "Show Details" — the clicked cell's row/column uniqueNames already include an entry at
   // the Σ Values level (a non-member placeholder caption, not a real dimension member — see
   // CubeQueryService.BuildHeaders), which must be stripped before sending, same as every other
@@ -1467,50 +1634,19 @@ export default function PivotGrid({
   }
 
   const { rowHeaders, columnHeaders, cells } = result;
-  // MAX across every row, not just row 0 — real Excel's per-member OLAP drilldown (PLAN 8) produces
-  // genuinely ragged rows (a still-collapsed member has fewer labels than an expanded descendant),
-  // so row 0 alone is no longer a reliable stand-in for "how many levels does this table have".
-  // Harmless no-op for every non-drilldown pivot, where every row already shares the same depth.
-  const rowDepth = rowHeaders.reduce((max, h) => Math.max(max, h.labels.length), 0);
-  // One entry per row level, resolved once rather than re-looked-up per row/group — mirrors the
-  // backend's HtmlSnapshotRenderer exactly (same field, same fallback-to-report-default order), so
-  // the live grid and a saved snapshot never disagree on which fields share a column.
-  const rowFieldLayouts = Array.from({ length: rowDepth }, (_, level) => fieldLayouts.find((f) => f.field === rows[level]) ?? null);
-  const compactFlags = rowFieldLayouts.map((fl) => fl?.compact ?? layout === "Compact");
-  // A drilldown hierarchy is always rendered as ONE shared indented column regardless of
-  // reportLayout — matching real Excel's own natural-hierarchy rendering, and the only shape that
-  // can represent ragged depth without a per-level field to anchor separate columns to (there is no
-  // `rows[level]` field backing any level here — Rows is empty in this mode, see
-  // PivotBuilder.jsx's own rowsHierarchyDrilldown WHY comment).
-  //
-  // Drilldown v3: a drilldown COMBINED with other Rows fields (its slot among `rows`) is laid out like
-  // any Rows field instead — one label per field, the slot's own labels indented by member depth
-  // (see buildDisplayRows' drillSlot). Only a drilldown ALONE keeps the single ragged column.
-  const drillSlot = rowsHierarchyDrilldown ? rows.indexOf(rowsHierarchyDrilldown.topLevelField) : -1;
-  const drilldownAlone = Boolean(rowsHierarchyDrilldown) && rows.filter((f) => f !== MEASURES_PLACEHOLDER && f !== rowsHierarchyDrilldown.topLevelField).length === 0;
-  const combinedDrillSlot = rowsHierarchyDrilldown && !drilldownAlone ? drillSlot : -1;
-  const rowHeaderGroups = drilldownAlone ? [{ start: 0, end: Math.max(0, rowDepth - 1) }] : buildRowHeaderGroups(rowDepth, compactFlags);
-  const rowHeaderColumnCount = rowHeaderGroups.length;
-  // Backend floor of 1 (not 0) whenever there's at least one row to label: with no Value fields at
-  // all (Excel's own "removed the last Value field" state), Columns can legitimately come back with
-  // ZERO headers (a literal empty MDX set — see MdxPivotQueryBuilder.BuildAxisFinal's own WHY
-  // comment) — but the level-0 header row below is also where the ROW field's own title cell
-  // (FieldHeaderMenu "Business Unit.BU Short Name" etc.) renders, via the `Array.from({length:
-  // columnDepth})` loop a few lines down. columnDepth === 0 would skip that loop entirely and drop
-  // the row headers' own title row along with the (correctly absent) column ones — caught live,
-  // 2026-10-05, the first time this zero-Values case became reachable at all.
-  // Columns drilldown (C2): a drilldown slot adds one header row per member depth — the shared
-  // buildColumnHeaderRows (mirrored by the backend's ColumnHeaderLayout) decides rows and spans.
-  const allColumnHeaderRows = buildColumnHeaderRows(columnHeaders, columnsDrillSlot, columnsMeasuresIndex);
-  // One value field with Columns fields: Excel shows no row repeating the value's name under every
-  // column — the name sits once in the top-left corner (2026-10-21). Only when Σ Values is the LAST
-  // column level (its usual place, and always so with one value — PivotBuilder keeps it there), so
-  // the Grand Total caption on the first row is never the one dropped.
-  const labelLevels = columnHeaders[0]?.labels.length ?? 0;
-  const hideSingleValueRow = valueFields.length === 1 && columnsDrillSlot < 0 && labelLevels > 1 && columnsMeasuresIndex === labelLevels - 1;
-  const columnHeaderRows = hideSingleValueRow ? allColumnHeaderRows.filter((_, r) => r !== columnsMeasuresIndex) : allColumnHeaderRows;
-  const singleValueCaption = hideSingleValueRow ? (columnHeaders.find((c) => !c.isTotal)?.labels[columnsMeasuresIndex] ?? valueFields[0]?.field ?? "") : null;
-  const columnDepth = columnHeaders.length > 0 ? columnHeaderRows.length : rowHeaders.length > 0 ? 1 : 0;
+  const {
+    rowFieldLayouts,
+    combinedDrillSlot,
+    rowHeaderGroups,
+    rowHeaderColumnCount,
+    columnHeaderRows,
+    singleValueCaption,
+    columnDepth,
+    allDisplayRows,
+    collapsible,
+    displayRows,
+    labelSpans,
+  } = pivotLayout;
 
   const toggleGroup = (key) => {
     setCollapsed((prev) => {
@@ -1521,27 +1657,6 @@ export default function PivotGrid({
     });
   };
 
-  // The rows real Excel actually draws (item rows for compact-form levels, "ER Total"/"Grand Total"
-  // captions, Top subtotals absorbed or moved) — see buildDisplayRows' own WHY comment. Shared with
-  // exportExcel.js and mirrored by the backend's HtmlSnapshotRenderer, so the live grid, a saved
-  // snapshot and an export all draw the same table. Collapsing an outermost item (Excel's +/-)
-  // then replaces that item's rows with one row carrying its subtotal.
-  const allDisplayRows = buildDisplayRows(rowHeaders, {
-    rowHeaderGroups,
-    rowFieldLayouts,
-    repeatItemLabels,
-    measuresLevel: rowsMeasuresIndex,
-    drilldown: drilldownAlone,
-    // Excel's Outline AND Compact layouts are both "outline form" (outer items on their own row);
-    // only Tabular puts an item on its first child's row.
-    outline: layout !== "Tabular",
-    drilldownSubtotals,
-    drillSlot: combinedDrillSlot,
-  });
-  // A drilldown hierarchy has its OWN per-member +/- (onToggleDrilldownMember) — the outer-item
-  // collapse would be a second, conflicting toggle on the same rows.
-  const collapsible = rowsHierarchyDrilldown ? new Set() : collapsibleKeys(allDisplayRows);
-  const displayRows = applyCollapse(allDisplayRows, new Set([...collapsed].filter((k) => collapsible.has(k))), rowHeaderGroups);
   // Excel's "Expand/Collapse Entire Field" (2026-10-20): every item of one Rows level at once.
   const levelPrefix = (level) => `${level}\u0002`;
   const fieldCollapse = {
@@ -1636,11 +1751,6 @@ export default function PivotGrid({
   // filter drop downs" leaves the field-name header cells empty — no caption, no arrow — like Excel.
   const showExpandButtons = pivotOptions.showExpandButtons !== false;
   const FieldCaption = pivotOptions.showFieldCaptions === false ? NoCaption : FieldHeaderMenu;
-  // "Merge and center cells with labels": an item's label cell spans its rows (computeLabelSpans).
-  const labelSpans = pivotOptions.mergeLabels ? computeLabelSpans(displayRows, rowHeaderGroups, { drillSlot: combinedDrillSlot, drilldown: drilldownAlone }) : null;
-  // Value-carrying rows in display order — what arrow-key navigation steps through (an item row
-  // with no subtotal has no value cells to select).
-  const navigableRows = displayRows.filter((d) => d.sourceIndex !== null).map((d) => d.sourceIndex);
 
   // Grid lines on every header/body cell (border on all four sides, not just a per-row bottom
   // border) — the single biggest visual gap vs a real spreadsheet grid (flagged live, 2026-09-28).
@@ -1720,26 +1830,14 @@ export default function PivotGrid({
     }
   };
 
-  // The selected range in DISPLAY order: row positions in navigableRows and a column span.
-  const rangeBounds = () => {
-    if (!selectedCell) return null;
-    const anchor = anchorCell ?? selectedCell;
-    const a = navigableRows.indexOf(anchor.row);
-    const b = navigableRows.indexOf(selectedCell.row);
-    if (a < 0 || b < 0) return null;
-    return { top: Math.min(a, b), bottom: Math.max(a, b), left: Math.min(anchor.col, selectedCell.col), right: Math.max(anchor.col, selectedCell.col) };
-  };
-  const bounds = rangeBounds();
+  // bounds/navigableRows/selectedRows/selectedValues/baseStats are all declared above, alongside
+  // pivotLayout, for the Rules-of-Hooks reason explained there.
   const isMultiCellRange = bounds && (bounds.top !== bounds.bottom || bounds.left !== bounds.right);
   const inRange = (rowIndex, colIndex) => {
     if (!isMultiCellRange) return false;
     const position = navigableRows.indexOf(rowIndex);
     return position >= bounds.top && position <= bounds.bottom && colIndex >= bounds.left && colIndex <= bounds.right;
   };
-  // The selected range's Sum/Average/Count for the status bar (SelectionStatsReporter below).
-  const selectedRows = bounds ? navigableRows.slice(bounds.top, bounds.bottom + 1) : [];
-  const selectedValues = selectedRows.flatMap((r) => (cells[r] ?? []).slice(bounds.left, bounds.right + 1));
-  const baseStats = bounds ? selectionStats(selectedValues) : null;
   // Plus what Home › Number needs (2026-10-20): the value fields the selection covers (a format
   // applies to a whole value field, as in an Excel PivotTable) and the most decimals its numbers
   // show in General (up to 2) — where Increase/Decrease Decimal starts from.

@@ -200,8 +200,9 @@ function FolderTreeNode({ node, folderKeyPrefix, depth, expandedFolders, toggleF
         onClick={(e) => e.stopPropagation()}
         className="h-3 w-3 shrink-0 accent-primary"
       />
-      {/* Clicking the name ticks the field too, like Excel's own Field List. */}
-      <span className="cursor-pointer truncate" onClick={() => onFieldCheckToggle(field, !isPlaced(field))}>
+      {/* Clicking the name ticks the field too, like Excel's own Field List. A truncated name shows
+          its full text on hover via the native title tooltip, same as Excel's own Field List. */}
+      <span className="cursor-pointer truncate" title={label} onClick={() => onFieldCheckToggle(field, !isPlaced(field))}>
         {label}
       </span>
     </li>
@@ -403,7 +404,12 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
   };
   const dimensionFieldsByTable = groupByTable(dimensions);
 
-  const fieldsFor = (name) => [...(dimensionFieldsByTable.get(name) ?? []), ...(measuresByGroup.get(name) ?? [])];
+  // Same "Sort A to Z" / "Sort in Data Source Order" choice as the table/group names below — applies
+  // to a table's own fields and a measure group's own measures too, not just the top-level list
+  // (the backend no longer alphabetizes fields itself — see CubeMetadataService.cs's own WHY
+  // comment — so "Data Source Order" here is the cube's real MDSCHEMA row order, not a no-op).
+  const sortFields = (fields) => (sortOrder === "source" ? fields : [...fields].sort((a, b) => byName(a.label, b.label)));
+  const fieldsFor = (name) => sortFields([...(dimensionFieldsByTable.get(name) ?? []), ...(measuresByGroup.get(name) ?? [])]);
 
   const toggleTable = (name) => {
     onEnabledTableNamesChange(
@@ -432,7 +438,7 @@ function AvailableFieldsPanel({ dimensions, measures, valuesCount, isPlaced, tab
     }));
     const names = new Set([...dimensionMatches.keys(), ...measuresByGroup.keys()]);
     names.forEach((name) => {
-      const matched = [...(dimensionMatches.get(name) ?? []), ...(measuresByGroup.get(name) ?? []).filter((m) => m.label.toLowerCase().includes(query))];
+      const matched = sortFields([...(dimensionMatches.get(name) ?? []), ...(measuresByGroup.get(name) ?? []).filter((m) => m.label.toLowerCase().includes(query))]);
       if (matched.length > 0) fieldMatchesByTable.set(name, matched);
     });
   }
@@ -3489,26 +3495,41 @@ export default function FieldPicker({
                 { zoneKey: "rows", label: "Move to Row Labels" },
                 { zoneKey: "values", label: "Move to Values" },
               ]}
-              // Field Settings > Subtotals (Automatic/None) on Columns: a drilldown's "Egypt Total"
-              // columns (2026-10-14), or an ordinary OUTER field's "2024 Total" columns (2026-10-15 —
-              // every real Columns field but the innermost, see ColumnSubtotalsProcessor). Same
-              // fieldSubtotals list as Rows; columns have no Top/Bottom, so no Custom either.
+              // Field Settings > Subtotals on Columns: a drilldown's "Egypt Total" columns
+              // (2026-10-14), an ordinary OUTER field's "2024 Total" columns (2026-10-15 — every real
+              // Columns field but the innermost), a real field BEFORE a drilldown slot's own
+              // "Dept Total" columns (2026-11-05, PLAN 10), a real field AFTER the slot (2026-11-05,
+              // PLAN 11), and Custom (multi-function) Subtotals (PLAN 11 — see
+              // ColumnSubtotalsProcessor, same Automatic/None/Custom-function-checklist shape Rows
+              // already has, not a second sub-panel). Same fieldSubtotals list and onChange merge
+              // shape as the Rows instance below — only `appliesTo` differs (columns have no
+              // Top/Bottom, and the slot's own level is always excluded, drilldown or not).
               fieldSettings={
                 value.columnsHierarchyDrilldown || value.columns.filter((f) => f !== MEASURES_PLACEHOLDER).length >= 2
                   ? {
                       reportDefault: value.subtotals,
                       overrides: value.fieldSubtotals,
+                      // Custom (multi-function) Subtotals disabled (2026-11-09): confirmed against a
+                      // real Excel instance that "Custom" is greyed out for an OLAP-connected
+                      // PivotTable (Microsoft's own docs: a custom summary function can't be used
+                      // with an OLAP data source) — this app is OLAP-only, so the option never has a
+                      // real Excel equivalent to match. Automatic/None only, same as real Excel.
+                      noCustom: true,
+                      // Every real field but the innermost — the drill slot itself included (it
+                      // already had its own entry before PLAN 10/11, controlling
+                      // ColumnDrilldownLayoutProcessor's "Egypt Total" on/off; PLAN 10/11 added real
+                      // Subtotals support for every OTHER non-innermost real field too, before or
+                      // after the slot, so there's no reason left to single the slot out).
                       appliesTo: (field) => {
-                        if (value.columnsHierarchyDrilldown) return field === value.columnsHierarchyDrilldown.topLevelField;
                         const real = value.columns.filter((f) => f !== MEASURES_PLACEHOLDER);
                         return real.includes(field) && field !== real[real.length - 1];
                       },
-                      noCustom: true,
                       onChange: (field, patch) => {
                         const existing = value.fieldSubtotals.find((f) => f.field === field);
-                        const position = patch.position !== undefined ? patch.position : (existing?.position ?? null);
+                        const next = { position: existing?.position ?? null, functions: existing?.functions ?? null, ...patch };
                         const withoutField = value.fieldSubtotals.filter((f) => f.field !== field);
-                        onChange({ ...value, fieldSubtotals: position ? [...withoutField, { field, position, functions: null }] : withoutField });
+                        const isDefault = !next.position && (!next.functions || next.functions.length === 0);
+                        onChange({ ...value, fieldSubtotals: isDefault ? withoutField : [...withoutField, { field, ...next }] });
                       },
                     }
                   : undefined
@@ -3593,6 +3614,9 @@ export default function FieldPicker({
               fieldSettings={{
                 reportDefault: value.subtotals,
                 overrides: value.fieldSubtotals,
+                // Custom (multi-function) Subtotals disabled (2026-11-09) — see the Columns
+                // instance's own WHY comment above; same reasoning, OLAP-only app.
+                noCustom: true,
                 // patch is a partial { position, functions } — merged onto whatever override
                 // already exists for this field (or defaults, for a field with none yet). An
                 // override collapses back to "no entry at all" once both position and functions are
