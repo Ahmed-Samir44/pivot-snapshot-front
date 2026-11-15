@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { FileSpreadsheet, PanelRightOpen, Plus, Save, X } from "lucide-react";
+import { FileSpreadsheet, Link2, PanelRightOpen, Plus, Save, X } from "lucide-react";
 import Popover from "../components/forms/Popover";
+import ButtonProgressBar from "../components/forms/ButtonProgressBar";
+import KpiPicker from "../components/forms/KpiPicker";
 import MessageBar from "../components/layout/MessageBar";
 import Toasts from "../components/layout/Toasts";
 import { isCubeTemporarilyDown } from "../services/apiError";
@@ -22,7 +24,7 @@ import PivotChart from "../components/pivot/PivotChart";
 import { chartUnavailableReason } from "../utils/chartLayout";
 import { queryPivot } from "../services/pivotApi";
 import { getTables, getDimensions, getDimensionsForTable, getMeasures, getMembers } from "../services/cubeMetaApi";
-import { saveSnapshot, listDefinitions } from "../services/snapshotApi";
+import { saveSnapshot, listDefinitions, linkKpi } from "../services/snapshotApi";
 import { MEASURES_PLACEHOLDER, normalizeMeasuresPlacement, hideMeasuresLabelIfSingleValue } from "../utils/measuresPlacement";
 import { readFieldDragPayload, FIELD_DRAG_MIME, removeFieldEverywhere } from "../utils/dragDrop";
 import { isCompleteCalculatedField, isCompleteCalculatedItem } from "../utils/calculatedFields";
@@ -525,6 +527,14 @@ export default function PivotBuilder() {
   }, []);
   const [tableStyle, setTableStyle] = useState(() => readPersistedBuilderState()?.tableStyle ?? "Default");
   const [includeChart, setIncludeChart] = useState(() => readPersistedBuilderState()?.includeChart ?? false);
+  // Link this save straight to a KPI (2026-11-15, "وانا بعملها save كمان" — do it in the same Save
+  // action instead of needing a separate trip to Snapshot History afterward). Just holds the pick
+  // until Save actually succeeds — the real linkKpi() call happens in handleSave, against whichever
+  // pivot definition this save resolves to (a brand-new one, or an existing one getting a new
+  // version — either way the definition is what gets linked, not the version).
+  const [linkKpiSelection, setLinkKpiSelection] = useState(null);
+  const [linkKpiError, setLinkKpiError] = useState(null);
+  const [showKpiPicker, setShowKpiPicker] = useState(false);
   const [chartType, setChartType] = useState(() => readPersistedBuilderState()?.chartType ?? "Bar");
   // Real Excel's own default for a brand-new PivotTable is Compact Form, not Tabular — same
   // 2026-10-06 default-behaviors audit as the Grand Totals default above.
@@ -1042,6 +1052,16 @@ export default function PivotBuilder() {
       if (!existingSnapshotNames.includes(snapshotName.trim())) {
         setExistingSnapshotNames((prev) => [...prev, snapshotName.trim()]);
       }
+      if (linkKpiSelection) {
+        try {
+          await linkKpi(saved.definitionId, linkKpiSelection.id);
+          setLinkKpiSelection(null);
+        } catch (err) {
+          // The save itself already succeeded — a failed link shouldn't read as a failed save, so
+          // this gets its own error surface instead of overwriting saveMessage/saveError above.
+          setLinkKpiError(err.message);
+        }
+      }
       return true;
     } catch (err) {
       // SnapshotTooLarge included — a flat, non-overridable ceiling now (removed 2026-09-27 on
@@ -1191,12 +1211,13 @@ export default function PivotBuilder() {
         type="button"
         onClick={handleExport}
         disabled={!result || exporting}
-        className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        className="btn-secondary relative overflow-hidden inline-flex items-center gap-1.5 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
         title="Download this PivotTable as an Excel file"
       >
         <FileSpreadsheet className="h-4 w-4" style={{ color: "#217346" }} />
         {/* Icon only on a phone (the title stays as its tooltip) so the top bar fits, 2026-10-25. */}
         <span className="hidden sm:inline">{exporting ? "Exporting…" : "Export"}</span>
+        <ButtonProgressBar active={exporting} tone="dark" />
       </button>
       <Popover
         align="right"
@@ -1293,8 +1314,43 @@ export default function PivotBuilder() {
               </select>
             )}
 
-            <button type="submit" disabled={saving || !snapshotName.trim()} className="btn-primary mt-1 disabled:cursor-not-allowed disabled:opacity-50">
+            {linkKpiSelection ? (
+              <div className="flex items-center gap-1.5 rounded-md border border-primary-200 bg-primary-50 px-2 py-1.5 text-xs text-primary-strong">
+                <Link2 className="h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">Link to KPI: {linkKpiSelection.name}</span>
+                <button type="button" onClick={() => setLinkKpiSelection(null)} className="shrink-0 rounded p-0.5 hover:bg-primary-100" aria-label="Clear KPI link" title="Clear">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : showKpiPicker ? (
+              // Rendered INLINE, not in its own Popover — a second portaled Popover nested inside
+              // this one broke the outer one: both portal to document.body as SIBLINGS, so a click
+              // inside the inner panel isn't a DOM descendant of the outer panel's own ref, and the
+              // outer Popover's outside-click handler read it as "outside" and closed the whole Save
+              // form (caught live, 2026-11-15, picking a KPI closed the entire Save Snapshot popover).
+              <div className="rounded-md border border-slate-200 p-2">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-xs font-medium text-ink">Link to KPI</span>
+                  <button type="button" onClick={() => setShowKpiPicker(false)} className="rounded p-0.5 text-muted hover:bg-slate-100" aria-label="Cancel">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <KpiPicker onSelect={(kpi) => { setLinkKpiSelection(kpi); setShowKpiPicker(false); }} />
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowKpiPicker(true)}
+                className="inline-flex items-center gap-1 self-start text-xs font-medium text-primary-strong hover:underline"
+              >
+                <Link2 className="h-3 w-3" />
+                Link to KPI (optional)
+              </button>
+            )}
+
+            <button type="submit" disabled={saving || !snapshotName.trim()} className="btn-primary relative overflow-hidden mt-1 disabled:cursor-not-allowed disabled:opacity-50">
               {saving ? "Saving…" : "Save"}
+              <ButtonProgressBar active={saving} tone="light" />
             </button>
           </form>
         )}
@@ -1642,6 +1698,7 @@ export default function PivotBuilder() {
         items={[
           saveMessage && { tone: "success", text: saveMessage, onClose: () => setSaveMessage(null) },
           saveError && { tone: "error", text: saveError, onClose: () => setSaveError(null) },
+          linkKpiError && { tone: "error", text: `Saved, but couldn't link the KPI: ${linkKpiError}`, onClose: () => setLinkKpiError(null) },
           exportError && { tone: "error", text: exportError, onClose: () => setExportError(null) },
           exportNotice && { tone: "warning", text: exportNotice, onClose: () => setExportNotice(null) },
         ].filter(Boolean)}

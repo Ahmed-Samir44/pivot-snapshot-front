@@ -20,8 +20,10 @@ async function request(path, options = {}) {
   if (!response.ok) {
     const error = new Error(data?.error || `Request to ${path} failed with status ${response.status}`);
     // Structured fields (type/actualRows/maxRows, etc.) carried on the Error object — same
-    // "details, not just message" convention as pivotApi.js's queryPivot.
+    // "details, not just message" convention as pivotApi.js's queryPivot. status: so a caller can
+    // tell "not found" apart from a real server failure without parsing the message text.
     error.details = data;
+    error.status = response.status;
     throw error;
   }
   return data;
@@ -90,6 +92,38 @@ export function deleteDefinition(definitionId) {
 
 export function getVersions(definitionId) {
   return request(`/api/snapshots/${definitionId}/versions`);
+}
+
+// Strategy KPI linking (2026-11-12) — see DataverseSnapshotStorageService.LinkKpiAsync's own WHY
+// comment. Re-linking an already-linked KPI to a different pivot just overwrites the old link.
+export function linkKpi(definitionId, kpiId) {
+  return request(`/api/snapshots/${definitionId}/link-kpi`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kpiId }),
+  });
+}
+
+// "Off"/"Hourly"/"Daily"/"Weekly" — see DataverseSnapshotStorageService.SetScheduleAsync's own WHY
+// comment on why this only does anything for a KPI-linked pivot.
+export function setSchedule(definitionId, interval) {
+  return request(`/api/snapshots/${definitionId}/schedule`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ interval }),
+  });
+}
+
+// The linked pivot's latest active version, in the same shape getVersion() returns — null if no
+// pivot is linked to this KPI yet (404), distinguished from a real network/server error.
+export async function getVersionByKpi(kpiId) {
+  try {
+    const version = await request(`/api/snapshots/by-kpi/${kpiId}`);
+    return version ? { ...version, result: reviveResultCells(version.result) } : version;
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
 }
 
 export function getDeactivatedVersions(definitionId) {

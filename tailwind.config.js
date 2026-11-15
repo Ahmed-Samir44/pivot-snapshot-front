@@ -53,6 +53,18 @@ export default {
         enter: 'cubic-bezier(.2,.7,.2,1)',
         exit: 'cubic-bezier(.4,0,.7,.2)',
       },
+      keyframes: {
+        // The Save/Export buttons have no real percentage to report (just an awaited request), so
+        // this is an indeterminate sweep — the same "we're working on it" shape Office itself uses
+        // for an in-progress command, not a determinate fill.
+        'progress-sweep': {
+          '0%': { left: '-40%' },
+          '100%': { left: '100%' },
+        },
+      },
+      animation: {
+        'progress-sweep': 'progress-sweep 1.1s ease-in-out infinite',
+      },
     },
   },
   plugins: [],

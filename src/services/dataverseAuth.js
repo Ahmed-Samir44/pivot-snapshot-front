@@ -163,6 +163,15 @@ async function handlePendingRedirect() {
   writeTokens(tokenResponse);
 }
 
+// Hands the CURRENT refresh token to a caller that wants to register it server-side for
+// unattended/scheduled use (see PivotSnapshot-Back's ScheduledRunTokenStore) — this is the exact
+// same refresh token already driving this module's own silent getDataverseAccessToken() refresh,
+// just copied to the backend instead of staying only in this browser's localStorage. Null when
+// there's nothing to hand over (not signed in).
+export function getRefreshTokenForScheduling() {
+  return readTokens()?.refreshToken ?? null;
+}
+
 export function isSignedIn() {
   const tokens = readTokens();
   return Boolean(tokens?.refreshToken || (tokens?.accessToken && tokens.expiresAt > Date.now()));

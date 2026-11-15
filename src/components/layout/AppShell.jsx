@@ -10,6 +10,7 @@ import { getSignedInUser, signOut } from "../../services/dataverseAuth";
 const NAV_ITEMS = [
   { path: "/", label: "Pivot Builder", short: "Builder" },
   { path: "/history", label: "Snapshot History", short: "History" },
+  { path: "/kpi-links", label: "KPI Links", short: "KPIs" },
 ];
 
 function initialsOf(user) {
