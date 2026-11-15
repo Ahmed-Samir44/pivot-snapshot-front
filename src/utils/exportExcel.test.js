@@ -106,4 +106,51 @@ describe("exportPivotToExcel into a workbook (Show Report Filter Pages)", () => 
     expect(setup.printTitlesRow).toMatch(/^\d+:\d+$/);
     expect(workbook.title).toBe("Revenue by country");
   });
+
+  // 2026-11-10: when the export can't become a real embedded PivotTable (every case above, since
+  // targetWorkbook forces that), the sheet is now a real Excel Table (Ctrl+T) — filter buttons and
+  // banded rows — instead of bare, unstructured cells (requested live: "عايزه يبقى جدول").
+  it("wraps the export in a real Excel Table with a filter button on every column", async () => {
+    const workbook = createWorkbook();
+    await exportPivotToExcel(options({ workbook }));
+    const table = workbook.worksheets[0].getTables()[0];
+    expect(table).toBeTruthy();
+    expect(table.model.columns.map((c) => c.name)).toEqual(["Country", "Revenue"]);
+    expect(table.model.columns.every((c) => c.filterButton)).toBe(true);
+    // 3 result rows (Egypt, KSA, Grand Total) = 3 table rows, one each.
+    expect(table.model.rows).toHaveLength(3);
+  });
+
+  it("flattens a multi-level column header into one combined name per column, dropping the suppressed Σ Values level", async () => {
+    const workbook = createWorkbook();
+    const crossed = {
+      rowHeaders: [{ labels: ["AMH"], isTotal: false }],
+      columnHeaders: [
+        { labels: ["Egypt", "Revenue"], isTotal: false },
+        { labels: ["KSA", "Revenue"], isTotal: false },
+      ],
+      cells: [[1, 2]],
+    };
+    await exportPivotToExcel(options({ workbook, result: crossed, rows: ["[BU]"], columns: ["[Country]", "[Measures]"], rowFieldLabels: ["BU"], columnFieldLabels: ["Country", "Σ Values"] }));
+    const table = workbook.worksheets[0].getTables()[0];
+    // Not "Egypt - Revenue"/"KSA - Revenue": the single-value-field Σ level is suppressed, same as
+    // the live grid and the PivotTable-placeholder path (its own "Revenue" caption sits in the
+    // corner cell above the table instead, covered by the existing crossed-header test above).
+    expect(table.model.columns.map((c) => c.name)).toEqual(["BU", "Egypt", "KSA"]);
+  });
+
+  it("keeps a Grand Total column's own caption as its table column name", async () => {
+    const withColumnTotal = {
+      rowHeaders: [{ labels: ["Egypt"], isTotal: false }],
+      columnHeaders: [
+        { labels: ["Jan"], isTotal: false },
+        { labels: ["Total"], isTotal: true, captionLevel: -1, caption: "Grand Total" },
+      ],
+      cells: [[5, 5]],
+    };
+    const workbook = createWorkbook();
+    await exportPivotToExcel(options({ workbook, result: withColumnTotal, columns: ["[Month]"], columnFieldLabels: ["Month"] }));
+    const table = workbook.worksheets[0].getTables()[0];
+    expect(table.model.columns.map((c) => c.name)).toEqual(["Country", "Jan", "Grand Total"]);
+  });
 });

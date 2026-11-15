@@ -318,114 +318,225 @@ export async function exportPivotToExcel({
   // One row per column-header level, with the row-header field labels occupying the top-left
   // corner (merged down through every column-header level, same as PivotGrid's rowSpan).
   const columnHeaderStartRow = currentRow;
-  for (let level = 0; level < columnDepth; level++) {
-    const row = sheet.getRow(currentRow);
-    if (level === 0) {
-      rowHeaderGroups.forEach((group, gi) => {
-        const cell = row.getCell(gi + 1);
-        // A compact-merged column is Excel's literal "Row Labels"; a standalone one is its field.
-        // Blank with "Display field captions and filter drop downs" off (PivotTable Options > Display).
-        cell.value = !showCaptions ? "" : group.start < group.end ? "Row Labels" : rowFieldLayouts[group.start]?.customName || rowFieldLabels[group.start] || "";
+  let firstDataRow;
+  let placedRows = [];
+
+  if (plain) {
+    for (let level = 0; level < columnDepth; level++) {
+      const row = sheet.getRow(currentRow);
+      if (level === 0) {
+        rowHeaderGroups.forEach((group, gi) => {
+          const cell = row.getCell(gi + 1);
+          // A compact-merged column is Excel's literal "Row Labels"; a standalone one is its field.
+          // Blank with "Display field captions and filter drop downs" off (PivotTable Options > Display).
+          cell.value = !showCaptions ? "" : group.start < group.end ? "Row Labels" : rowFieldLayouts[group.start]?.customName || rowFieldLabels[group.start] || "";
+          cell.font = { bold: true };
+          cell.fill = HEADER_FILL;
+          if (columnDepth > 1) mergeCells(columnHeaderStartRow, gi + 1, columnHeaderStartRow + columnDepth - 1, gi + 1);
+        });
+      }
+      // A Grand Total column shows its caption once, in the top header row, like Excel.
+      const levelLabels = columnHeaders.map((c) => (c.captionLevel === -1 && c.caption ? (level === 0 ? c.caption : "") : c.labels[level]));
+      // The same spans as the live grid (buildColumnHeaderRows: an outer item over its children, a
+      // "2024 Total" caption, blanks under it), since 2026-10-15 for ordinary Columns fields too.
+      const runs = columnHeaderRows[level]?.map((cell) => ({ start: cell.sourceIndex, end: cell.sourceIndex + cell.span, label: cell.text })) ?? mergeRuns(levelLabels);
+      for (const run of runs) {
+        const startCol = rowDepth + run.start + 1;
+        const endCol = rowDepth + run.end;
+        const cell = row.getCell(startCol);
+        cell.value = run.label;
         cell.font = { bold: true };
         cell.fill = HEADER_FILL;
-        if (columnDepth > 1) mergeCells(columnHeaderStartRow, gi + 1, columnHeaderStartRow + columnDepth - 1, gi + 1);
-      });
+        // An outer header spanning its children is left-aligned (Excel's Compact layout) — centered with
+        // "Merge and center cells with labels"; a single column stays centered.
+        cell.alignment = { horizontal: endCol > startCol && !pivotOptions.mergeLabels ? "left" : "center" };
+        if (endCol > startCol) mergeCells(currentRow, startCol, currentRow, endCol);
+      }
+      currentRow += 1;
     }
-    // A Grand Total column shows its caption once, in the top header row, like Excel.
-    const levelLabels = columnHeaders.map((c) => (c.captionLevel === -1 && c.caption ? (level === 0 ? c.caption : "") : c.labels[level]));
-    // The same spans as the live grid (buildColumnHeaderRows: an outer item over its children, a
-    // "2024 Total" caption, blanks under it), since 2026-10-15 for ordinary Columns fields too.
-    const runs = columnHeaderRows[level]?.map((cell) => ({ start: cell.sourceIndex, end: cell.sourceIndex + cell.span, label: cell.text })) ?? mergeRuns(levelLabels);
-    for (const run of runs) {
-      const startCol = rowDepth + run.start + 1;
-      const endCol = rowDepth + run.end;
-      const cell = row.getCell(startCol);
-      cell.value = run.label;
-      cell.font = { bold: true };
-      cell.fill = HEADER_FILL;
-      // An outer header spanning its children is left-aligned (Excel's Compact layout) — centered with
-      // "Merge and center cells with labels"; a single column stays centered.
-      cell.alignment = { horizontal: endCol > startCol && !pivotOptions.mergeLabels ? "left" : "center" };
-      if (endCol > startCol) mergeCells(currentRow, startCol, currentRow, endCol);
-    }
-    currentRow += 1;
   }
 
   // Row headers + values, one sheet row per DISPLAY row (see buildDisplayRows) — the same rows the
   // live grid draws: compact-form item rows (indented with Excel's own cell indent), "ER Total"/
   // "Grand Total" captions, each label shown once (Excel doesn't merge label cells by default).
   const displayRows = buildDisplayRows(rowHeaders, { rowHeaderGroups, rowFieldLayouts, repeatItemLabels, measuresLevel: rowsMeasuresIndex, outline: layout !== "Tabular", drilldown, drilldownSubtotals, drillSlot });
-  const firstDataRow = currentRow;
 
   // PivotTable Options › Printing (2026-10-20), applied where printing happens — the exported sheet:
   // "Set print titles" repeats the column header rows at the top of every printed page, and "Repeat
   // row labels on each printed page" the row label columns at the left of every page.
-  if (pivotOptions.printTitles && firstDataRow > 1 + filterAreaRows) {
-    sheet.pageSetup.printTitlesRow = `${1 + filterAreaRows}:${firstDataRow - 1}`;
-  }
-  if (pivotOptions.repeatRowLabelsOnPrint !== false && rowDepth > 0) {
-    sheet.pageSetup.printTitlesColumn = `A:${sheet.getColumn(rowDepth).letter}`;
-  }
   // Alt Text: Excel stores it on the PivotTable; here it goes into the file's own Title/Subject.
   if (pivotOptions.altTextTitle) workbook.title = pivotOptions.altTextTitle;
   if (pivotOptions.altTextDescription) workbook.subject = pivotOptions.altTextDescription;
-  // "Merge and center cells with labels": a real merged cell per item (computeLabelSpans). A merge
-  // never crosses a blank line, so its rows are consecutive sheet rows.
-  const labelSpans = pivotOptions.mergeLabels ? computeLabelSpans(displayRows, rowHeaderGroups, { drillSlot, drilldown }) : null;
-  // Sheet row of every display row that shows a result row's values: [excelRow, rowIndex, kind].
-  const placedRows = [];
-  displayRows.forEach((displayRow, displayIndex) => {
-    const excelRow = currentRow;
-    const isTotalRow = displayRow.kind === "subtotal" || displayRow.kind === "grand" || (displayRow.kind === "header" && displayRow.sourceIndex !== null);
-    rowHeaderGroups.forEach((_, gi) => {
-      const span = labelSpans?.[displayIndex][gi] ?? -1;
-      if (span === 0) return; // inside the merged cell above
-      const cell = sheet.getRow(excelRow).getCell(gi + 1);
-      const lines = displayRow.groupCells[gi]?.lines ?? [];
-      cell.value = lines.map((l) => l.text).join(" › ");
-      if (lines[0]?.indent) cell.alignment = { indent: lines[0].indent };
-      // An outer item's label (span >= 1) is merged and centered; everything else keeps its alignment.
-      if (span >= 1) cell.alignment = { horizontal: "center", vertical: "middle" };
-      if (span > 1) mergeCells(excelRow, gi + 1, excelRow + span - 1, gi + 1);
-      cell.font = { bold: isTotalRow || displayRow.kind === "header" };
-      if (isTotalRow) cell.fill = SUBTOTAL_FILL;
-    });
-    if (displayRow.sourceIndex !== null) placedRows.push([excelRow, displayRow.sourceIndex, displayRow.kind]);
-    currentRow += displayRow.blankLineAfter ? 2 : 1;
-  });
 
-  // Data cells — same measure-lookup rule as PivotGrid: whichever axis actually carries Σ Values
-  // determines which PivotValueField a given cell belongs to, read directly off that header's own
-  // caption at the sentinel's position (not a fixed stride — see utils/measuresPlacement.js).
-  placedRows.forEach(([excelRow, rowIndex]) => {
-    const rowHeader = rowHeaders[rowIndex];
-    columnHeaders.forEach((colHeader, colIndex) => {
-      const measureIndex = measuresInRows
-        ? measureIndexOf(rowHeader, rowsMeasuresIndex, captionToIndex)
-        : measureIndexOf(colHeader, columnsMeasuresIndex, captionToIndex);
-      const value = cells[rowIndex][colIndex];
-      const isTotalCell = rowHeader.isTotal || colHeader.isTotal;
-      const cell = sheet.getRow(excelRow).getCell(rowDepth + colIndex + 1);
-      // An error cell is a real Excel #DIV/0! (or the "For error values show" text); an empty one
-      // stays empty unless "For empty cells show" has text.
-      if (isErrorValue(value)) {
-        cell.value = pivotOptions.showErrorText ? pivotOptions.errorText : { error: errorToken(value) };
-      } else if (value === null || value === undefined) {
-        cell.value = pivotOptions.showEmptyText && pivotOptions.emptyText ? pivotOptions.emptyText : null;
-      } else {
-        cell.value = value;
-      }
-      const code = excelNumberFormat(cellFormats?.[cellFormatKey(rowHeader, colHeader)] ?? formatForColumn(measureIndex, valueFields));
-      cell.numFmt = code === "General" && typeof value === "number" ? generalAsShown([value]) : code;
-      cell.font = { bold: isTotalCell };
-      cell.alignment = { horizontal: "center" };
-      if (isTotalCell) cell.fill = SUBTOTAL_FILL;
-    });
-  });
-
-  // Plain cells under a PivotTable: Excel applies the pivot's own style once it refreshes.
   if (plain) {
+    firstDataRow = currentRow;
+    if (pivotOptions.printTitles && firstDataRow > 1 + filterAreaRows) {
+      sheet.pageSetup.printTitlesRow = `${1 + filterAreaRows}:${firstDataRow - 1}`;
+    }
+    if (pivotOptions.repeatRowLabelsOnPrint !== false && rowDepth > 0) {
+      sheet.pageSetup.printTitlesColumn = `A:${sheet.getColumn(rowDepth).letter}`;
+    }
+    // "Merge and center cells with labels": a real merged cell per item (computeLabelSpans). A merge
+    // never crosses a blank line, so its rows are consecutive sheet rows.
+    const labelSpans = pivotOptions.mergeLabels ? computeLabelSpans(displayRows, rowHeaderGroups, { drillSlot, drilldown }) : null;
+    // Sheet row of every display row that shows a result row's values: [excelRow, rowIndex, kind].
+    displayRows.forEach((displayRow, displayIndex) => {
+      const excelRow = currentRow;
+      const isTotalRow = displayRow.kind === "subtotal" || displayRow.kind === "grand" || (displayRow.kind === "header" && displayRow.sourceIndex !== null);
+      rowHeaderGroups.forEach((_, gi) => {
+        const span = labelSpans?.[displayIndex][gi] ?? -1;
+        if (span === 0) return; // inside the merged cell above
+        const cell = sheet.getRow(excelRow).getCell(gi + 1);
+        const lines = displayRow.groupCells[gi]?.lines ?? [];
+        cell.value = lines.map((l) => l.text).join(" › ");
+        if (lines[0]?.indent) cell.alignment = { indent: lines[0].indent };
+        // An outer item's label (span >= 1) is merged and centered; everything else keeps its alignment.
+        if (span >= 1) cell.alignment = { horizontal: "center", vertical: "middle" };
+        if (span > 1) mergeCells(excelRow, gi + 1, excelRow + span - 1, gi + 1);
+        cell.font = { bold: isTotalRow || displayRow.kind === "header" };
+        if (isTotalRow) cell.fill = SUBTOTAL_FILL;
+      });
+      if (displayRow.sourceIndex !== null) placedRows.push([excelRow, displayRow.sourceIndex, displayRow.kind]);
+      currentRow += displayRow.blankLineAfter ? 2 : 1;
+    });
+
+    // Data cells — same measure-lookup rule as PivotGrid: whichever axis actually carries Σ Values
+    // determines which PivotValueField a given cell belongs to, read directly off that header's own
+    // caption at the sentinel's position (not a fixed stride — see utils/measuresPlacement.js).
+    placedRows.forEach(([excelRow, rowIndex]) => {
+      const rowHeader = rowHeaders[rowIndex];
+      columnHeaders.forEach((colHeader, colIndex) => {
+        const measureIndex = measuresInRows
+          ? measureIndexOf(rowHeader, rowsMeasuresIndex, captionToIndex)
+          : measureIndexOf(colHeader, columnsMeasuresIndex, captionToIndex);
+        const value = cells[rowIndex][colIndex];
+        const isTotalCell = rowHeader.isTotal || colHeader.isTotal;
+        const cell = sheet.getRow(excelRow).getCell(rowDepth + colIndex + 1);
+        // An error cell is a real Excel #DIV/0! (or the "For error values show" text); an empty one
+        // stays empty unless "For empty cells show" has text.
+        if (isErrorValue(value)) {
+          cell.value = pivotOptions.showErrorText ? pivotOptions.errorText : { error: errorToken(value) };
+        } else if (value === null || value === undefined) {
+          cell.value = pivotOptions.showEmptyText && pivotOptions.emptyText ? pivotOptions.emptyText : null;
+        } else {
+          cell.value = value;
+        }
+        const code = excelNumberFormat(cellFormats?.[cellFormatKey(rowHeader, colHeader)] ?? formatForColumn(measureIndex, valueFields));
+        cell.numFmt = code === "General" && typeof value === "number" ? generalAsShown([value]) : code;
+        cell.font = { bold: isTotalCell };
+        cell.alignment = { horizontal: "center" };
+        if (isTotalCell) cell.fill = SUBTOTAL_FILL;
+      });
+    });
+
+    // Plain cells under a PivotTable: Excel applies the pivot's own style once it refreshes.
     sheet.eachRow({ includeEmpty: false }, (row) => row.eachCell({ includeEmpty: false }, (cell) => (cell.style = {})));
+  } else {
+    // A real Excel Table (Ctrl+T) instead of bare cells, for the export Excel can't rebuild as its
+    // own PivotTable — filter-dropdown arrows and banded rows instead of flat, unstructured values
+    // (requested live 2026-11-10: "عايزه يبقى جدول مايبقاش مجرد cells"). A Table needs exactly ONE
+    // header row and no merged cells, so multi-level column headers are flattened into one combined
+    // name per column instead of the stacked per-level header rows the PivotTable-placeholder path
+    // above draws — "Merge and center cells with labels" has no effect here for the same reason.
+    const rowHeaderNames = rowHeaderGroups.map((group, gi) =>
+      !showCaptions
+        ? `Row ${gi + 1}`
+        : group.start < group.end
+          ? "Row Labels"
+          : rowFieldLayouts[group.start]?.customName || rowFieldLabels[group.start] || `Row ${gi + 1}`,
+    );
+    const columnNames = columnHeaders.map((c) => {
+      if (c.captionLevel === -1 && c.caption) return c.caption; // Grand Total column
+      const parts = [];
+      for (let level = 0; level < columnDepth; level++) {
+        if (c.labels[level]) parts.push(c.labels[level]);
+      }
+      return parts.join(" - ") || "Total";
+    });
+    // Table column names must be unique and non-empty within the table.
+    const seenNames = new Map();
+    const tableColumnNames = [...rowHeaderNames, ...columnNames].map((name) => {
+      const base = String(name ?? "").trim() || "Column";
+      const n = (seenNames.get(base) ?? 0) + 1;
+      seenNames.set(base, n);
+      return n === 1 ? base : `${base} (${n})`;
+    });
+
+    const tableRows = [];
+    let excelRow = columnHeaderStartRow + 1;
+    displayRows.forEach((displayRow) => {
+      const rowValues = rowHeaderGroups.map((_, gi) => {
+        const lines = displayRow.groupCells[gi]?.lines ?? [];
+        return lines.length > 0 ? lines.map((l) => l.text).join(" › ") : null;
+      });
+      if (displayRow.sourceIndex !== null) {
+        const rowIndex = displayRow.sourceIndex;
+        const valueValues = columnHeaders.map((colHeader, colIndex) => {
+          const value = cells[rowIndex][colIndex];
+          if (isErrorValue(value)) return pivotOptions.showErrorText ? pivotOptions.errorText : { error: errorToken(value) };
+          if (value === null || value === undefined) return pivotOptions.showEmptyText && pivotOptions.emptyText ? pivotOptions.emptyText : null;
+          return value;
+        });
+        tableRows.push([...rowValues, ...valueValues]);
+        placedRows.push([excelRow, rowIndex, displayRow.kind]);
+      } else {
+        tableRows.push([...rowValues, ...columnHeaders.map(() => null)]);
+      }
+      excelRow += 1;
+      if (displayRow.blankLineAfter) {
+        tableRows.push(tableColumnNames.map(() => null));
+        excelRow += 1;
+      }
+    });
+    if (tableRows.length === 0) tableRows.push(tableColumnNames.map(() => null));
+
+    sheet.addTable({
+      name: safeTableName(sheet.name),
+      ref: `A${columnHeaderStartRow}`,
+      headerRow: true,
+      style: { theme: "TableStyleMedium2", showRowStripes: true },
+      columns: tableColumnNames.map((name) => ({ name, filterButton: true })),
+      rows: tableRows,
+    });
+    firstDataRow = columnHeaderStartRow + 1;
+    if (pivotOptions.printTitles) sheet.pageSetup.printTitlesRow = `${columnHeaderStartRow}:${columnHeaderStartRow}`;
+    if (pivotOptions.repeatRowLabelsOnPrint !== false && rowDepth > 0) {
+      sheet.pageSetup.printTitlesColumn = `A:${sheet.getColumn(rowDepth).letter}`;
+    }
+
+    // Styling pass — addTable already wrote every cell's value above; this only layers font/fill/
+    // numFmt on top, the same total-row/total-cell/number-format rules the PivotTable-placeholder
+    // path uses, reusing the SAME cell addresses addTable just populated.
+    let styleRow = firstDataRow;
+    displayRows.forEach((displayRow) => {
+      const isTotalRow = displayRow.kind === "subtotal" || displayRow.kind === "grand" || (displayRow.kind === "header" && displayRow.sourceIndex !== null);
+      rowHeaderGroups.forEach((_, gi) => {
+        const cell = sheet.getRow(styleRow).getCell(gi + 1);
+        const lines = displayRow.groupCells[gi]?.lines ?? [];
+        if (lines[0]?.indent) cell.alignment = { indent: lines[0].indent };
+        cell.font = { bold: isTotalRow || displayRow.kind === "header" };
+        if (isTotalRow) cell.fill = SUBTOTAL_FILL;
+      });
+      styleRow += 1;
+      if (displayRow.blankLineAfter) styleRow += 1;
+    });
+    placedRows.forEach(([excelRowAddr, rowIndex]) => {
+      const rowHeader = rowHeaders[rowIndex];
+      columnHeaders.forEach((colHeader, colIndex) => {
+        const measureIndex = measuresInRows
+          ? measureIndexOf(rowHeader, rowsMeasuresIndex, captionToIndex)
+          : measureIndexOf(colHeader, columnsMeasuresIndex, captionToIndex);
+        const value = cells[rowIndex][colIndex];
+        const isTotalCell = rowHeader.isTotal || colHeader.isTotal;
+        const cell = sheet.getRow(excelRowAddr).getCell(rowDepth + colIndex + 1);
+        const code = excelNumberFormat(cellFormats?.[cellFormatKey(rowHeader, colHeader)] ?? formatForColumn(measureIndex, valueFields));
+        cell.numFmt = code === "General" && typeof value === "number" ? generalAsShown([value]) : code;
+        cell.font = { bold: isTotalCell };
+        cell.alignment = { horizontal: "center" };
+        if (isTotalCell) cell.fill = SUBTOTAL_FILL;
+      });
+    });
+    currentRow = styleRow;
   }
 
   // Native Excel conditional formatting, scoped to each measure's own detail cells (excluding
@@ -533,6 +644,17 @@ function safeSheetName(workbook, name) {
     candidate = base.slice(0, 31 - suffix.length) + suffix;
   }
   return candidate;
+}
+
+// Excel table names: letters/digits/underscores only, must start with a letter or underscore, and
+// unique across the WHOLE workbook (not just the sheet) — same problem safeSheetName solves for
+// sheet names. Derived from the sheet's own (already workbook-unique) name rather than tracked
+// separately, so it's unique for free without needing to enumerate every table already added to
+// other sheets (Report Filter Pages puts several of these in one shared workbook).
+function safeTableName(fromSheetName) {
+  let base = `Table_${String(fromSheetName ?? "Pivot").replace(/[^A-Za-z0-9_]/g, "_")}`.slice(0, 255);
+  if (!/^[A-Za-z_]/.test(base)) base = `T_${base}`;
+  return base;
 }
 
 export function createWorkbook() {
