@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronLeft, FileSpreadsheet, Filter as FilterIcon, Loader2, Table2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronLeft, FileSpreadsheet, Filter as FilterIcon, Table2, X } from "lucide-react";
 import Popover from "../forms/Popover";
 import ContextMenu from "../forms/ContextMenu";
 import Modal from "../forms/Modal";
+import ButtonProgressBar from "../forms/ButtonProgressBar";
 import Slicer from "./Slicer";
 import Timeline from "./Timeline";
 import GroupItemsPanel from "./GroupItemsPanel";
@@ -1066,6 +1067,8 @@ export default function PivotGrid({
   // A query is running: with no result yet the placeholder says so, instead of "choose fields"
   // (2026-10-20, found by the feature test — it showed while fields were already placed).
   loading = false,
+  // Real elapsed seconds, not a fake percentage — see PivotBuilder.jsx's own WHY comment.
+  loadingSeconds = 0,
 }) {
   const [collapsed, setCollapsed] = useState(() => new Set());
   // The right-clicked value cell's context menu ({x, y, row, column, valueField, measureIndex}) and
@@ -1604,14 +1607,19 @@ export default function PivotGrid({
       <div
         className={`flex min-h-[22rem] items-center justify-center rounded-lg border border-slate-200 bg-white ${fill ? "flex-1" : ""}`}
       >
-        {/* Excel's own placeholder for an empty PivotTable, as a card on the empty sheet. */}
-        <div className="max-w-sm rounded-xl border border-slate-200 bg-white px-8 py-7 text-center shadow-sm">
+        {/* Excel's own placeholder for an empty PivotTable, as a card on the empty sheet. A thin
+            indeterminate progress sweep along the bottom edge while loading (2026-11-16, "عايز دول
+            يبقوا زي ال progress bar" — the same sweep Save/Export already use, not a spinning
+            circle) needs `relative overflow-hidden` on the card itself so the sweep clips within
+            its own rounded corners instead of spilling past them. */}
+        <div className="relative max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white px-8 py-7 text-center shadow-sm">
+          <ButtonProgressBar active={loading} tone="dark" />
           <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-primary-soft">
-            {loading ? <Loader2 className="h-5 w-5 animate-spin text-primary-strong" /> : <Table2 className="h-5 w-5 text-primary-strong" />}
+            <Table2 className="h-5 w-5 text-primary-strong" />
           </span>
           {loading ? (
             <>
-              <p className="text-sm font-semibold text-ink">Updating the PivotTable…</p>
+              <p className="text-sm font-semibold text-ink">Updating the PivotTable… {loadingSeconds}s</p>
               <p className="mt-1.5 text-xs leading-relaxed text-muted">Getting the numbers from the data server.</p>
             </>
           ) : request && (request.rows.length > 0 || request.columns.some((f) => f !== MEASURES_PLACEHOLDER) || request.values.length > 0) ? (

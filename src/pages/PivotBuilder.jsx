@@ -6,7 +6,6 @@ import KpiPicker from "../components/forms/KpiPicker";
 import MessageBar from "../components/layout/MessageBar";
 import Toasts from "../components/layout/Toasts";
 import { isCubeTemporarilyDown } from "../services/apiError";
-import { useRetryCountdown } from "../utils/useRetryCountdown";
 import { useUndoHistory } from "../utils/useUndoHistory";
 import AppShell from "../components/layout/AppShell";
 import FieldPicker from "../components/pivot/FieldPicker";
@@ -415,15 +414,28 @@ export default function PivotBuilder() {
   const [lastRunSignature, setLastRunSignature] = useState(null);
   const [error, setError] = useState(null);
   // The last query failed only because the data server is busy/unreachable (ApiError code) — shown as
-  // a calm notice that retries by itself (2026-10-20) instead of a red error. queryFailures restarts
-  // the countdown after each failed attempt.
+  // a calm notice with a manual "Try now" action instead of a red error. No longer auto-retried
+  // (2026-11-16, "مش عايز التطبيق بتاعنا يعمل retry عشان مايعملش حمل زيادة") — an automatic retry
+  // every 20s on top of the server's own 7s-bounded retry (CubeRetry.cs) added real, repeated load
+  // to an already-struggling cube during a real outage, silently, with no user action behind each
+  // attempt. A failed retry now just waits for the person to click "Try now" again.
   const [errorTemporary, setErrorTemporary] = useState(false);
-  const [queryFailures, setQueryFailures] = useState(0);
   const [loading, setLoading] = useState(false);
+  // Real elapsed time, not a fake percentage (2026-11-16, "ليه مافيش percentage؟" — a cube query
+  // reports no progress until it's fully done, so any % shown would be made up, not measured; a
+  // plain second count is honest about the same "still waiting" state without pretending to know
+  // how close it is).
+  const [loadingSeconds, setLoadingSeconds] = useState(0);
+  useEffect(() => {
+    if (!loading) return undefined;
+    setLoadingSeconds(0);
+    const started = Date.now();
+    const timer = setInterval(() => setLoadingSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [loading]);
   const [measures, setMeasures] = useState([]);
   const [metaError, setMetaError] = useState(null);
-  // Same for the field list: a busy/unreachable server reloads it on its own (metaAttempt re-runs
-  // the loading effects below).
+  // Same for the field list — manual "Try now" only, same reasoning as errorTemporary above.
   const [metaTemporary, setMetaTemporary] = useState(false);
   const [metaAttempt, setMetaAttempt] = useState(0);
   // Separate from `loading` above (that one's for Run query). `tables` is the fast, columns-free
@@ -859,7 +871,6 @@ export default function PivotBuilder() {
       if (token !== queryTokenRef.current) return;
       setError(err.message);
       setErrorTemporary(isCubeTemporarilyDown(err));
-      if (isCubeTemporarilyDown(err)) setQueryFailures((n) => n + 1);
       setResult(null);
       setLastQuery(null);
     } finally {
@@ -1193,14 +1204,10 @@ export default function PivotBuilder() {
         .map((f) => ({ field: f.field, mode: "Members", includedMembers: [] })),
     }));
 
-  // The busy/unreachable data server retries by itself after a short wait (the server usually
-  // recovers within a minute); "Try now" skips the wait.
-  const queryRetryIn = useRetryCountdown(Boolean(error) && errorTemporary && !loading, 20, () => runQuery(), queryFailures);
   const retryMeta = () => {
     setTablesLoading(true);
     setMetaAttempt((n) => n + 1);
   };
-  const metaRetryIn = useRetryCountdown(Boolean(metaError) && metaTemporary && !tablesLoading, 20, retryMeta, metaAttempt);
 
   // The top bar's actions (2026-10-20, "like excel but more modern"): Export and Save Snapshot sit
   // where Excel for the web has Share — they used to be a card under the Fields pane. Report Layout and
@@ -1367,7 +1374,7 @@ export default function PivotBuilder() {
         {metaError &&
           (metaTemporary ? (
             <MessageBar tone="info" action={{ label: "Try now", onClick: retryMeta, disabled: tablesLoading }}>
-              {metaError} The field list will load as soon as it answers{metaRetryIn ? ` — trying again in ${metaRetryIn}s` : "…"}
+              {metaError} Use Try now to check again.
             </MessageBar>
           ) : (
             <MessageBar tone="warning">Couldn&apos;t load the field list: {metaError}</MessageBar>
@@ -1391,7 +1398,7 @@ export default function PivotBuilder() {
           {error &&
             (errorTemporary ? (
               <MessageBar tone="info" action={{ label: "Try now", onClick: () => runQuery(), disabled: loading }}>
-                {error} Your PivotTable will appear as soon as it answers{queryRetryIn ? ` — trying again in ${queryRetryIn}s` : "…"}
+                {error} Use Try now to check again.
               </MessageBar>
             ) : (
               <MessageBar tone="error" action={{ label: "Retry", onClick: () => runQuery(), disabled: loading }}>
@@ -1572,6 +1579,7 @@ export default function PivotBuilder() {
                 onCellFormatsChange={setCellFormats}
                 commandRef={gridCommandRef}
                 loading={loading}
+                loadingSeconds={loadingSeconds}
               />
               </div>
           </div>
@@ -1705,6 +1713,7 @@ export default function PivotBuilder() {
       />
       <StatusBar
         loading={loading}
+        loadingSeconds={loadingSeconds}
         onCancel={handleCancelQuery}
         pendingLayout={deferLayout && Boolean(pendingRequest)}
         stats={selectionSummary}

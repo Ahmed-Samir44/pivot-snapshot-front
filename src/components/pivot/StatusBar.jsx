@@ -1,5 +1,6 @@
-import { Loader2, Minus, PanelRightClose, PanelRightOpen, Plus } from "lucide-react";
+import { Minus, PanelRightClose, PanelRightOpen, Plus } from "lucide-react";
 import { ZOOM_LEVELS } from "../../utils/zoom";
+import ButtonProgressBar from "../forms/ButtonProgressBar";
 
 
 const statFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
@@ -8,7 +9,7 @@ const statFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }
 // state on the left, Average / Count / Sum of the selected cells (shown, like Excel, once 2+ cells
 // are selected — a single cell already shows its own value), then the view controls (Field List
 // toggle and zoom) on the right.
-export default function StatusBar({ onCancel = null, loading, pendingLayout, stats, zoom, onZoomChange, fieldListShown, onToggleFieldList }) {
+export default function StatusBar({ onCancel = null, loading, loadingSeconds = 0, pendingLayout, stats, zoom, onZoomChange, fieldListShown, onToggleFieldList }) {
   const zoomIndex = ZOOM_LEVELS.indexOf(zoom);
   const stepZoom = (delta) => {
     const index = zoomIndex >= 0 ? zoomIndex : ZOOM_LEVELS.indexOf(1);
@@ -17,12 +18,15 @@ export default function StatusBar({ onCancel = null, loading, pendingLayout, sta
   const showStats = stats && stats.cellCount >= 2 && stats.count > 0;
 
   return (
-    <footer className="flex h-8 shrink-0 items-center gap-4 rounded-md border border-slate-200 bg-slate-50 px-3 text-xs text-slate-600" aria-label="Status bar">
+    // relative overflow-hidden: lets the progress sweep below clip within the bar's own rounded
+    // corners instead of spilling past them (2026-11-16, same "زي ال progress bar" request as the
+    // empty-PivotTable card — see its own WHY comment).
+    <footer className="relative flex h-8 shrink-0 items-center gap-4 overflow-hidden rounded-md border border-slate-200 bg-slate-50 px-3 text-xs text-slate-600" aria-label="Status bar">
+      <ButtonProgressBar active={loading} tone="dark" />
       <span className="flex items-center gap-1.5" role="status">
         {loading ? (
           <>
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary-strong" />
-            Updating…
+            Updating… {loadingSeconds}s
             {onCancel && (
               <button type="button" onClick={onCancel} className="ml-1 rounded px-1 font-medium text-primary-strong underline-offset-2 hover:underline" title="Stop this refresh">
                 Cancel
